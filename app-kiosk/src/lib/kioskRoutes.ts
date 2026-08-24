@@ -6,32 +6,33 @@
  *   /showroom/:showroomSlug            -> home for that showroom
  *   /showroom/:showroomSlug/:section   -> deep link into a section
  *
- * Supported sections: home | elite100 | product-catalog | live-inventory | visualizer
+ * Supported sections: home | elite100 | product-catalog | live-inventory | visualizer | shower-program
  *
  * The host (Vercel) rewrites every path to index.html (see vercel.json) so any
  * of these URLs can be launched directly by Arreya in kiosk mode.
  */
 
 import { useEffect, useState } from "react";
-import type { NavSectionId } from "./kioskConfig";
+import type { RoutableSectionId } from "./kioskConfig";
 
 export const DEFAULT_SHOWROOM_SLUG = "main";
 
-const NAV_SECTION_IDS: NavSectionId[] = [
+const ROUTABLE_SECTION_IDS: RoutableSectionId[] = [
   "elite100",
   "product-catalog",
   "live-inventory",
   "visualizer",
+  "shower-program",
 ];
 
 export interface KioskRoute {
   showroomSlug: string;
   /** `null` means the home screen. */
-  section: NavSectionId | null;
+  section: RoutableSectionId | null;
 }
 
-function isNavSectionId(value: string): value is NavSectionId {
-  return (NAV_SECTION_IDS as string[]).includes(value);
+function isRoutableSectionId(value: string): value is RoutableSectionId {
+  return (ROUTABLE_SECTION_IDS as string[]).includes(value);
 }
 
 function sanitizeSlug(raw: string): string {
@@ -61,7 +62,7 @@ export function parseRoute(pathname: string): KioskRoute {
     return { showroomSlug, section: null };
   }
 
-  if (isNavSectionId(rawSection)) {
+  if (isRoutableSectionId(rawSection)) {
     return { showroomSlug, section: rawSection };
   }
 

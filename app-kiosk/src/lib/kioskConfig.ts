@@ -45,17 +45,21 @@ export type KioskSectionId =
   | "elite100"
   | "product-catalog"
   | "live-inventory"
-  | "visualizer";
+  | "visualizer"
+  | "shower-program";
 
-/** Section ids that can be navigated to as cards (everything except home). */
-export type NavSectionId = Exclude<KioskSectionId, "home">;
+/** Section ids that appear on the home 2×2 card grid (everything except home). */
+export type NavSectionId = Exclude<KioskSectionId, "home" | "shower-program">;
+
+/** All navigable section ids including shower program (slideshow / deep links). */
+export type RoutableSectionId = Exclude<KioskSectionId, "home">;
 
 export type KioskSectionKind = "home" | "iframe-or-hero" | "handoff";
 
 export interface KioskSection {
-  id: NavSectionId;
+  id: RoutableSectionId;
   /** URL slug used in /showroom/:slug/:section */
-  slug: NavSectionId;
+  slug: RoutableSectionId;
   title: string;
   /** Short card copy shown on the home screen. */
   cardCopy: string;
@@ -71,7 +75,8 @@ export interface KioskSection {
     | "stone"
     | "catalog"
     | "inventory"
-    | "visualizer";
+    | "visualizer"
+    | "shower";
 }
 
 function envUrl(value: string | undefined): string {
@@ -116,11 +121,11 @@ export const KIOSK_SECTIONS: KioskSection[] = [
   {
     id: "product-catalog",
     slug: "product-catalog",
-    title: "Product Catalog",
-    cardCopy: "Explore sinks, faucets, and accessories.",
+    title: "Products & Programs",
+    cardCopy: "Explore sinks, faucets, shower systems, and accessories.",
     heroCopy:
-      "Explore sinks, faucets, and finishing accessories that complete your countertop — mix and match to design the perfect space.",
-    actionLabel: "Open Product Catalog",
+      "Explore sinks, faucets, shower systems, and accessories — plus the ESF Groutless Stone Shower Program.",
+    actionLabel: "Open Products & Programs",
     kind: "iframe-or-hero",
     // Appends ?kiosk=1 so the Product Catalog page activates its kiosk display mode.
     url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_PRODUCT_CATALOG_URL)),
@@ -154,6 +159,23 @@ export const KIOSK_SECTIONS: KioskSection[] = [
   },
 ];
 
+/** Navigable sections not shown on the home 2×2 card grid. */
+export const KIOSK_EXTRA_SECTIONS: KioskSection[] = [
+  {
+    id: "shower-program",
+    slug: "shower-program",
+    title: "Shower Program",
+    cardCopy: "The Groutless Stone Shower — bases, walls, and installation.",
+    heroCopy:
+      "Explore luxury stone shower walls, stocked shower bases, curated colors, and real ESF installations.",
+    actionLabel: "Explore Shower Program",
+    kind: "iframe-or-hero",
+    url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_SHOWER_PROGRAM_URL)),
+    accent: "shower",
+  },
+];
+
 export function getSection(id: KioskSectionId): KioskSection | undefined {
-  return KIOSK_SECTIONS.find((s) => s.id === id);
+  if (id === "home") return undefined;
+  return KIOSK_SECTIONS.find((s) => s.id === id) ?? KIOSK_EXTRA_SECTIONS.find((s) => s.id === id);
 }

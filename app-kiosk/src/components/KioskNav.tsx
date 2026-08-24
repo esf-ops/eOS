@@ -1,11 +1,8 @@
-import { KIOSK_SECTIONS, type KioskSection } from "../lib/kioskConfig";
-import type { KioskSectionId } from "../lib/kioskConfig";
+import { KIOSK_SECTIONS, type KioskSection, type RoutableSectionId } from "../lib/kioskConfig";
 import { KioskCardMediaRotator } from "./KioskCardMediaRotator";
 
-type NavSectionId = Exclude<KioskSectionId, "home">;
-
 interface KioskNavProps {
-  onNavigate: (section: NavSectionId) => void;
+  onNavigate: (section: RoutableSectionId) => void;
 }
 
 // ── Asset lists ─────────────────────────────────────────────────────────────

@@ -1,13 +1,11 @@
 import { HOME_COPY } from "../lib/kioskConfig";
-import type { KioskSectionId } from "../lib/kioskConfig";
+import type { RoutableSectionId } from "../lib/kioskConfig";
 import { KioskHomeSlideshow } from "./KioskHomeSlideshow";
 import { KioskNav } from "./KioskNav";
 import { KioskTopBar } from "./KioskTopBar";
 
-type NavSectionId = Exclude<KioskSectionId, "home">;
-
 interface KioskHomeProps {
-  onNavigate: (section: NavSectionId) => void;
+  onNavigate: (section: RoutableSectionId) => void;
 }
 
 /** Full-screen attract/home screen. */

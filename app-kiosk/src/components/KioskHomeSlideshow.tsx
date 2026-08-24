@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { NavSectionId } from "../lib/kioskConfig";
+import type { RoutableSectionId } from "../lib/kioskConfig";
 
 interface Slide {
-  id: NavSectionId;
+  id: RoutableSectionId;
   eyebrow: string;
   headline: string;
   body: string;
@@ -18,10 +18,17 @@ const SLIDES: Slide[] = [
     accent: "stone",
   },
   {
+    id: "shower-program",
+    eyebrow: "Shower Program",
+    headline: "The Groutless Stone Shower",
+    body: "Explore stocked shower bases, curated stone surfaces, program options, and real ESF installations.",
+    accent: "shower",
+  },
+  {
     id: "product-catalog",
-    eyebrow: "Product Catalog",
-    headline: "Complete your countertop",
-    body: "Explore our full range of sinks, faucets, and finishing accessories.",
+    eyebrow: "Products & Programs",
+    headline: "Complete your space",
+    body: "Explore sinks, faucets, shower systems, and finishing accessories.",
     accent: "catalog",
   },
   {
@@ -60,7 +67,7 @@ function usePrefersReducedMotion(): boolean {
 
 interface KioskHomeSlideshowProps {
   /** Fired when the user taps the current slide — navigates to that section. */
-  onNavigate: (section: NavSectionId) => void;
+  onNavigate: (section: RoutableSectionId) => void;
 }
 
 export function KioskHomeSlideshow({ onNavigate }: KioskHomeSlideshowProps) {

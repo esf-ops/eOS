@@ -1,18 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { publicBaseUrl, type KioskSection } from "../lib/kioskConfig";
-import type { KioskSectionId } from "../lib/kioskConfig";
+import type { RoutableSectionId } from "../lib/kioskConfig";
 import { KioskFooter } from "./KioskFooter";
 import { KioskQrPanel } from "./KioskQrPanel";
 import { KioskSectionHero } from "./KioskSectionHero";
 import { KioskTopBar } from "./KioskTopBar";
 
-type NavSectionId = Exclude<KioskSectionId, "home">;
-
 interface KioskSectionFrameProps {
   section: KioskSection;
   showroomSlug: string;
   onHome: () => void;
-  onNavigate: (section: NavSectionId) => void;
+  onNavigate: (section: RoutableSectionId) => void;
 }
 
 /** How long to wait for an embedded frame before surfacing the fallback. */

@@ -18,6 +18,7 @@ import {
   parsePublicCatalogTabQuery,
   publicCatalogTabQueryValue,
 } from "./lib/publicProductCatalogRoute";
+import { PUBLIC_SHOWER_PROGRAM_PATH } from "./lib/publicShowerProgramRoute";
 import {
   ProductCatalogCard,
   ProductCatalogModal,
@@ -49,9 +50,9 @@ function readInitialCategory(tabs: ProductCatalogCategory[]): ProductCatalogCate
 export default function PublicProductCatalogPage({
   lockedCategory,
   hideCategoryTabs = false,
-  pageTitle = "Elite Stone Fabrication Product Catalog",
-  pageSubtitle = "Sinks, faucets, accessories, and specialty items",
-  metaDescription = "Elite Stone Fabrication product catalog — sinks, faucets, accessories, and specialty items showroom.",
+  pageTitle = "Products & Programs",
+  pageSubtitle = "Explore sinks, faucets, shower systems, and accessories.",
+  metaDescription = "Elite Stone Fabrication products and programs — sinks, faucets, shower systems, and accessories.",
   rootClassName,
 }: PublicProductCatalogPageProps = {}) {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -72,7 +73,7 @@ export default function PublicProductCatalogPage({
   useEffect(() => {
     document.title = lockedCategory === "faucet"
       ? "Faucets · Elite Stone Fabrication"
-      : "Product Catalog · Elite Stone Fabrication";
+      : "Products & Programs · Elite Stone Fabrication";
 
     let meta = document.querySelector('meta[name="robots"]');
     if (!meta) {
@@ -159,6 +160,30 @@ export default function PublicProductCatalogPage({
       </header>
 
       <main className="pc-public-main">
+        {!lockedCategory && !hideCategoryTabs ? (
+          <section className="pc-programs-strip" aria-label="Programs">
+            <a
+              href={`${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`}
+              className="pc-program-card pc-program-card--shower"
+            >
+              <div className="pc-program-card-copy">
+                <p className="pc-program-eyebrow">Shower Program</p>
+                <h2 className="pc-program-title">The Groutless Stone Shower</h2>
+                <p className="pc-program-body">
+                  Stocked bases, curated wall surfaces, and real ESF installations.
+                </p>
+                <span className="pc-program-cta">Explore Shower Program →</span>
+              </div>
+              <img
+                src="/shower-program/inspiration/pro-veMrdtPQ.jpeg"
+                alt=""
+                className="pc-program-card-img"
+                loading="lazy"
+              />
+            </a>
+          </section>
+        ) : null}
+
         {!hideCategoryTabs ? (
           <nav className="pc-tab-bar pc-public-tabs" aria-label="Product categories">
             {tabs.map((cat) => (

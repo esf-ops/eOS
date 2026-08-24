@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
-import type { KioskSection } from "../lib/kioskConfig";
-import type { KioskSectionId } from "../lib/kioskConfig";
+import type { KioskSection, RoutableSectionId } from "../lib/kioskConfig";
 import { KioskBackground } from "./KioskBackground";
 import { KioskHome } from "./KioskHome";
 import { KioskIdleOverlay } from "./KioskIdleOverlay";
 import { KioskSectionFrame } from "./KioskSectionFrame";
-
-type NavSectionId = Exclude<KioskSectionId, "home">;
 
 interface KioskShellProps {
   showroomSlug: string;
   section: KioskSection | null;
   idleReturning: boolean;
   onHome: () => void;
-  onNavigate: (section: NavSectionId) => void;
+  onNavigate: (section: RoutableSectionId) => void;
 }
 
 /**
