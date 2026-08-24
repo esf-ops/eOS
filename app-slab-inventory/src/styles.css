@@ -6871,6 +6871,10 @@ body.cambria-kiosk-body {
 
 /* ── Products & Programs landing (two-card chooser) ─────────────────────── */
 
+.pp-landing-page.pc-public-page {
+  min-height: 100vh;
+}
+
 .pp-landing-main {
   display: flex;
   flex-direction: column;
@@ -6882,6 +6886,7 @@ body.cambria-kiosk-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: clamp(16px, 2.5vw, 24px);
   width: 100%;
+  align-items: stretch;
 }
 
 .pp-landing-card {
@@ -6906,12 +6911,14 @@ body.cambria-kiosk-body {
   flex: 1 1 auto;
   min-height: clamp(140px, 22vh, 220px);
   background: #f4f6f9;
+  overflow: hidden;
 }
 
 .pp-landing-card-media--fixtures {
   display: grid;
   grid-template-columns: 1.15fr 1px 0.85fr;
   align-items: stretch;
+  min-height: 0;
 }
 
 .pp-fixtures-panel {
@@ -6920,6 +6927,8 @@ body.cambria-kiosk-body {
   justify-content: center;
   padding: 12px;
   background: #fff;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .pp-fixtures-panel--sinks {
@@ -6932,6 +6941,8 @@ body.cambria-kiosk-body {
 }
 
 .pp-fixtures-img {
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -6940,6 +6951,8 @@ body.cambria-kiosk-body {
 .pp-landing-card-media--shower {
   display: flex;
   align-items: stretch;
+  min-height: 0;
+  position: relative;
 }
 
 .pp-landing-shower-img {
@@ -6950,6 +6963,7 @@ body.cambria-kiosk-body {
 }
 
 .pp-landing-card-body {
+  flex: 0 0 auto;
   padding: clamp(18px, 2.5vw, 26px);
   border-top: 1px solid var(--eos-line);
   background: #fff;
@@ -6976,20 +6990,83 @@ body.cambria-kiosk-body {
   font-size: 0.95rem;
 }
 
+/* Kiosk iframe: fit header + equal cards + footer without internal scroll */
+html.pp-landing-kiosk-root,
+html.pp-landing-kiosk-root body,
+html.pp-landing-kiosk-root #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.pp-landing-kiosk.pc-public-page {
+  min-height: 0;
+  height: 100%;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.pp-landing-kiosk .pc-public-header {
+  flex: 0 0 auto;
+  padding: clamp(14px, 1.6vh, 22px) clamp(16px, 3vw, 32px) clamp(10px, 1.2vh, 16px);
+}
+
+.pp-landing-kiosk .pc-public-main.pp-landing-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(10px, 1.4vh, 16px) clamp(16px, 3vw, 32px) clamp(10px, 1.4vh, 16px);
+}
+
 .pp-landing-kiosk .pp-landing-grid {
-  gap: clamp(20px, 3vw, 28px);
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  gap: clamp(12px, 1.8vh, 20px);
 }
 
 .pp-landing-kiosk .pp-landing-card {
-  min-height: clamp(320px, 40vh, 480px);
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+}
+
+.pp-landing-kiosk .pp-landing-card-media {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+
+.pp-landing-kiosk .pp-landing-shower-img {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: cover;
+}
+
+.pp-landing-kiosk .pp-landing-card-body {
+  flex: 0 0 auto;
+  padding: clamp(14px, 1.6vh, 20px) clamp(16px, 2vw, 22px);
 }
 
 .pp-landing-kiosk .pp-landing-card-title {
-  font-size: clamp(1.45rem, 2.8vw, 2rem);
+  font-size: clamp(1.2rem, 2.2vh, 1.65rem);
 }
 
 .pp-landing-kiosk .pp-landing-card-copy {
-  font-size: clamp(1rem, 1.6vw, 1.15rem);
+  margin-bottom: 8px;
+  font-size: clamp(0.92rem, 1.5vh, 1.05rem);
+  line-height: 1.4;
+}
+
+.pp-landing-kiosk .pc-public-footer {
+  flex: 0 0 auto;
+  padding: 8px clamp(16px, 3vw, 32px) 10px;
 }
 
 .pp-landing-kiosk .pp-catalog-back {
@@ -7000,6 +7077,10 @@ body.cambria-kiosk-body {
 @media (max-width: 900px) {
   .pp-landing-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pp-landing-kiosk .pp-landing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -24,6 +24,12 @@ export default function PublicProductsProgramsPage() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
 
   useEffect(() => {
+    if (!kiosk) return;
+    document.documentElement.classList.add("pp-landing-kiosk-root");
+    return () => document.documentElement.classList.remove("pp-landing-kiosk-root");
+  }, [kiosk]);
+
+  useEffect(() => {
     document.title = "Products & Programs · Elite Stone Fabrication";
 
     let meta = document.querySelector('meta[name="robots"]');
