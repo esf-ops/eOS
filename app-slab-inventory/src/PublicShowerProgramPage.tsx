@@ -135,8 +135,19 @@ export default function PublicShowerProgramPage() {
     [elite100Lookup],
   );
 
-  const rootClass = ["sp-public-page", kiosk ? "sp-public-kiosk" : ""].filter(Boolean).join(" ");
   const onLanding = view.kind === "landing";
+
+  useEffect(() => {
+    if (!kiosk || !onLanding) return;
+    document.documentElement.classList.add("sp-shower-kiosk-landing-root");
+    return () => document.documentElement.classList.remove("sp-shower-kiosk-landing-root");
+  }, [kiosk, onLanding]);
+
+  const rootClass = [
+    "sp-public-page",
+    kiosk ? "sp-public-kiosk" : "",
+    kiosk && onLanding ? "sp-public-kiosk-landing" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <div className={rootClass}>

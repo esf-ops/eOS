@@ -6354,17 +6354,20 @@ body.cambria-kiosk-body {
 }
 
 .sp-hero-media {
+  position: relative;
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
-  min-height: 220px;
+  height: clamp(200px, 26vh, 320px);
+  min-height: 0;
 }
 
 .sp-hero-img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 220px;
   object-fit: cover;
 }
 
@@ -6849,6 +6852,117 @@ body.cambria-kiosk-body {
   font-size: clamp(1.75rem, 3.5vw, 2.6rem);
 }
 
+/* Shower Program kiosk landing — compact hero + six-card dashboard */
+html.sp-shower-kiosk-landing-root,
+html.sp-shower-kiosk-landing-root body,
+html.sp-shower-kiosk-landing-root #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.sp-public-kiosk-landing.sp-public-page {
+  min-height: 0;
+  height: 100%;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.sp-public-kiosk-landing .sp-public-header {
+  flex: 0 0 auto;
+  padding: clamp(12px, 1.4vh, 18px) clamp(16px, 3vw, 32px) clamp(8px, 1vh, 12px);
+}
+
+.sp-public-kiosk-landing .sp-public-logo {
+  width: clamp(44px, 4.5vw, 56px);
+  height: clamp(44px, 4.5vw, 56px);
+}
+
+.sp-public-kiosk-landing .sp-public-title {
+  font-size: clamp(1.15rem, 2vh, 1.45rem);
+}
+
+.sp-public-kiosk-landing .sp-public-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(8px, 1.2vh, 14px) clamp(16px, 3vw, 32px) clamp(8px, 1vh, 12px);
+}
+
+.sp-public-kiosk-landing .sp-landing {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sp-public-kiosk-landing .sp-hero {
+  flex: 0 0 auto;
+  margin-bottom: clamp(10px, 1.4vh, 14px);
+  gap: clamp(14px, 2vw, 20px);
+  align-items: center;
+}
+
+.sp-public-kiosk-landing .sp-hero-media {
+  height: clamp(280px, 34vh, 340px);
+  max-height: 340px;
+}
+
+.sp-public-kiosk-landing .sp-hero-title {
+  margin: 0 0 8px;
+  font-size: clamp(1.25rem, 2.2vh, 1.65rem);
+}
+
+.sp-public-kiosk-landing .sp-hero-body {
+  margin: 0 0 10px;
+  font-size: clamp(0.88rem, 1.4vh, 0.98rem);
+  line-height: 1.4;
+}
+
+.sp-public-kiosk-landing .sp-link-btn {
+  min-height: 44px;
+  font-size: 0.95rem;
+}
+
+.sp-public-kiosk-landing .sp-section-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: clamp(8px, 1.2vh, 12px);
+  align-items: stretch;
+}
+
+.sp-public-kiosk-landing .sp-section-card {
+  min-height: 0;
+  height: 100%;
+  padding: clamp(12px, 1.4vh, 16px) clamp(12px, 1.6vw, 16px);
+}
+
+.sp-public-kiosk-landing .sp-section-card-title {
+  font-size: clamp(1rem, 1.6vh, 1.15rem);
+  margin-bottom: 6px;
+}
+
+.sp-public-kiosk-landing .sp-section-card-body {
+  padding-bottom: 8px;
+  font-size: clamp(0.82rem, 1.3vh, 0.92rem);
+  line-height: 1.35;
+}
+
+.sp-public-kiosk-landing .sp-soon-badge {
+  margin-bottom: 6px;
+  font-size: 0.68rem;
+}
+
+.sp-public-kiosk-landing .sp-public-footer {
+  flex: 0 0 auto;
+  padding: 6px clamp(16px, 3vw, 32px) 8px;
+}
+
 @media (max-width: 768px) {
   .sp-hero,
   .pc-program-card {
@@ -6866,6 +6980,14 @@ body.cambria-kiosk-body {
 
   .pc-public-header-row {
     flex-direction: column;
+  }
+
+  .sp-public-kiosk-landing .sp-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+
+  .sp-public-kiosk-landing .sp-section-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
