@@ -41,7 +41,8 @@ export interface ShowerProgramBase {
   curbConfiguration: string;
   drainPositions: string[];
   stockColors: string[];
-  imageUrl: string;
+  /** Product photo — omit until approved base photography is available. */
+  imageUrl: string | null;
   dimensionalDrawingUrl: string | null;
   /**
    * Internal: manufacturer/spec archive label for the dimensional drawing when
@@ -104,7 +105,7 @@ export const SHOWER_PROGRAM_BASES: ShowerProgramBase[] = [
     curbConfiguration: "Single Curb",
     drainPositions: ["Center"],
     stockColors: [...SHOWER_PROGRAM_STOCK_BASE_COLORS],
-    imageUrl: "/shower-program/bases/36x36-mid.webp",
+    imageUrl: null,
     dimensionalDrawingUrl: "/shower-program/bases/36x36-drawing.webp",
     availability: "stocked",
   },
@@ -117,7 +118,7 @@ export const SHOWER_PROGRAM_BASES: ShowerProgramBase[] = [
     curbConfiguration: "Single Curb",
     drainPositions: ["Center"],
     stockColors: [...SHOWER_PROGRAM_STOCK_BASE_COLORS],
-    imageUrl: "/shower-program/bases/42x36-mid.webp",
+    imageUrl: null,
     // Same nominal base; manufacturer/spec archive labels the drawing 36×42.
     dimensionalDrawingUrl: "/shower-program/bases/42x36-drawing.webp",
     manufacturerDrawingLabel: "36×42",
@@ -132,7 +133,7 @@ export const SHOWER_PROGRAM_BASES: ShowerProgramBase[] = [
     curbConfiguration: "Dual Curb",
     drainPositions: ["Center"],
     stockColors: [...SHOWER_PROGRAM_STOCK_BASE_COLORS],
-    imageUrl: "/shower-program/bases/42x42-mid.webp",
+    imageUrl: null,
     dimensionalDrawingUrl: "/shower-program/bases/42x42-drawing.webp",
     availability: "stocked",
   },
@@ -145,7 +146,7 @@ export const SHOWER_PROGRAM_BASES: ShowerProgramBase[] = [
     curbConfiguration: "Single Curb",
     drainPositions: ["Left", "Right"],
     stockColors: [...SHOWER_PROGRAM_STOCK_BASE_COLORS],
-    imageUrl: "/shower-program/bases/60x32-mid.webp",
+    imageUrl: null,
     dimensionalDrawingUrl: "/shower-program/bases/60x32-left-drawing.webp",
     availability: "stocked",
   },

@@ -6719,6 +6719,62 @@ body.cambria-kiosk-body {
   margin: 16px 0;
 }
 
+.sp-guide-preview-wrap {
+  display: block;
+  width: 100%;
+  max-height: min(72vh, 820px);
+  margin: 12px 0 16px;
+  padding: 0;
+  border: 1px solid var(--eos-line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: center;
+}
+
+.sp-guide-preview-img {
+  display: block;
+  width: 100%;
+  max-height: min(68vh, 780px);
+  object-fit: contain;
+  background: #fff;
+}
+
+.sp-guide-preview-hint {
+  display: block;
+  padding: 10px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+  border-top: 1px solid var(--eos-line);
+  background: #f8fafc;
+}
+
+.sp-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.sp-public-kiosk .sp-guide-preview-wrap {
+  max-height: min(58vh, 640px);
+}
+
+.sp-public-kiosk .sp-guide-preview-img {
+  max-height: min(54vh, 600px);
+}
+
+.sp-base-card-media--drawing {
+  background: #f8fafc;
+}
+
+.sp-base-card-img--drawing {
+  object-fit: contain;
+  padding: 8px;
+}
+
 .sp-build-soon {
   max-width: 720px;
   padding: clamp(24px, 4vw, 40px);

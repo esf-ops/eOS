@@ -8,7 +8,6 @@ import {
   SHOWER_INSPIRATION_PHOTOS,
   SHOWER_PROGRAM_BASES,
   SHOWER_PROGRAM_BENEFITS,
-  SHOWER_PROGRAM_FLYER_URL,
   SHOWER_PROGRAM_HERO_IMAGE,
   SHOWER_PROGRAM_OPTIONS,
   SHOWER_PROGRAM_PROCESS,
@@ -16,6 +15,10 @@ import {
   getShowerBase,
   type ShowerInspirationPhoto,
 } from "./lib/showerProgram/showerProgramData";
+import {
+  SHOWER_PROGRAM_FLYER_PAGE_IMAGE_URL,
+  SHOWER_PROGRAM_FLYER_PDF_URL,
+} from "./lib/showerProgram/showerProgramDocuments";
 import {
   buildElite100ColorLookup,
   filterShowerWallColors,
@@ -212,7 +215,7 @@ export default function PublicShowerProgramPage() {
           <ProcessView />
         ) : null}
         {view.kind === "guide" ? (
-          <GuideView />
+          <GuideView kiosk={kiosk} />
         ) : null}
         {view.kind === "build-soon" ? (
           <BuildSoonView />
@@ -382,9 +385,15 @@ function BasesListView({ onSelect }: { onSelect: (baseId: string) => void }) {
           className="sp-base-card"
           onClick={() => onSelect(base.id)}
         >
-          <div className="sp-base-card-media">
-            <img src={base.imageUrl} alt="" className="sp-base-card-img" loading="lazy" />
-          </div>
+          {base.imageUrl ? (
+            <div className="sp-base-card-media">
+              <img src={base.imageUrl} alt="" className="sp-base-card-img" loading="lazy" />
+            </div>
+          ) : base.dimensionalDrawingUrl ? (
+            <div className="sp-base-card-media sp-base-card-media--drawing">
+              <img src={base.dimensionalDrawingUrl} alt="" className="sp-base-card-img sp-base-card-img--drawing" loading="lazy" />
+            </div>
+          ) : null}
           <div className="sp-base-card-body">
             <h3 className="sp-base-card-size">{base.widthIn}&quot; × {base.depthIn}&quot;</h3>
             <p className="sp-base-card-meta">{base.heightLabel} · {base.curbConfiguration}</p>
@@ -419,9 +428,11 @@ function BaseDetailView({ baseId }: { baseId: string }) {
 
   return (
     <article className="sp-base-detail">
-      <div className="sp-base-detail-hero">
-        <img src={base.imageUrl} alt="" className="sp-base-detail-img" />
-      </div>
+      {base.imageUrl ? (
+        <div className="sp-base-detail-hero">
+          <img src={base.imageUrl} alt="" className="sp-base-detail-img" />
+        </div>
+      ) : null}
       <div className="sp-base-detail-copy">
         <h2 className="sp-base-detail-title">{base.name}</h2>
         <dl className="sp-detail-list">
@@ -572,20 +583,50 @@ function ProcessView() {
   );
 }
 
-function GuideView() {
+function GuideView({ kiosk }: { kiosk: boolean }) {
+  const [enlarged, setEnlarged] = useState(false);
+
   return (
     <div className="sp-guide">
       <p className="sp-guide-intro">
         Reference the official ESF Shower Program flyer for program overview, color groups, and specifications.
       </p>
-      <iframe
-        title="ESF Shower Program flyer"
-        src={SHOWER_PROGRAM_FLYER_URL}
-        className="sp-guide-frame"
-      />
-      <a href={SHOWER_PROGRAM_FLYER_URL} target="_blank" rel="noopener noreferrer" className="sp-link-btn">
-        Open PDF in new tab →
-      </a>
+      <button
+        type="button"
+        className="sp-guide-preview-wrap"
+        onClick={() => setEnlarged(true)}
+        aria-label="View program guide full screen"
+      >
+        <img
+          src={SHOWER_PROGRAM_FLYER_PAGE_IMAGE_URL}
+          alt="ESF Shower Program flyer"
+          className="sp-guide-preview-img"
+        />
+        <span className="sp-guide-preview-hint">Tap to enlarge</span>
+      </button>
+      <div className="sp-guide-actions">
+        <a
+          href={SHOWER_PROGRAM_FLYER_PDF_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="sp-link-btn sp-guide-pdf-link"
+        >
+          Open PDF →
+        </a>
+      </div>
+      {enlarged ? (
+        <div
+          className={`sp-lightbox${kiosk ? " sp-lightbox-kiosk" : ""}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="ESF Shower Program flyer"
+        >
+          <button type="button" className="sp-lightbox-close" onClick={() => setEnlarged(false)} aria-label="Close">
+            ×
+          </button>
+          <img src={SHOWER_PROGRAM_FLYER_PAGE_IMAGE_URL} alt="ESF Shower Program flyer" className="sp-lightbox-img" />
+        </div>
+      ) : null}
     </div>
   );
 }
