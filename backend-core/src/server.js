@@ -24,6 +24,7 @@ import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachAccountDirectoryRoutes, resolveAccountDirectoryStore } from "./accountDirectory/accountDirectoryApi.js";
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
+import { attachSalesOpsRoutes } from "./salesOps/salesOpsApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
@@ -370,7 +371,7 @@ const app = express();
 const defaultAllowedOrigins = (() => {
   const out = [];
   for (const host of ["http://localhost", "http://127.0.0.1"]) {
-    for (let p = 5173; p <= 5189; p++) {
+    for (let p = 5173; p <= 5198; p++) {
       out.push(`${host}:${p}`);
     }
   }
@@ -461,7 +462,8 @@ const fixedEliteOsOrigins = [
   "http://localhost:5177",
   "http://localhost:5185",
   "http://localhost:5190",
-  "http://localhost:5194"
+  "http://localhost:5194",
+  "http://localhost:5198"
 ];
 
 /** Localhost origins are development-only; exclude in production to reduce attack surface. */
@@ -1299,6 +1301,12 @@ attachAccountDirectoryRoutes(app, {
 });
 
 attachHrWorkforceRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachSalesOpsRoutes(app, {
   requireAuth,
   requireHeadAccess,
   getSupabase: supabaseServerClient

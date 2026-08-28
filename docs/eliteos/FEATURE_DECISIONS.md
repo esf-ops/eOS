@@ -4539,3 +4539,45 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Identity, reconciliation, Final Review Queue, Account 360, Notes/Follow-up mutations, financial math authority, RBAC, QuickBooks/Moraware writes, schema migration. |
 | **Impacted** | Account Directory `listAccounts` / `listAccountPageIntelligence`, landing UI, `accountDirectoryListIntelligence`, this doc, SYSTEM_BLUEPRINT. |
 
+### 334. Sales Ops Head: personalized plans + Monday two-way account operations (2026-08-27)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-27 |
+| **Decision** | Ship a new protected head **`sales_ops`** (`app-sales-ops/`) for salesperson operating plans. It is **not** the existing Sales dashboard (`sales` / `https://sales.eliteosfab.com`). Production hostname is **`https://sales-ops.eliteosfab.com`** via **`HEAD_URL_SALES_OPS`**. The standalone Thera performance dashboard is a visual/product reference only; identity, ramp, scorecards, and accounts are generalized and Brain-authored. |
+| **Sources of truth** | **Sales plan / ramp / KPI targets / scorecards / intelligence** = eliteOS. **Account assignment and CRM operational fields** = Monday Account Master List. **Historical production** = governed operational evidence, never ownership. **Authorization** = eliteOS Brain (`requireAuth` + `requireHeadAccess("sales_ops")` + server-side owner/manager checks). Normal reps see only themselves and currently assigned accounts. Broader visibility requires explicit manager assignments (`sales_ops_manager_assignments`) or org admin/executive roles. |
+| **Isolation** | Rep APIs are `/api/sales-ops/me*`. Authenticated user identity is taken from the session, never from browser-supplied user/plan/org/Monday IDs. Guessing another UUID returns a safe 404 and does not leak existence. Cross-org rows are not visible. Inactive users and users without `sales_ops` head access are blocked. |
+| **Monday** | All Monday I/O is Brain-only. Board ID and column IDs live in org-scoped `sales_ops_monday_config` (Elite seed board `18397092941` is tenant config, not a SaaS-global constant). Column IDs are resolved by inspecting the live board and matching titles; they are not hardcoded in the frontend. Writes use semantic fields only. Webhook: `POST /api/integrations/monday/sales-ops/webhook` (challenge echo + optional JWT verify with `MONDAY_APP_SIGNING_SECRET`). Fetch-after-webhook; idempotent event IDs; eliteOS-originated mutations update the mirror and do not write back. |
+| **Realtime** | This repo does not currently use Supabase Realtime. Sales Ops uses authenticated 20s polling / invalidation after mutations and documents that limitation. |
+| **Commission** | Per-plan `commission_enabled`. No shared ledger. Other reps’ commission is never returned. Thera’s historical commission files are reference only and are not production authority. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_v1.sql`. Manual apply. RLS SELECT is ownership/manager/admin scoped; mutations via service_role Brain. Production persistence: `SALES_OPS_STORE=supabase` (hosted Vercel defaults to supabase when the env is unset). Local Brain defaults to the in-memory store until SQL is applied. |
+| **Out of scope** | Auto-creating Monday boards/columns, Moraware/QuickBooks writeback, using static JSON as ongoing account authority, localStorage scorecards, rewriting quote/pricing heads. |
+| **Impacted** | `app-sales-ops/`, `backend-core/src/salesOps/`, governance catalog, this doc, SYSTEM_BLUEPRINT, eliteOS-master-head-map, `docs/eliteos/monday-sales-ops.md`. |
+
+### 335. Sales Ops Plan Lifecycle and Versioning (2026-08-27)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-27 |
+| **Decision** | Sales plans are **eliteOS-owned**. Admins and assigned managers author **drafts**. **Publication is governed**: managers may create/edit/submit/preview drafts for **explicit direct reports** (`sales_ops_manager_assignments`). **Only `admin` / `executive` / `super_admin` may approve or publish** in v1. Clients cannot PATCH `status`; lifecycle transitions are Brain-authoritative semantic actions (`submit-review`, `approve`, `publish`, `revise`, `archive`). |
+| **Versioning** | Each plan has `plan_family_id` + `version_number`. Statuses: `draft`, `in_review`, `approved`, `active`, `superseded`, `archived`. Published/effective versions are **immutable**. Material changes require **Create Revision**, which clones into a new draft with an incremented version. Historical scorecards keep `plan_id` plus a `target_snapshot` so later revisions cannot silently rewrite prior-period targets. |
+| **Rep visibility** | `/api/sales-ops/me/plan` returns only the currently **effective** published/active plan. Future-dated `approved` plans may appear as **Upcoming Plan** and must not replace today’s active plan. Reps may read their own historical published versions and acknowledge their own published plan. Acknowledgment does **not** grant edit/approve rights and does **not** block effectiveness. Drafts are not a salesperson’s active plan. |
+| **Templates** | Reusable `sales_ops_plan_templates` (plus period/metric/copy tables) clone into an independent draft. Later template edits do not rewrite existing plans. |
+| **Prototype** | `prototype_cedar_valley_sales_plan_2026_2028` is **reference/template material only**. It is not an approved Thera/Cedar Valley production plan, is not auto-activated, and is not assigned to a real user by the SQL migration (no salesperson UUID seed). |
+| **Monday** | Monday remains **account assignment / CRM operations** authority. Plan lifecycle is **not** pushed to Monday. |
+| **Preview** | Admin/manager “Preview as salesperson” renders the plan DTO only. It does not impersonate the user, switch auth, or call rep account/commission APIs under another identity. |
+| **Schema** | `eliteos_sales_ops_v1.sql` is applied in production. Further Sales Ops schema is additive (`eliteos_sales_ops_monday_full_mirror_v2.sql`). |
+| **Out of scope** | Manager publish/approve (unless a later permission is added), generalized commission economics, pushing plans to Monday, blocking effectiveness on missing acknowledgment. |
+| **Impacted** | `app-sales-ops/` Plan Admin, `backend-core/src/salesOps/`, `eliteos_sales_ops_v1.sql`, this doc, SYSTEM_BLUEPRINT, eliteOS-master-head-map, CURRENT_SYSTEM_MAP, `monday-sales-ops.md`. |
+
+### 336. Sales Ops Monday Full-Fidelity Mirror (2026-08-27)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-27 |
+| **Decision** | Monday Account Master List is the **CRM source**, not canonical eliteOS account identity. Canonical identity remains **`account_directory_accounts.id`**. Sales Ops keeps a **Layer A** full-fidelity Monday mirror (items, all column values/EAV, subitems, updates/replies, asset metadata, docs metadata, users/teams, groups) plus a **Layer B** operational projection on `sales_ops_accounts`. Future Monday columns persist in `sales_ops_monday_column_values` by `column_id` with **no new DDL**. The browser never receives `source_snapshot`, `raw_columns`, tokens, or private asset URLs. Heavy resources are account-scoped and lazy. Writes remain **disabled** (`write_enabled=false`) until separately approved; reads can run independently (`read_enabled`). Full reconcile is the safety net; incremental sync is idempotent (event ID + fetch-after-event + stale `updated_at` guard). **No time-based echo suppression.** Permanent Account Directory linkage is **exact** only: `account_directory_external_links` with `external_system = 'monday'` and `external_id = '{boardId}:{itemId}'`. Unlinked Monday accounts may still exist in the Sales Ops projection. Elite tenant config (not SaaS-global): parent board `18397092941`, subitem board `18397319923`. Ownership maps by **Monday person ID**, never display name. |
+| **Why** | Selected-column projection dropped unknown columns, people arrays, subitems, replies, files, and docs. Unbounded `select *` plus DTO spreading could leak `raw_columns` to the browser. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_monday_full_mirror_v2.sql` **applied** to production `wbxbzhxsdlkpqsviyzkt`. Follow-up `eliteos_sales_ops_monday_column_value_null_v2_1.sql` allows SQL NULL for empty Monday columns (PostgREST JSON null). Do **not** rewrite applied `eliteos_sales_ops_v1.sql`. |
+| **Out of scope** | Enabling writes, seeding eliteOS UUID mappings, fuzzy AD linking, public asset proxy, inbound Monday webhook until `MONDAY_APP_SIGNING_SECRET` exists. |
+| **Impacted** | `backend-core/src/salesOps/`, `backend-core/supabase/eliteos_sales_ops_monday_full_mirror_v2.sql`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT, CURRENT_SYSTEM_MAP, eliteOS-master-head-map, `monday-sales-ops.md`. |
+

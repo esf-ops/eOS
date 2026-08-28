@@ -31,7 +31,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "quickbooks_intelligence", // QuickBooks Intelligence — AR/revenue/payment insights (read-only)
   "elite100_estimate_studio", // Elite 100 Estimate Studio — private pilot Digital Estimate publish head
   "elite100_quote_flow", // Elite 100 Quote Flow — Inbox → Estimate Queue → Estimates (clean staff head)
-  "account_directory" // Account Directory — standalone account identity + estimating contacts (not Estimate Studio)
+  "account_directory", // Account Directory — standalone account identity + estimating contacts (not Estimate Studio)
+  "sales_ops" // Sales Ops — personalized plans + Monday-backed account operations
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

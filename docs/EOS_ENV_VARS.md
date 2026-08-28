@@ -27,6 +27,9 @@ Copy `app-brain-health/.env.local.example` and `app-executive/.env.local.example
 | `PORT` | No | Listener port (default **3001** in code). |
 | `EOS_ALLOWED_ORIGINS` | Staging/prod | Comma-separated origins, e.g. `https://app1.vercel.app,https://app2.vercel.app`. Localhost Vite ports are always merged in — see server comment block. |
 | `EOS_CRON_SECRET` | For cron routes | Shared secret header `x-eos-cron-secret` for internal autosync endpoints. |
+| `HEAD_URL_SALES_OPS` | For Sales Ops launcher | Production `https://sales-ops.eliteosfab.com`. Distinct from `HEAD_URL_SALES`. |
+| `SALES_OPS_STORE` | For Sales Ops persistence | `supabase` after `eliteos_sales_ops_v1.sql` (applied) **and** additive `eliteos_sales_ops_monday_full_mirror_v2.sql` (unapplied until an operator runs it). Local default is in-memory. |
+| `MONDAY_APP_SIGNING_SECRET` | For Sales Ops webhooks | Monday app signing secret (JWT). Alias `MONDAY_SIGNING_SECRET`. Never frontend. |
 | `EOS_ALLOW_PUBLIC_SYNC_HEALTH` | No | Set to `1` only if you intentionally expose sync health without auth (default is guarded — see server). |
 
 ---

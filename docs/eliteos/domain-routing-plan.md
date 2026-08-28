@@ -116,5 +116,6 @@ Canonical keys live in `backend-core/src/me/headDeploymentUrls.js`. Minimum set 
 | `HEAD_URL_SYSTEM_ADMIN` | eliteOS System Admin Head |
 | `HEAD_URL_HOME` | eliteOS Home / Launcher (`app-home`); also used as invite redirect fallback when building `…/auth/callback` |
 | `HEAD_URL_SALES` | eliteOS Sales Head |
+| `HEAD_URL_SALES_OPS` | eliteOS Sales Ops Head (`app-sales-ops`); production **`https://sales-ops.eliteosfab.com`**. Do **not** reuse `sales.eliteosfab.com`. |
 
 **app-home** may use **`VITE_HEAD_URL_*`** and **`VITE_BACKEND_URL`** as SPA fallbacks; production should prefer URLs returned by **`GET /api/me/heads`**.

@@ -63,6 +63,15 @@ export const HEAD_LAUNCHER_CATALOG = [
     roleNote: "Preview only until approved account attribution mappings and dashboard parity are complete."
   },
   {
+    slug: "sales_ops",
+    label: "eliteOS Sales Ops Head",
+    description: "Personalized sales plans, scorecards, and Monday-backed account operations for the assigned salesperson.",
+    category: "Revenue",
+    href: "/sales-ops",
+    roleNote:
+      "Requires sales_ops head access. Normal reps see only their own plan and currently assigned Monday accounts. Managers see only explicitly assigned direct reports. Distinct from the Sales dashboard head (`sales`)."
+  },
+  {
     slug: "quote",
     label: "eliteOS Internal Estimate Head",
     description: "Create and revise internal estimates (measurement + pricing workspace).",
@@ -289,7 +298,7 @@ function defaultSlugSet(role, userKind) {
 
   const base = new Set(["brain_health"]);
   const roleHints = {
-    sales: ["sales", "quote", "quote_library", "custom_quote", "visualizer", "reports", "account_directory"],
+    sales: ["sales", "sales_ops", "quote", "quote_library", "custom_quote", "visualizer", "reports", "account_directory"],
     estimator: ["quote", "quote_library", "custom_quote", "visualizer", "reports", "account_directory"],
     accounting: ["finance", "reports", "pricing_admin", "quickbooks_intelligence"],
     production: ["production", "shop_tv", "reports"],

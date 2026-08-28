@@ -45,6 +45,7 @@ export const PROJECT_DEPENDENCIES = Object.freeze({
   "app-home": ["shared/eliteos-ui"],
   "app-kiosk": ["shared/eliteos-ui"],
   "app-sales": ["shared/eliteos-ui"],
+  "app-sales-ops": ["backend-core/src/salesOps", "shared/eliteos-ui"],
   "app-slab-inventory": ["shared/eliteos-ui"],
   "app-visualizer": ["shared/eliteos-ui"],
   "app-pricing-admin": ["shared/eliteos-ui"],

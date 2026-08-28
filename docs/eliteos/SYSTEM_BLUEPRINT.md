@@ -66,6 +66,7 @@ Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to f
 | **Custom Quote Head (`app-custom-quote`)** | **`https://custom.eliteosfab.com`** (recommended); set **`HEAD_URL_CUSTOM_QUOTE`**. **eliteOS Custom Quote Head** — ESF-only off-program material quotes; slug **`custom_quote`**; **`quote_source: custom_quote`**. Not dealer/partner/public. |
 | **AI Takeoff Lab Head (`app-ai-takeoff`)** | **`https://takeoff.eliteosfab.com`**; set **`HEAD_URL_AI_TAKEOFF`**. **eliteOS AI Takeoff Lab** — slug **`ai_takeoff`**; plan upload, AI draft extraction (review-only), estimator review/approve workflow. **No quote mutation; Internal Estimate import disabled.** See [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md). |
 | **Sales Dashboard Head (`app-sales`)** | **`https://sales.eliteosfab.com`**; set **`HEAD_URL_SALES`** on Brain and deploy `app-sales` with `VITE_BACKEND_URL`, `VITE_HOME_URL=https://www.eliteosfab.com`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`. **eliteOS Sales Head** — staff auth + `sales` head access. Current status is **scaffolded / deployed preview** until approved account attribution mappings and dashboard parity are complete. |
+| **Sales Ops Head (`app-sales-ops`)** | **`https://sales-ops.eliteosfab.com`** (do **not** reuse `sales.eliteosfab.com`, which is the Sales dashboard). Set **`HEAD_URL_SALES_OPS`**. Slug **`sales_ops`**. Staff auth + head access. Versioned, admin-managed sales plans (draft → review → approve → publish), Brain-persisted scorecards, Monday full-fidelity source mirror (Layer A) plus Sales Ops projection (Layer B). Writes remain disabled until separately approved. See `FEATURE_DECISIONS.md` §334–§336. |
 | **Org Directory Head (`app-org-directory`)** | **`https://org.eliteosfab.com`** or **`https://org-directory.eliteosfab.com`**; set **`HEAD_URL_ORG_DIRECTORY`**. **eliteOS Org Directory** — planning org chart (departments, seats, reporting lines, recommended head tags). Requires **`org_directory`** head access; does **not** change `user_head_access`. |
 | **Install Dashboard Head (`app-install-dashboard`)** | Recommended **`https://install.eliteosfab.com`**; set **`HEAD_URL_INSTALL_DASHBOARD`**. **eliteOS Install Dashboard** — slug **`install_dashboard`**; staff auth + head access; **read-only Installer Day View** via **`GET /api/install-dashboard/*`**. **No** schedule editing, route optimization, or Moraware writeback in v1. |
 | **HR Head (`app-hr`)** | **`https://hr.eliteosfab.com`**; set **`HEAD_URL_HR`**. **eliteOS HR Head** — slug **`hr`**; workforce quality grading (supervisor-logged mistakes, weekly letter grades, performance history). |
@@ -258,6 +259,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 |------|------------------|
 | **`app-quote` changed** | `npm run build --prefix app-quote` |
 | **`app-finance` changed** | `npm install --prefix app-finance` (first clone) then `npm run build --prefix app-finance`; `npm run eos:test:finance-read` |
+| **`app-sales-ops` changed** | `npm install --prefix app-sales-ops` (first clone) then `npm run build --prefix app-sales-ops`; `npm run eos:test:sales-ops` |
 | **`app-internal-estimate` changed** | `npm install --prefix app-internal-estimate` (first clone) then `npm run build --prefix app-internal-estimate` |
 | **`app-pricing-admin` changed** | `npm install --prefix app-pricing-admin` (first clone) then `npm run build --prefix app-pricing-admin` |
 | **`app-elite100-quote-flow` changed** | `npm install --prefix app-elite100-quote-flow` (first clone) then `npm run build --prefix app-elite100-quote-flow` |
@@ -363,6 +365,7 @@ Use this checklist when scaffolding any new protected eliteOS head. Completing a
 |----------|---------|
 | [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md) | Head inventory and platform rules |
 | [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) | Dated decisions, rationale, revisit triggers |
+| [`monday-sales-ops.md`](./monday-sales-ops.md) | Sales Ops Monday full-fidelity mirror, identity, webhooks, and read/write gates |
 | [`audits/README.md`](./audits/README.md) | Studio end-to-end process/ownership audit (docs-only; cleanup recommendations) |
 | [`../quote-platform/`](../quote-platform/) | Quote engine, Monday setup, math test cases |
 | [`../EOS_ENV_VARS.md`](../EOS_ENV_VARS.md) | Environment variable reference |

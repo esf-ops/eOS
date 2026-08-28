@@ -41,6 +41,7 @@ Each launcher row aligns with **`user_head_access.head_slug`** and `EOS_HEAD_SLU
 | eliteOS Brain Health Head | `brain_health` | `/brain-health` |
 | eliteOS System Admin Head | `system_admin` | `/system-admin` |
 | eliteOS Sales Head | `sales` | `/sales` → `app-sales` (default dev: `http://localhost:5178`, override `VITE_SALES_URL` / `VITE_HEAD_URL_SALES`) |
+| eliteOS Sales Ops Head | `sales_ops` | `/sales-ops` → `app-sales-ops` (default dev: `http://localhost:5198`, override `VITE_HEAD_URL_SALES_OPS`). Distinct from Sales dashboard. |
 | eliteOS Internal Estimate Head | `quote` | `/quote` → `app-internal-estimate` |
 | eliteOS Production Head | `production` | `/production` |
 | eliteOS Shop Floor TV Head | `shop_tv` | `/shop-tv` |
