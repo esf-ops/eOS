@@ -130,7 +130,7 @@ Rep: own Monday-assigned accounts. Manager: explicit assigned reports. Admin/exe
 ## Schema
 
 - v1 `eliteos_sales_ops_v1.sql` is **already applied** in production.
-- Additive v2 `eliteos_sales_ops_monday_full_mirror_v2.sql` **is applied** on production project `wbxbzhxsdlkpqsviyzkt`, plus follow-up `eliteos_sales_ops_monday_column_value_null_v2_1.sql` (empty column JSON null). Writes remain disabled.
+- Additive v2 `eliteos_sales_ops_monday_full_mirror_v2.sql` **is applied** on production project `wbxbzhxsdlkpqsviyzkt`, plus follow-up `eliteos_sales_ops_monday_column_value_null_v2_1.sql` (empty column JSON null) and `eliteos_sales_ops_monday_sync_mode_schedule_v2_2.sql` (sync_mode allow-list includes `light` / `deep` / `reproject`). Writes remain disabled.
 - Additive v3 `eliteos_sales_ops_performance_attribution_v3.sql` is applied (attribution facts; no seeded actuals).
 - Additive v4 `eliteos_sales_ops_identity_review_v4.sql` — identity review queue, compensation proposal/config, commission-report lifecycle. Applied.
 - Additive v5 `eliteos_sales_ops_identity_review_v5.sql` — `EXACT_SOURCE_ID` status, bulk-approval audit actions, `match_method`. Apply before Brain deploy of the bulk-review slice.

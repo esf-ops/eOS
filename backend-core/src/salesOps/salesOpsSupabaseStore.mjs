@@ -2502,7 +2502,7 @@ function mondayUserWrite(row) {
   return {
     organization_id: row.organizationId,
     monday_user_id: String(row.mondayUserId),
-    kind: row.kind || "person",
+    kind: String(row.kind || "person").toLowerCase() === "team" ? "team" : "person",
     display_name: row.displayName ?? null,
     email: row.email ?? null,
     source_metadata: row.sourceMetadata ?? {},

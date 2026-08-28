@@ -221,6 +221,12 @@ async function main() {
     n1.cols += 1;
     return origCols(...args);
   };
+  const origUsersBatch = batchStore.upsertMondayUsersBatch.bind(batchStore);
+  batchStore.upsertMondayUsersBatch = async (rows) => {
+    const ids = (rows || []).map((r) => String(r.mondayUserId));
+    assert.equal(new Set(ids).size, ids.length, "user upsert batch must be unique");
+    return origUsersBatch(rows);
+  };
   batchStore.upsertAccount = async (...args) => {
     n1.upsert += 1;
     return origUpsert(...args);

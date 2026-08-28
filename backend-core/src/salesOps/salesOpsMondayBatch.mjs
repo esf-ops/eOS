@@ -24,6 +24,17 @@ export function chunk(arr, size) {
   return out;
 }
 
+function dedupeLastWins(rows, keyFn) {
+  const map = new Map();
+  for (const row of rows || []) {
+    if (!row) continue;
+    const key = keyFn(row);
+    if (!key) continue;
+    map.set(key, row);
+  }
+  return [...map.values()];
+}
+
 async function persistRows(store, batchName, singleName, rows, batchSize) {
   const list = (rows || []).filter(Boolean);
   if (!list.length) return 0;
@@ -59,19 +70,37 @@ export async function persistPreparedItemRows(store, preparedList, progress = nu
       accounts.push(row);
     }
   }
+  const uniqueItems = dedupeLastWins(
+    items,
+    (r) => `${r.organizationId}:${r.mondayBoardId}:${r.mondayItemId}`
+  );
+  const uniqueColumns = dedupeLastWins(
+    columns,
+    (r) => `${r.organizationId}:${r.mondayBoardId}:${r.mondayItemId}:${r.columnId}`
+  );
+  const uniqueUsers = dedupeLastWins(users, (r) => `${r.organizationId}:${r.mondayUserId}`);
+  const uniqueAssets = dedupeLastWins(
+    assets,
+    (r) => `${r.organizationId}:${r.mondayAssetId || r.mondayBoardId}:${r.mondayItemId || ""}:${r.filename || ""}`
+  );
+  const uniqueDocs = dedupeLastWins(docs, (r) => `${r.organizationId}:${r.mondayDocId}:${r.mondayItemId || ""}`);
+  const uniqueAccounts = dedupeLastWins(
+    accounts,
+    (r) => `${r.organizationId}:${r.mondayBoardId}:${r.mondayItemId}`
+  );
   let batches = 0;
-  batches += await persistRows(store, "upsertMondayItemsBatch", "upsertMondayItem", items, SALES_OPS_ITEM_UPSERT_BATCH);
+  batches += await persistRows(store, "upsertMondayItemsBatch", "upsertMondayItem", uniqueItems, SALES_OPS_ITEM_UPSERT_BATCH);
   batches += await persistRows(
     store,
     "upsertMondayColumnValuesBatch",
     "upsertMondayColumnValue",
-    columns,
+    uniqueColumns,
     SALES_OPS_COLUMN_UPSERT_BATCH
   );
-  batches += await persistRows(store, "upsertMondayUsersBatch", "upsertMondayUser", users, SALES_OPS_USER_UPSERT_BATCH);
-  batches += await persistRows(store, "upsertMondayAssetsBatch", "upsertMondayAsset", assets, SALES_OPS_ASSET_UPSERT_BATCH);
-  batches += await persistRows(store, "upsertMondayDocsBatch", "upsertMondayDoc", docs, SALES_OPS_DOC_UPSERT_BATCH);
-  batches += await persistRows(store, "upsertAccountsBatch", "upsertAccount", accounts, SALES_OPS_ACCOUNT_UPSERT_BATCH);
+  batches += await persistRows(store, "upsertMondayUsersBatch", "upsertMondayUser", uniqueUsers, SALES_OPS_USER_UPSERT_BATCH);
+  batches += await persistRows(store, "upsertMondayAssetsBatch", "upsertMondayAsset", uniqueAssets, SALES_OPS_ASSET_UPSERT_BATCH);
+  batches += await persistRows(store, "upsertMondayDocsBatch", "upsertMondayDoc", uniqueDocs, SALES_OPS_DOC_UPSERT_BATCH);
+  batches += await persistRows(store, "upsertAccountsBatch", "upsertAccount", uniqueAccounts, SALES_OPS_ACCOUNT_UPSERT_BATCH);
   progress?.noteDbBatch(batches);
   return {
     items: items.length,
@@ -83,6 +112,7 @@ export async function persistPreparedItemRows(store, preparedList, progress = nu
 
 export async function persistPreparedUpdateRows(store, prepared, progress = null) {
   let batches = 0;
+  const uniqueUsers = dedupeLastWins(prepared.userRows, (r) => `${r.organizationId}:${r.mondayUserId}`);
   batches += await persistRows(
     store,
     "upsertMondayUpdatesBatch",
@@ -94,7 +124,7 @@ export async function persistPreparedUpdateRows(store, prepared, progress = null
     store,
     "upsertMondayUsersBatch",
     "upsertMondayUser",
-    prepared.userRows,
+    uniqueUsers,
     SALES_OPS_USER_UPSERT_BATCH
   );
   batches += await persistRows(
