@@ -107,7 +107,7 @@ Rep: own Monday-assigned accounts. Manager: explicit assigned reports. Admin/exe
 
 | Variable | Where | Purpose |
 |----------|--------|---------|
-| `HEAD_URL_SALES_OPS` | Brain | Launcher + CORS origin. Suggested `https://sales-ops.eliteosfab.com`. |
+| `HEAD_URL_SALES_OPS` | Brain | Launcher + CORS origin. Production **`https://sales-ops.eliteosfab.com`** (Vercel project `eliteos-sales-ops`; Cloudflare DNS-only CNAME to `c0bfc63fa49f166c.vercel-dns-016.com`). |
 | `SALES_OPS_STORE` | Brain | `supabase` after v1 **and** v2 SQL. `memory` for local tests. |
 | `MONDAY_API_TOKEN` | Brain only | GraphQL reads (and future writes). |
 | `MONDAY_APP_SIGNING_SECRET` | Brain only | App-created board webhook JWT. |

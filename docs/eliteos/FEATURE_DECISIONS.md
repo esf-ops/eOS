@@ -4592,3 +4592,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Monday writes, fuzzy identity, Cloudflare DNS provider changes, inbound webhook without `MONDAY_APP_SIGNING_SECRET`. |
 | **Impacted** | `backend-core/src/salesOps/`, this doc, `monday-sales-ops.md`, SYSTEM_BLUEPRINT. |
 
+### 338. Sales Ops production hostname CNAME (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | Production Sales Ops is **`https://sales-ops.eliteosfab.com`** on Vercel project **`eliteos-sales-ops`** (`prj_wbu6ZajgzDgl43lkScrWIPRl68pA`). The authoritative DNS record is the **project-specific CNAME** Vercel rank-1 target **`c0bfc63fa49f166c.vercel-dns-016.com`**, Cloudflare **DNS-only**. Do **not** use apex-style `A 76.76.21.21` for this subdomain (valid fallback only). Generic `cname.vercel-dns.com` is rank-2. Brain `HEAD_URL_SALES_OPS` is `https://sales-ops.eliteosfab.com`. Writes remain disabled. |
+| **Why** | Working eliteOS subdomains use project-specific `*.vercel-dns-016.com` CNAMEs. The temporary A record verified the domain but was `configuredBy: A` / `ipStatus: optional-change`. After the CNAME swap, Vercel reports `configuredBy: CNAME`, `verified: true`, `misconfigured: false`. Let's Encrypt was issued for the hostname (HTTP-01). |
+| **Schema** | None. |
+| **Out of scope** | Cloudflare nameserver/provider moves, orange-cloud proxy, Monday writes, inbound webhook until `MONDAY_APP_SIGNING_SECRET` exists. |
+| **Impacted** | This doc, `monday-sales-ops.md`, CURRENT_SYSTEM_MAP. |
+
