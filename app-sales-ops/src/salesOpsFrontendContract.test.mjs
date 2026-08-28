@@ -12,6 +12,7 @@ function read(rel) {
 const files = [
   "src/lib/api.ts",
   "src/lib/supabase.ts",
+  "src/lib/accountListScopeCopy.mjs",
   "src/ui/SalesOpsApp.tsx",
   "src/ui/Account360Workspace.tsx",
   "src/ui/PlanAdmin.tsx",
@@ -53,5 +54,27 @@ assert.ok(!app.includes("Assign the approved"));
 assert.ok(!app.includes("cedar_valley_2026_2028"));
 assert.ok(!/localStorage\.setItem/.test(app));
 assert.ok(app.includes("20000"), "visible-tab poll interval");
+assert.ok(app.includes("accountListScopeCopy"));
+assert.equal(app.includes("You only see accounts currently assigned to you."), false);
+
+const { accountListScopeCopy } = await import("./lib/accountListScopeCopy.mjs");
+assert.equal(
+  accountListScopeCopy({ isOrgAdmin: true, isManager: false }),
+  "You can see every active account in this organization. Unmapped Monday owners stay hidden from normal sales books but remain visible here."
+);
+assert.equal(
+  accountListScopeCopy({ isOrgAdmin: false, isManager: true }),
+  "You see your managed scope: accounts assigned to you and to people who report to you. Unmapped Monday owners stay hidden."
+);
+assert.equal(
+  accountListScopeCopy({ isOrgAdmin: false, isManager: false }),
+  "You only see your assigned book — accounts currently assigned to you. Unmapped Monday owners stay hidden."
+);
+assert.equal(
+  accountListScopeCopy({ isOrgAdmin: true, isManager: true }),
+  "You can see every active account in this organization. Unmapped Monday owners stay hidden from normal sales books but remain visible here."
+);
+assert.ok(accountListScopeCopy({}).includes("your assigned book"));
+assert.equal(/user_profiles|role === ["']admin["']/.test(read("src/lib/accountListScopeCopy.mjs")), false);
 
 console.log("salesOpsFrontendContract.test.mjs: ok");

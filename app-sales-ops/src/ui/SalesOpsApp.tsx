@@ -2,6 +2,7 @@ import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } f
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import { apiGet, apiPatch, apiPost, apiPut, ApiError } from "../lib/api";
+import { accountListScopeCopy } from "../lib/accountListScopeCopy.mjs";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
 import Account360Workspace, {
@@ -810,7 +811,7 @@ export default function SalesOpsApp() {
                 <div>
                   <p className="kicker">Source-of-truth protection</p>
                   <h3>Monday owns assignment. Historical production is evidence—not ownership.</h3>
-                  <p>You only see accounts currently assigned to you. Unmapped Monday owners stay hidden.</p>
+                  <p>{accountListScopeCopy(me?.access as { isOrgAdmin?: boolean; isManager?: boolean } | undefined)}</p>
                 </div>
                 <small>
                   Synced
