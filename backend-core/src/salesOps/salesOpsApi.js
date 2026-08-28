@@ -102,6 +102,46 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.get("/api/sales-ops/me/performance", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getMyPerformance(actorUser(req), { period: req.query.period || null });
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/me/performance/months", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getMyPerformance(actorUser(req), { period: req.query.period || null });
+      jsonNoStore(res);
+      res.json({ ok: true, period: data.period, months: data.months, actualSfDefinition: data.actualSfDefinition });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/me/performance/accounts", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getMyPerformance(actorUser(req), {
+        period: req.query.period || null,
+        includeAccounts: true
+      });
+      jsonNoStore(res);
+      res.json({
+        ok: true,
+        period: data.period,
+        actualStatus: data.currentMonth?.actualStatus,
+        actualSf: data.currentMonth?.actualSf,
+        accounts: data.accounts,
+        actualSfDefinition: data.actualSfDefinition
+      });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.get("/api/sales-ops/me/progress", ...guard, async (req, res) => {
     try {
       const data = await svc.getMyProgress(actorUser(req));
@@ -308,6 +348,29 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.get("/api/sales-ops/team/performance", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getTeamPerformance(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/team/:userId/performance", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getScopedPerformance(actorUser(req), req.params.userId, {
+        period: req.query.period || null,
+        includeAccounts: req.query.accounts === "1" || req.query.accounts === "true"
+      });
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.get("/api/sales-ops/team/:userId/plan", ...guard, async (req, res) => {
     try {
       const data = await svc.getTeamMemberPlan(actorUser(req), req.params.userId);
@@ -348,6 +411,26 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
       const templates = await svc.listPlanTemplates(actorUser(req));
       jsonNoStore(res);
       res.json({ ok: true, templates });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/people", ...guard, async (req, res) => {
+    try {
+      const people = await svc.listAdminPeople(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, people });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/identity-audit", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getIdentityAudit(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
     } catch (e) {
       sendError(res, e);
     }
@@ -416,6 +499,16 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
   app.post("/api/sales-ops/admin/plans/:planId/revise", ...guard, jsonParser, async (req, res) => {
     try {
       const data = await svc.reviseAdminPlan(actorUser(req), req.params.planId);
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/plans/:planId/generate-ramp", ...guard, jsonParser, async (req, res) => {
+    try {
+      const data = await svc.generateAdminRamp(actorUser(req), req.params.planId, req.body || {});
       jsonNoStore(res);
       res.json({ ok: true, ...data });
     } catch (e) {

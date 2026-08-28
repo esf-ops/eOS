@@ -14,7 +14,7 @@ import Account360Workspace, {
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
-type Tab = "overview" | "progress" | "entry" | "accounts" | "rhythms" | "commission" | "team" | "admin";
+type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin";
 
 type Insight = {
   eyebrow: string;
@@ -49,14 +49,53 @@ type Scorecard = {
   sources?: Record<string, string>;
 };
 
+type PerformanceMonth = {
+  period: string;
+  goalSf: number | null;
+  actualSf: number | null;
+  varianceSf: number | null;
+  attainmentPct: number | null;
+  actualStatus: string;
+};
+
+type PerformanceAccount = {
+  accountDirectoryAccountId: string;
+  salesOpsAccountId: string | null;
+  accountName: string | null;
+  creditedSf: number;
+  sharePct: number | null;
+  canOpenWorkspace: boolean;
+};
+
+type PerformanceDto = {
+  period: string;
+  currentMonth: PerformanceMonth;
+  ytd: { goalSf: number | null; actualSf: number | null; varianceSf: number | null; attainmentPct: number | null };
+  priorMonthActualSf: number | null;
+  rollingThreeMonthActualSf: number | null;
+  months: PerformanceMonth[];
+  accounts?: PerformanceAccount[];
+  actualSfDefinition?: { status?: string; note?: string };
+};
+
+function fmtMaybe(value: number | null | undefined) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return fmt.format(Number(value));
+}
+
+function fmtPct(value: number | null | undefined) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${Number(value).toFixed(1)}%`;
+}
+
 const DEFAULT_INSIGHTS: Record<string, Insight> = {
   installed: {
     eyebrow: "01 / Result",
-    title: "Credited installed square feet",
-    lead: "Square feet count when the work is installed and credited under the plan’s rules—not when it is discussed, quoted, or merely awarded.",
+    title: "Monthly square-foot goal",
+    lead: "The published plan stores an explicit SF target for every calendar month. Actual credited SF is a separate governed fact and is not implied by this coaching copy.",
     sections: [
-      { title: "What counts", items: ["Eligible square footage installed in the reporting month", "Credit applied under the signed rules"] },
-      { title: "How it is coached", items: ["Monthly target remains the formal goal", "A rolling three-month view separates scheduling movement from a true performance pattern"] }
+      { title: "What the plan holds", items: ["One editable monthly SF goal per calendar month", "Ramp generation writes those months; it is not the runtime authority"] },
+      { title: "What actuals require", items: ["An approved earned-sale event and date", "Exact Account Directory identity before Moraware square footage is attributed"] }
     ]
   },
   pipeline: {
@@ -161,6 +200,13 @@ export default function SalesOpsApp() {
   const [writeError, setWriteError] = useState<string | null>(null);
   const [team, setTeam] = useState<{ reports: Array<Record<string, unknown>> } | null>(null);
   const [planHistory, setPlanHistory] = useState<Array<Record<string, unknown>>>([]);
+  const [performance, setPerformance] = useState<PerformanceDto | null>(null);
+  const [perfAccounts, setPerfAccounts] = useState<PerformanceAccount[]>([]);
+  const [teamPerformance, setTeamPerformance] = useState<{
+    period: string;
+    rows: Array<Record<string, unknown>>;
+  } | null>(null);
+  const [scopedUserId, setScopedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -201,15 +247,47 @@ export default function SalesOpsApp() {
       setAccountsCursor(acc.nextCursor || null);
       const comm = (await apiGet("/api/sales-ops/me/commission", sessionToken)) as typeof commission;
       setCommission(comm);
+      try {
+        const selfId = String((meRes.user as { id?: string } | undefined)?.id || "");
+        const targetId = scopedUserId && scopedUserId !== selfId ? scopedUserId : "";
+        if (targetId) {
+          const perf = (await apiGet(
+            `/api/sales-ops/team/${targetId}/performance?accounts=1`,
+            sessionToken
+          )) as PerformanceDto;
+          setPerformance(perf);
+          setPerfAccounts(perf.accounts || []);
+        } else {
+          const perf = (await apiGet("/api/sales-ops/me/performance", sessionToken)) as PerformanceDto;
+          setPerformance(perf);
+          const contrib = (await apiGet(
+            `/api/sales-ops/me/performance/accounts${perf.period ? `?period=${encodeURIComponent(perf.period)}` : ""}`,
+            sessionToken
+          )) as { accounts?: PerformanceAccount[] };
+          setPerfAccounts(contrib.accounts || []);
+        }
+      } catch {
+        setPerformance(null);
+        setPerfAccounts([]);
+      }
       const access = meRes.access as { isManager?: boolean; canAdministerPlans?: boolean } | undefined;
       if (access?.isManager || access?.canAdministerPlans) {
         const t = (await apiGet("/api/sales-ops/team", sessionToken)) as { reports: Array<Record<string, unknown>> };
         setTeam(t);
+        try {
+          const tp = (await apiGet("/api/sales-ops/team/performance", sessionToken)) as {
+            period: string;
+            rows: Array<Record<string, unknown>>;
+          };
+          setTeamPerformance(tp);
+        } catch {
+          setTeamPerformance(null);
+        }
       }
     } catch (e) {
       setLoadError(e instanceof ApiError ? e.message : String((e as Error)?.message || e));
     }
-  }, [sessionToken]);
+  }, [sessionToken, scopedUserId]);
 
   useEffect(() => {
     void reload();
@@ -520,14 +598,14 @@ export default function SalesOpsApp() {
     if (insights[key]) setInsight(insights[key]);
   };
   const tabs: [Tab, string, string, boolean][] = [
-    ["overview", "01", "Plan overview", true],
-    ["progress", "02", "Progress", true],
-    ["entry", "03", "Performance marks", true],
-    ["accounts", "04", "Account strategy", true],
-    ["rhythms", "05", "Rhythms", true],
+    ["overview", "01", "Overview", true],
+    ["performance", "02", "Performance", true],
+    ["accounts", "03", "Accounts", true],
+    ["plan", "04", "Plan", true],
+    ["entry", "05", "Scorecards", true],
     ["commission", "06", "Commission", true],
-    ["team", "07", "Team", Boolean((me?.access as { isManager?: boolean; isOrgAdmin?: boolean } | undefined)?.isManager || (me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
-    ["admin", "08", "Plan admin", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)]
+    ["team", "07", "Team Performance", Boolean((me?.access as { isManager?: boolean; isOrgAdmin?: boolean } | undefined)?.isManager || (me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
+    ["admin", "08", "Plan Builder", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)]
   ];
 
   return (
@@ -659,82 +737,167 @@ export default function SalesOpsApp() {
             </div>
           )}
 
-          {tab === "progress" && (
+          {tab === "performance" && (
             <div className="tab-page">
               <div className="section-heading split-heading progress-heading">
                 <div>
-                  <p className="kicker">Live scorecard</p>
-                  <h2>Performance at a glance.</h2>
+                  <p className="kicker">
+                    {scopedUserId ? "Team member performance" : `Current month ${performance?.period || ""}`}
+                  </p>
+                  <h2>Goal versus actual square feet.</h2>
                 </div>
-                <div className="heading-actions">
-                  <StatusPill status={latest.status || "pending"} />
-                  <button className="primary-button" onClick={() => setTab("entry")}>
-                    Update marks <ArrowIcon />
+                {scopedUserId ? (
+                  <button type="button" className="text-link" onClick={() => setScopedUserId(null)}>
+                    My performance
                   </button>
-                </div>
+                ) : null}
               </div>
+              {performance?.currentMonth?.actualStatus && performance.currentMonth.actualStatus !== "AVAILABLE" && (
+                <div className="stale-banner">
+                  <b>{performance.currentMonth.actualStatus.split("_").join(" ")}.</b>{" "}
+                  {performance.actualSfDefinition?.note || "Actual SF is not treated as zero when the governed source is unavailable."}
+                </div>
+              )}
               <div className="score-grid">
                 <article className="score-card hero-score">
-                  <span>Installed sq ft</span>
+                  <span>Monthly SF goal</span>
                   <div className="score-value">
-                    <strong>{fmt.format(Number(latest.latest?.installed || 0))}</strong>
-                    <small>/ {fmt.format(Number(latest.latestRamp?.installedTarget || 0))}</small>
+                    <strong>{fmtMaybe(performance?.currentMonth?.goalSf)}</strong>
                   </div>
-                  <Meter value={Number(latest.attainment || 0)} />
                 </article>
                 <article className="score-card">
-                  <span>Rolling 3-month result</span>
+                  <span>Actual SF</span>
                   <div className="score-value">
-                    <strong>{fmt.format(Number(latest.recentActual || 0))}</strong>
-                    <small>/ {fmt.format(Number(latest.latestRamp?.rollingThreeMonthTarget || 0))}</small>
+                    <strong>{fmtMaybe(performance?.currentMonth?.actualSf)}</strong>
+                    <small>{performance?.currentMonth?.actualStatus || "—"}</small>
                   </div>
-                  <Meter value={Number(latest.rollingAttainment || 0)} tone="gold" />
                 </article>
                 <article className="score-card">
-                  <span>90-day pipeline</span>
+                  <span>Variance SF</span>
                   <div className="score-value">
-                    <strong>{Number(latest.pipelineCoverage || 0).toFixed(1)}×</strong>
-                    <small>/ 3.0×</small>
+                    <strong>{fmtMaybe(performance?.currentMonth?.varianceSf)}</strong>
                   </div>
-                  <Meter value={Number(latest.pipelineCoverage || 0) * 100} tone="green" />
                 </article>
                 <article className="score-card">
-                  <span>Close rate by sq ft</span>
+                  <span>Attainment</span>
                   <div className="score-value">
-                    <strong>{pct(Number(latest.closeRate || 0))}</strong>
-                    <small>/ {latest.closeRateStandard || 35}%</small>
+                    <strong>{fmtPct(performance?.currentMonth?.attainmentPct)}</strong>
+                    {performance?.currentMonth?.attainmentPct == null ? null : (
+                      <Meter value={Number(performance.currentMonth.attainmentPct)} />
+                    )}
                   </div>
-                  <Meter value={(Number(latest.closeRate || 0) / Number(latest.closeRateStandard || 35)) * 100} />
+                </article>
+              </div>
+              <div className="score-grid">
+                <article className="score-card">
+                  <span>YTD goal</span>
+                  <strong>{fmtMaybe(performance?.ytd?.goalSf)}</strong>
+                </article>
+                <article className="score-card">
+                  <span>YTD actual</span>
+                  <strong>{fmtMaybe(performance?.ytd?.actualSf)}</strong>
+                </article>
+                <article className="score-card">
+                  <span>YTD variance</span>
+                  <strong>{fmtMaybe(performance?.ytd?.varianceSf)}</strong>
+                </article>
+                <article className="score-card">
+                  <span>YTD attainment</span>
+                  <strong>{fmtPct(performance?.ytd?.attainmentPct)}</strong>
+                </article>
+                <article className="score-card">
+                  <span>Prior-month actual</span>
+                  <strong>{fmtMaybe(performance?.priorMonthActualSf)}</strong>
+                </article>
+                <article className="score-card">
+                  <span>Rolling 3-month actual</span>
+                  <strong>{fmtMaybe(performance?.rollingThreeMonthActualSf)}</strong>
+                  <small>Shown only when three months of actuals exist</small>
                 </article>
               </div>
               <div className="chart-card">
                 <div className="chart-head">
                   <div>
-                    <p className="kicker">The ramp</p>
-                    <h3>Target vs. actual installed sq ft</h3>
-                  </div>
-                  <div className="chart-controls">
-                    {["all", ...rampYears].map((year) => (
-                      <button key={year} onClick={() => setYearFilter(year)} className={yearFilter === year ? "active" : ""}>
-                        {year === "all" ? "All" : year}
-                      </button>
-                    ))}
+                    <p className="kicker">Monthly history</p>
+                    <h3>Goal vs actual SF</h3>
                   </div>
                 </div>
-                <div className="bar-chart" style={{ gridTemplateColumns: `repeat(${Math.max(filteredRamp.length, 1)}, minmax(18px, 1fr))` }}>
-                  {filteredRamp.map((item) => {
-                    const actual = Number(scorecards.find((r) => r.period === item.period)?.installed ?? 0);
+                <div
+                  className="bar-chart"
+                  style={{ gridTemplateColumns: `repeat(${Math.max((performance?.months || []).length, 1)}, minmax(18px, 1fr))` }}
+                  aria-hidden="true"
+                >
+                  {(performance?.months || []).map((item) => {
+                    const ceiling = Math.max(
+                      1,
+                      ...(performance?.months || []).map((m) =>
+                        Math.max(Number(m.goalSf || 0), m.actualSf == null ? 0 : Number(m.actualSf))
+                      )
+                    );
                     return (
-                      <button type="button" className="bar-group" key={item.period}>
+                      <div className="bar-group" key={item.period}>
                         <div className="bars">
-                          <i className="actual-bar" style={{ height: `${(actual / maxChart) * 100}%` }} />
-                          <i className="target-bar" style={{ height: `${(Number(item.installedTarget) / maxChart) * 100}%` }} />
+                          {item.actualSf == null ? null : (
+                            <i className="actual-bar" style={{ height: `${(Number(item.actualSf) / ceiling) * 100}%` }} />
+                          )}
+                          <i className="target-bar" style={{ height: `${(Number(item.goalSf || 0) / ceiling) * 100}%` }} />
                         </div>
-                        <span>{item.label}</span>
-                      </button>
+                        <span>{item.period.slice(5)}</span>
+                      </div>
                     );
                   })}
                 </div>
+                <div className="month-goal-table" role="table" aria-label="Monthly goal versus actual">
+                  <div className="month-goal-head" role="row">
+                    <span>Month</span>
+                    <span>Goal</span>
+                    <span>Actual</span>
+                    <span>Variance</span>
+                    <span>Attainment</span>
+                    <span>Status</span>
+                  </div>
+                  {(performance?.months || []).map((row) => (
+                    <div key={row.period} className="month-goal-row" role="row">
+                      <span>{row.period}</span>
+                      <span>{fmtMaybe(row.goalSf)}</span>
+                      <span>{fmtMaybe(row.actualSf)}</span>
+                      <span>{fmtMaybe(row.varianceSf)}</span>
+                      <span>{fmtPct(row.attainmentPct)}</span>
+                      <span>{row.actualStatus}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="form-section">
+                <p className="kicker">Account contribution</p>
+                <h3>{performance?.period || "Selected month"}</h3>
+                <p className="workspace-muted">Canonical Account Directory identity only. Unassigned accounts stay listed without a workspace link.</p>
+                {(perfAccounts || []).map((row) => (
+                  <div className="workspace-line" key={row.accountDirectoryAccountId}>
+                    <span>
+                      {row.canOpenWorkspace && row.salesOpsAccountId ? (
+                        <button
+                          type="button"
+                          className="text-link"
+                          onClick={() => {
+                            void openAccountById(row.salesOpsAccountId as string);
+                            setTab("accounts");
+                          }}
+                        >
+                          {row.accountName || "Assigned account"}
+                        </button>
+                      ) : (
+                        "Account"
+                      )}
+                    </span>
+                    <strong>
+                      {fmtMaybe(row.creditedSf)} SF · {fmtPct(row.sharePct)}
+                    </strong>
+                  </div>
+                ))}
+                {(perfAccounts || []).length === 0 && (
+                  <p className="workspace-muted">No credited account contribution is available for this month.</p>
+                )}
               </div>
             </div>
           )}
@@ -870,20 +1033,21 @@ export default function SalesOpsApp() {
             </div>
           )}
 
-          {tab === "rhythms" && (
+          {tab === "plan" && (
             <div className="tab-page rhythm-page">
               <div className="section-heading">
-                <p className="kicker">The operating cadence</p>
-                <h2>Know the win. Run the week.</h2>
+                <p className="kicker">Assigned plan</p>
+                <h2>{String(plan?.planName || "No published plan")}</h2>
+                <p>{String((planBundle as { planCopy?: { introduction?: string } } | null)?.planCopy?.introduction || plan?.subtitle || "")}</p>
               </div>
               <section className="rhythm-hero">
                 <div className="rhythm-month-control">
                   <p className="kicker">Monthly north star</p>
-                  <p>{String((plan?.rhythms as { monthly?: string } | undefined)?.monthly || "KPI standards are loaded from your assigned plan. Activity automation stays off until evidence is reliable.")}</p>
+                  <p>{String((plan?.rhythms as { monthly?: string } | undefined)?.monthly || "KPI standards are loaded from your assigned plan.")}</p>
                 </div>
                 <div className="rhythm-target-main">
-                  <span>Installed target</span>
-                  <strong>{fmt.format(Number(selectedRamp?.installedTarget || 0))}</strong>
+                  <span>This month's stored goal</span>
+                  <strong>{fmtMaybe(performance?.currentMonth?.goalSf)}</strong>
                 </div>
               </section>
               {Boolean((plan?.rhythms as { weekly?: string } | undefined)?.weekly) && (
@@ -900,6 +1064,20 @@ export default function SalesOpsApp() {
                   </button>
                 ))}
               </div>
+              {planHistory.length > 0 && (
+                <div className="plan-history">
+                  <p className="kicker">Published plan history</p>
+                  <ul>
+                    {planHistory.map((row) => (
+                      <li key={String(row.id)}>
+                        <strong>{String(row.planName || "Plan")}</strong>
+                        <span>v{String(row.versionNumber || 1)} · {String(row.status)}</span>
+                        <small>{String(row.effectiveStartDate || "—")} → {String(row.effectiveEndDate || "open")}</small>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
@@ -921,15 +1099,40 @@ export default function SalesOpsApp() {
 
           {tab === "team" && (
             <div className="tab-page">
-              <p className="kicker">Direct reports</p>
-              <h2>Only explicitly assigned people.</h2>
-              {(team?.reports || []).map((r) => (
-                <article key={String(r.userId)} className="form-section">
-                  <h3>{String(r.planName || r.userId)}</h3>
-                  <p>Plan {String(r.planId || "none")}</p>
-                </article>
-              ))}
-              {(team?.reports || []).length === 0 && <p>No direct reports are assigned to you.</p>}
+              <p className="kicker">Team performance</p>
+              <h2>Governed scope only.</h2>
+              <p className="workspace-muted">Sales sees self. Managers see assigned reports. Admin/executive sees the organization. Actual SF stays unavailable until the earned-sale definition is approved.</p>
+              <div className="month-goal-table" role="table" aria-label="Team performance">
+                <div className="month-goal-head team-perf-head" role="row">
+                  <span>Rep</span>
+                  <span>Goal</span>
+                  <span>Actual</span>
+                  <span>Variance</span>
+                  <span>Attainment</span>
+                  <span>YTD goal</span>
+                  <span>YTD actual</span>
+                </div>
+                {(teamPerformance?.rows || []).map((row) => (
+                  <button
+                    type="button"
+                    className="month-goal-row team-perf-row"
+                    key={String(row.userId)}
+                    onClick={() => {
+                      setScopedUserId(String(row.userId));
+                      setTab("performance");
+                    }}
+                  >
+                    <span>{String(row.displayName || "").trim() || String(row.userId).slice(0, 8)}</span>
+                    <span>{fmtMaybe(row.goalSf as number | null)}</span>
+                    <span>{fmtMaybe(row.actualSf as number | null)}</span>
+                    <span>{fmtMaybe(row.varianceSf as number | null)}</span>
+                    <span>{fmtPct(row.attainmentPct as number | null)}</span>
+                    <span>{fmtMaybe(row.ytdGoalSf as number | null)}</span>
+                    <span>{fmtMaybe(row.ytdActualSf as number | null)}</span>
+                  </button>
+                ))}
+              </div>
+              {(teamPerformance?.rows || []).length === 0 && <p>No people are in your governed performance scope.</p>}
             </div>
           )}
 

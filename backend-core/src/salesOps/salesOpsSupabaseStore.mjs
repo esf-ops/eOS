@@ -35,6 +35,20 @@ function throwDb(error, fallback) {
   throw err;
 }
 
+async function pageSelect(queryFactory, mapRow = (r) => r, pageSize = 1000) {
+  const out = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await queryFactory().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    out.push(...rows.map(mapRow));
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return out;
+}
+
 function mapPlan(row) {
   if (!row) return null;
   const status = row.status || (row.active ? "active" : "draft");
@@ -1934,7 +1948,141 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         unlinkedCount: unlinked.count || 0,
         unmappedMondayPeopleCount
       };
+    },
+
+    async listAccountIdentityRows(organizationId) {
+      try {
+        return await pageSelect(
+          () =>
+            db()
+              .from("sales_ops_accounts")
+              .select("id,monday_board_id,monday_item_id,account_directory_account_id,assigned_user_id")
+              .eq("organization_id", organizationId)
+              .eq("archived", false)
+              .eq("source_state", "active")
+              .order("id", { ascending: true }),
+          (row) => ({
+            id: row.id,
+            mondayBoardId: row.monday_board_id,
+            mondayItemId: row.monday_item_id,
+            accountDirectoryAccountId: row.account_directory_account_id ?? null,
+            assignedUserId: row.assigned_user_id ?? null
+          })
+        );
+      } catch (error) {
+        throwDb(error, "Could not list Sales Ops account identity rows.");
+      }
+    },
+
+    async listActiveExternalLinks(organizationId, externalSystem) {
+      try {
+        return await pageSelect(
+          () =>
+            db()
+              .from("account_directory_external_links")
+              .select("account_id,external_id")
+              .eq("organization_id", organizationId)
+              .eq("external_system", String(externalSystem))
+              .eq("is_active", true)
+              .order("external_id", { ascending: true }),
+          (row) => ({
+            accountId: row.account_id,
+            externalId: row.external_id
+          })
+        );
+      } catch (error) {
+        throwDb(error, "Could not list Account Directory external links.");
+      }
+    },
+
+    async listPeriodTargetsForPlanIds(organizationId, planIds) {
+      const ids = [...new Set((planIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      const out = [];
+      const chunk = 100;
+      for (let i = 0; i < ids.length; i += chunk) {
+        const slice = ids.slice(i, i + chunk);
+        const { data, error } = await db()
+          .from("sales_ops_plan_period_targets")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .in("plan_id", slice);
+        if (error) throwDb(error, "Could not list period targets.");
+        out.push(...(data || []).map(mapPeriod));
+      }
+      return out.sort((a, b) => a.period.localeCompare(b.period));
+    },
+
+    async insertAttributionFact(row) {
+      const { data, error } = await db()
+        .from("sales_ops_sf_attribution_facts")
+        .insert({
+          organization_id: row.organizationId,
+          salesperson_user_id: row.salespersonUserId,
+          account_directory_account_id: row.accountDirectoryAccountId,
+          sales_ops_account_id: row.salesOpsAccountId ?? null,
+          moraware_account_id: row.morawareAccountId ?? null,
+          moraware_job_id: row.morawareJobId ?? null,
+          qualifying_event: row.qualifyingEvent,
+          qualifying_date: row.qualifyingDate,
+          performance_month: row.performanceMonth,
+          credited_sf: Number(row.creditedSf),
+          attribution_basis: row.attributionBasis || "explicit_fact",
+          source_observed_at: row.sourceObservedAt ?? null,
+          reversal_of_id: row.reversalOfId ?? null,
+          status: row.status || "credited"
+        })
+        .select("*")
+        .single();
+      if (error) throwDb(error, "Could not save attribution fact.");
+      return mapAttributionFact(data);
+    },
+
+    async listAttributionFacts(organizationId, { userIds = null, periodFrom = null, periodTo = null } = {}) {
+      const ids = userIds ? [...new Set(userIds.map(String).filter(Boolean))] : null;
+      if (ids && !ids.length) return [];
+      try {
+        return await pageSelect(
+          () => {
+            let q = db()
+              .from("sales_ops_sf_attribution_facts")
+              .select("*")
+              .eq("organization_id", organizationId)
+              .order("performance_month", { ascending: true })
+              .order("id", { ascending: true });
+            if (ids) q = q.in("salesperson_user_id", ids);
+            if (periodFrom) q = q.gte("performance_month", periodFrom);
+            if (periodTo) q = q.lte("performance_month", periodTo);
+            return q;
+          },
+          mapAttributionFact
+        );
+      } catch (error) {
+        throwDb(error, "Could not list attribution facts.");
+      }
     }
+  };
+}
+
+function mapAttributionFact(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    salespersonUserId: row.salesperson_user_id,
+    accountDirectoryAccountId: row.account_directory_account_id,
+    salesOpsAccountId: row.sales_ops_account_id ?? null,
+    morawareAccountId: row.moraware_account_id ?? null,
+    morawareJobId: row.moraware_job_id ?? null,
+    qualifyingEvent: row.qualifying_event,
+    qualifyingDate: row.qualifying_date,
+    performanceMonth: row.performance_month,
+    creditedSf: Number(row.credited_sf),
+    attributionBasis: row.attribution_basis,
+    sourceObservedAt: row.source_observed_at ?? null,
+    reversalOfId: row.reversal_of_id ?? null,
+    status: row.status || "credited",
+    createdAt: row.created_at
   };
 }
 

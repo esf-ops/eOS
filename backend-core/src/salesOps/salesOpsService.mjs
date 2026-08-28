@@ -48,6 +48,7 @@ import { ingestIncrementalItem, runFullMondayReconcile } from "./salesOpsMondayR
 import { reprojectAccountsFromMirror } from "./salesOpsMondayBatch.mjs";
 import { createReconcileProgress, reconcileStatusFromSyncState } from "./salesOpsMondayProgress.mjs";
 import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
+import { assembleTeamPerformance, assembleUserPerformance, loadIdentityAudit } from "./salesOpsPerformanceQuery.mjs";
 
 export { SalesOpsError };
 
@@ -266,6 +267,97 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const bundle = await loadEffectiveBundle(actor.organizationId, actor.userId);
       if (!bundle) throw new SalesOpsError("No active sales plan is assigned.", 404, "no_plan");
       return bundle;
+    },
+
+    async getMyPerformance(user, { period = null, includeAccounts = false } = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      return assembleUserPerformance(store, {
+        organizationId: actor.organizationId,
+        userId: actor.userId,
+        now: typeof now === "function" ? now() : now,
+        period,
+        includeAccounts
+      });
+    },
+
+    async getScopedPerformance(user, targetUserId, { period = null, includeAccounts = false } = {}) {
+      const actor = actorFromUser(user);
+      await canAccessUser(actor, targetUserId);
+      return assembleUserPerformance(store, {
+        organizationId: actor.organizationId,
+        userId: String(targetUserId),
+        now: typeof now === "function" ? now() : now,
+        period,
+        includeAccounts
+      });
+    },
+
+    async getTeamPerformance(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      let userIds;
+      let plans = null;
+      let mappings = [];
+      if (isOrgAdminRole(actor.role)) {
+        const [orgPlans, mapRows] = await Promise.all([
+          store.listPlansForOrg(actor.organizationId),
+          typeof store.listRepMappings === "function" ? store.listRepMappings(actor.organizationId) : []
+        ]);
+        plans = orgPlans;
+        mappings = mapRows || [];
+        userIds = [...new Set([...orgPlans.map((p) => p.userId), ...mappings.map((m) => m.userId)].filter(Boolean))];
+      } else {
+        const [reports, mapRows] = await Promise.all([
+          store.listReportsForManager(actor.organizationId, actor.userId),
+          typeof store.listRepMappings === "function" ? store.listRepMappings(actor.organizationId) : []
+        ]);
+        if (!reports.length) throw NOT_FOUND();
+        mappings = mapRows || [];
+        userIds = [actor.userId, ...reports.map((r) => r.reportUserId)];
+      }
+      const assembled = await assembleTeamPerformance(store, {
+        organizationId: actor.organizationId,
+        userIds,
+        plans,
+        now: typeof now === "function" ? now() : now
+      });
+      const labelByUser = new Map(mappings.map((m) => [String(m.userId), m.salespersonLabel || null]));
+      return {
+        ...assembled,
+        rows: (assembled.rows || []).map((row) => ({
+          ...row,
+          displayName: labelByUser.get(String(row.userId)) || null
+        }))
+      };
+    },
+
+    async getIdentityAudit(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      return loadIdentityAudit(store, actor.organizationId);
+    },
+
+    async listAdminPeople(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) {
+        const reports = await store.listReportsForManager(actor.organizationId, actor.userId);
+        if (!reports.length) throw NOT_FOUND();
+      }
+      const mappings = typeof store.listRepMappings === "function" ? await store.listRepMappings(actor.organizationId) : [];
+      return mappings.map((m) => ({
+        userId: m.userId,
+        mondayUserId: m.mondayUserId,
+        salespersonLabel: m.salespersonLabel || null
+      }));
+    },
+
+    async generateAdminRamp(user, planId, payload) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      return planAdmin.generateRamp(actor, planId, payload || {});
     },
 
     async getMyPlanHistory(user) {

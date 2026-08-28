@@ -21,8 +21,22 @@ import {
   snapshotPeriodTargets,
   SalesOpsError
 } from "./salesOpsPlanLifecycle.mjs";
+import {
+  applyRollingConvenience,
+  generateLinearRamp,
+  mergeExplicitMonthlyTargets,
+  uniquePeriodTargets
+} from "./salesOpsMonths.mjs";
 
 const NOT_FOUND = () => new SalesOpsError("Not found", 404, "not_found");
+
+function periodTargetsOrThrow(rows) {
+  try {
+    return applyRollingConvenience(uniquePeriodTargets(rows));
+  } catch (e) {
+    throw new SalesOpsError(e.message || "Invalid monthly targets.", 400, e.code || "period_invalid");
+  }
+}
 
 function defaultInsights() {
   return {
@@ -363,7 +377,17 @@ export function createPlanAdmin({ store, audit, now }) {
       if (template) {
         await applyTemplateContents(store, actor.organizationId, template.id, plan.id);
       } else if (Array.isArray(payload.periodTargets) && payload.periodTargets.length) {
-        await store.replacePeriodTargets(actor.organizationId, plan.id, payload.periodTargets);
+        await store.replacePeriodTargets(
+          actor.organizationId,
+          plan.id,
+          periodTargetsOrThrow(payload.periodTargets)
+        );
+      } else {
+        await store.replacePeriodTargets(
+          actor.organizationId,
+          plan.id,
+          mergeExplicitMonthlyTargets([], startDate, endDate)
+        );
       }
       if (Array.isArray(payload.metricTargets) && payload.metricTargets.length) {
         await store.replaceMetricTargets(actor.organizationId, plan.id, payload.metricTargets);
@@ -409,7 +433,20 @@ export function createPlanAdmin({ store, audit, now }) {
         ? await store.updatePlan(actor.organizationId, plan.id, patch)
         : plan;
       if (Array.isArray(payload.periodTargets)) {
-        await store.replacePeriodTargets(actor.organizationId, plan.id, payload.periodTargets);
+        await store.replacePeriodTargets(
+          actor.organizationId,
+          plan.id,
+          periodTargetsOrThrow(payload.periodTargets)
+        );
+      } else if (patch.startDate || patch.endDate || patch.effectiveStartDate || patch.effectiveEndDate) {
+        const existing = await store.listPeriodTargets(actor.organizationId, plan.id);
+        const rangeStart = updated.effectiveStartDate || updated.startDate;
+        const rangeEnd = updated.effectiveEndDate || updated.endDate;
+        await store.replacePeriodTargets(
+          actor.organizationId,
+          plan.id,
+          mergeExplicitMonthlyTargets(existing, rangeStart, rangeEnd)
+        );
       }
       if (Array.isArray(payload.metricTargets)) {
         await store.replaceMetricTargets(actor.organizationId, plan.id, payload.metricTargets);
@@ -548,6 +585,35 @@ export function createPlanAdmin({ store, audit, now }) {
         archivedAt: new Date().toISOString()
       });
       await emit(updated, "archived", actor);
+      return loadPlanBundle(store, actor.organizationId, plan.id);
+    },
+
+    async generateRamp(actor, planId, payload = {}) {
+      const plan = await requirePlanForAuthor(actor, planId, { mutate: true });
+      let generated;
+      try {
+        generated = generateLinearRamp({
+          startMonth: payload.startMonth,
+          startSf: payload.startSf,
+          endMonth: payload.endMonth,
+          endSf: payload.endSf
+        });
+      } catch (e) {
+        throw new SalesOpsError(e.message || "Could not generate ramp.", 400, e.code || "ramp_invalid");
+      }
+      const existing = await store.listPeriodTargets(actor.organizationId, plan.id);
+      const byPeriod = new Map(existing.map((r) => [r.period, r]));
+      for (const row of generated) byPeriod.set(row.period, row);
+      const rangeStart = payload.startMonth || plan.effectiveStartDate || plan.startDate;
+      const rangeEnd = payload.endMonth || plan.effectiveEndDate || plan.endDate;
+      const merged = mergeExplicitMonthlyTargets([...byPeriod.values()], rangeStart, rangeEnd);
+      await store.replacePeriodTargets(actor.organizationId, plan.id, merged);
+      const updated = await store.getPlanById(actor.organizationId, plan.id);
+      await emit(updated, "ramp_generated", actor, {
+        startMonth: payload.startMonth,
+        endMonth: payload.endMonth,
+        monthCount: generated.length
+      });
       return loadPlanBundle(store, actor.organizationId, plan.id);
     },
 

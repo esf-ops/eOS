@@ -185,6 +185,25 @@ async function main() {
   assert.equal(Object.prototype.hasOwnProperty.call(ownDetail.account || {}, "rawColumns"), false);
   assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accB.id}`, authAdmin)).status, 200);
 
+  const perfA = await fetch(`${base}/api/sales-ops/me/performance`, authA);
+  assert.equal(perfA.status, 200);
+  const perfBody = await perfA.json();
+  assert.equal(perfBody.ok, true);
+  assert.equal(perfBody.currentMonth.actualSf, null);
+  assert.equal(perfBody.actualSfDefinition.status, "ACTUAL_SF_DEFINITION_REQUIRED");
+  assert.equal((await fetch(`${base}/api/sales-ops/me/performance/months`, authA)).status, 200);
+  assert.equal((await fetch(`${base}/api/sales-ops/me/performance/accounts`, authA)).status, 200);
+  assert.equal((await fetch(`${base}/api/sales-ops/team/${REP_A}/performance`, authB)).status, 404);
+  assert.equal((await fetch(`${base}/api/sales-ops/team/${REP_A}/performance`, authA)).status, 200);
+  assert.equal((await fetch(`${base}/api/sales-ops/team/performance`, authB)).status, 404);
+  assert.equal((await fetch(`${base}/api/sales-ops/team/performance`, authAdmin)).status, 200);
+  assert.equal((await fetch(`${base}/api/sales-ops/admin/identity-audit`, authA)).status, 404);
+  const audit = await fetch(`${base}/api/sales-ops/admin/identity-audit`, authAdmin);
+  assert.equal(audit.status, 200);
+  const auditBody = await audit.json();
+  assert.equal(Object.prototype.hasOwnProperty.call(auditBody, "account_name"), false);
+  assert.ok(typeof auditBody.salesOpsAccountsTotal === "number");
+
   await new Promise((r) => server.close(r));
   console.log("salesOpsHttp.test.mjs: ok");
 }

@@ -4614,4 +4614,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Monday writes, asset content proxy, inbound webhook without `MONDAY_APP_SIGNING_SECRET`, Account Directory 360 financials. |
 | **Impacted** | `app-sales-ops/`, `backend-core/src/salesOps/` tests, `monday-sales-ops.md`, SYSTEM_BLUEPRINT, eliteOS-master-head-map, this doc. |
 
+### 340. Sales Ops monthly goals + gated performance actuals (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | Sales Performance v1 extends the **existing** Sales Ops plan lifecycle. Monthly square-foot goals are stored as explicit `sales_ops_plan_period_targets` rows (`period` = `YYYY-MM`, `installed_target`). Ramp generation is an admin write-time helper only. **Actual SF is not computed from Moraware until a governed qualifying event/date is approved.** Existing Sales dashboard date bases (`created_at_source` / install / completed) remain **rejected proxies** for this head. Attribution, when present, is immutable eliteOS fact rows (`sales_ops_sf_attribution_facts`); current Monday ownership cannot rewrite credited history. Permanent identity stays exact Account Directory links (`monday` `{boardId}:{itemId}`, `moraware` Account ID, `quickbooks_desktop` root ListID). Missing actuals are `null` with `ACTUAL_SF_DEFINITION_REQUIRED` (or other explicit statuses), never coerced to zero. Thera is not a hardcoded tenant; any salesperson can have independent monthly targets. Monday writes, webhooks, and fuzzy linking stay disabled. |
+| **APIs** | `GET /api/sales-ops/me/performance`, `/months`, `/accounts`; `GET /api/sales-ops/team/performance` and `/team/:userId/performance`; `POST /api/sales-ops/admin/plans/:planId/generate-ramp`; `GET /api/sales-ops/admin/identity-audit`. Auth remains `requireAuth` + `requireHeadAccess("sales_ops")` with Brain scope. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_performance_attribution_v3.sql`. Do not rewrite v1/v2/v2.1. |
+| **Out of scope** | Publishing a production Thera plan, choosing fabricated/invoice/created dates as earned-sale credit, Monday/Moraware/QuickBooks writes, automatic fuzzy identity. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, `eliteos_sales_ops_performance_attribution_v3.sql`, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
+
 

@@ -54,8 +54,19 @@ assert.ok(!app.includes("Assign the approved"));
 assert.ok(!app.includes("cedar_valley_2026_2028"));
 assert.ok(!/localStorage\.setItem/.test(app));
 assert.ok(app.includes("20000"), "visible-tab poll interval");
-assert.ok(app.includes("accountListScopeCopy"));
-assert.equal(app.includes("You only see accounts currently assigned to you."), false);
+assert.ok(app.includes("/api/sales-ops/me/performance"));
+assert.ok(app.includes("/api/sales-ops/me/performance/accounts"));
+assert.ok(app.includes("/api/sales-ops/team/performance"));
+assert.ok(app.includes("/api/sales-ops/team/${"));
+assert.ok(app.includes("accounts=1"));
+assert.ok(app.includes("Plan Builder"));
+assert.ok(app.includes("Team Performance"));
+assert.ok(!app.includes("api.moraware.com"));
+assert.ok(!app.includes("quickbooks"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("/api/sales-ops/admin/plans/"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("generate-ramp"));
+assert.ok(!/Thera/.test(app));
+assert.ok(!/Thera/.test(read("src/ui/PlanAdmin.tsx")));
 
 const { accountListScopeCopy } = await import("./lib/accountListScopeCopy.mjs");
 assert.equal(

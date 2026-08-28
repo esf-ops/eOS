@@ -57,6 +57,51 @@ function asText(v: unknown) {
   return v == null ? "" : String(v);
 }
 
+function periodFromDate(value: string) {
+  const s = String(value || "").trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 7);
+  return "";
+}
+
+function addMonths(period: string, delta: number) {
+  const y = Number(period.slice(0, 4));
+  const m = Number(period.slice(5, 7)) - 1 + delta;
+  const d = new Date(Date.UTC(y, m, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function enumerateMonths(start: string, end: string) {
+  const a = periodFromDate(start);
+  const b = periodFromDate(end);
+  if (!a || !b || a > b) return [];
+  const out: string[] = [];
+  let cur = a;
+  while (cur <= b && out.length < 240) {
+    out.push(cur);
+    cur = addMonths(cur, 1);
+  }
+  return out;
+}
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function toPeriodRow(period: string, installedTarget = 0, extras: Partial<PeriodTarget> = {}): PeriodTarget {
+  return {
+    period,
+    label: extras.label || MONTH_LABELS[Number(period.slice(5, 7)) - 1] || period,
+    year: extras.year || period.slice(0, 4),
+    installedTarget: Number(installedTarget || 0),
+    rollingThreeMonthTarget: Number(extras.rollingThreeMonthTarget || 0),
+    qualifiedPipelineTarget: Number(extras.qualifiedPipelineTarget || 0)
+  };
+}
+
+function mergeMonths(existing: PeriodTarget[], start: string, end: string) {
+  const byPeriod = new Map(existing.filter((r) => r.period).map((r) => [r.period, r]));
+  return enumerateMonths(start, end).map((period) => byPeriod.get(period) || toPeriodRow(period, 0));
+}
+
 function SalesPlanPreview({ bundle }: { bundle: PlanBundle }) {
   const plan = bundle.plan || {};
   const copy = bundle.planCopy || {};
@@ -111,7 +156,8 @@ export default function PlanAdmin({
   const [filterYear, setFilterYear] = useState("");
   const [filterManager, setFilterManager] = useState("");
   const [createUserId, setCreateUserId] = useState("");
-  const [createSource, setCreateSource] = useState<"blank" | "prototype" | string>("prototype");
+  const [createSource, setCreateSource] = useState<"blank" | "prototype" | string>("blank");
+  const [people, setPeople] = useState<Array<{ userId: string; salespersonLabel?: string | null }>>([]);
 
   const [form, setForm] = useState({
     planName: "",
@@ -138,8 +184,12 @@ export default function PlanAdmin({
     monthly: "",
     quarterly: ""
   });
-  const [periodText, setPeriodText] = useState("");
+  const [periodRows, setPeriodRows] = useState<PeriodTarget[]>([]);
   const [metricText, setMetricText] = useState("");
+  const [rampStart, setRampStart] = useState("");
+  const [rampEnd, setRampEnd] = useState("");
+  const [rampStartSf, setRampStartSf] = useState("");
+  const [rampEndSf, setRampEndSf] = useState("");
 
   const loadList = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -151,6 +201,14 @@ export default function PlanAdmin({
     setPlans(data.plans || []);
     const tpl = (await apiGet("/api/sales-ops/admin/templates", token)) as { templates: Array<Record<string, unknown>> };
     setTemplates(tpl.templates || []);
+    try {
+      const peopleRes = (await apiGet("/api/sales-ops/admin/people", token)) as {
+        people: Array<{ userId: string; salespersonLabel?: string | null }>;
+      };
+      setPeople(peopleRes.people || []);
+    } catch {
+      setPeople([]);
+    }
   }, [token, filterStatus, filterUser, filterYear, filterManager]);
 
   const loadPlan = useCallback(
@@ -186,7 +244,10 @@ export default function PlanAdmin({
         monthly: rhythms.monthly || "",
         quarterly: rhythms.quarterly || ""
       });
-      setPeriodText(JSON.stringify(data.periodTargets || [], null, 2));
+      setPeriodRows(mergeMonths(data.periodTargets || [], asText(plan.startDate), asText(plan.endDate)));
+      const periods = data.periodTargets || [];
+      setRampStart(periods[0]?.period || asText(plan.startDate).slice(0, 7));
+      setRampEnd(periods[periods.length - 1]?.period || asText(plan.endDate).slice(0, 7));
       setMetricText(JSON.stringify(data.metricTargets || [], null, 2));
     },
     [token]
@@ -235,13 +296,12 @@ export default function PlanAdmin({
   async function saveDraft(e: FormEvent) {
     e.preventDefault();
     if (!selectedId) return;
-    let periodTargets: PeriodTarget[] = [];
+    let periodTargets: PeriodTarget[] = periodRows;
     let metricTargets: MetricTarget[] = [];
     try {
-      periodTargets = JSON.parse(periodText || "[]");
       metricTargets = JSON.parse(metricText || "[]");
     } catch {
-      setError("Period and KPI targets must be valid JSON.");
+      setError("KPI targets must be valid JSON.");
       return;
     }
     let commissionRules = {};
@@ -305,8 +365,19 @@ export default function PlanAdmin({
       <form className="admin-panel" onSubmit={(e) => void createPlan(e)}>
         <p className="kicker">Create plan</p>
         <label>
-          Salesperson user id
-          <input value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} placeholder="UUID" />
+          Salesperson
+          {people.length ? (
+            <select value={createUserId} onChange={(e) => setCreateUserId(e.target.value)}>
+              <option value="">Select a mapped salesperson</option>
+              {people.map((p) => (
+                <option key={p.userId} value={p.userId}>
+                  {p.salespersonLabel || p.userId}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} placeholder="Salesperson user UUID" />
+          )}
         </label>
         <label>
           Starting point
@@ -411,11 +482,29 @@ export default function PlanAdmin({
                 </label>
                 <label>
                   Start
-                  <input type="date" value={form.startDate} disabled={!editable} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+                  <input
+                    type="date"
+                    value={form.startDate}
+                    disabled={!editable}
+                    onChange={(e) => {
+                      const startDate = e.target.value;
+                      setForm({ ...form, startDate });
+                      setPeriodRows((rows) => mergeMonths(rows, startDate, form.endDate));
+                    }}
+                  />
                 </label>
                 <label>
                   End
-                  <input type="date" value={form.endDate} disabled={!editable} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+                  <input
+                    type="date"
+                    value={form.endDate}
+                    disabled={!editable}
+                    onChange={(e) => {
+                      const endDate = e.target.value;
+                      setForm({ ...form, endDate });
+                      setPeriodRows((rows) => mergeMonths(rows, form.startDate, endDate));
+                    }}
+                  />
                 </label>
               </div>
             </section>
@@ -443,8 +532,69 @@ export default function PlanAdmin({
             </section>
 
             <section>
-              <p className="kicker">3. Period targets</p>
-              <textarea className="json-area" value={periodText} disabled={!editable} onChange={(e) => setPeriodText(e.target.value)} />
+              <p className="kicker">3. Monthly goals</p>
+              <p className="workspace-muted">Each calendar month is stored as its own target. Ramp generation writes those month values; it is not the runtime formula.</p>
+              {editable && (
+                <div className="field-grid four ramp-controls">
+                  <label>
+                    Ramp start month
+                    <input type="month" value={rampStart} onChange={(e) => setRampStart(e.target.value)} />
+                  </label>
+                  <label>
+                    Start SF
+                    <input value={rampStartSf} onChange={(e) => setRampStartSf(e.target.value)} />
+                  </label>
+                  <label>
+                    Ramp end month
+                    <input type="month" value={rampEnd} onChange={(e) => setRampEnd(e.target.value)} />
+                  </label>
+                  <label>
+                    End SF
+                    <input value={rampEndSf} onChange={(e) => setRampEndSf(e.target.value)} />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() =>
+                        apiPost(`/api/sales-ops/admin/plans/${selectedId}/generate-ramp`, token, {
+                          startMonth: rampStart,
+                          startSf: Number(rampStartSf),
+                          endMonth: rampEnd,
+                          endSf: Number(rampEndSf)
+                        })
+                      )
+                    }
+                  >
+                    Generate ramp
+                  </button>
+                </div>
+              )}
+              <div className="month-goal-table" role="table" aria-label="Monthly square-foot goals">
+                <div className="month-goal-head" role="row">
+                  <span>Month</span>
+                  <span>Goal SF</span>
+                </div>
+                {periodRows.map((row, idx) => (
+                  <label key={row.period} className="month-goal-row" role="row">
+                    <span>
+                      {row.label} {row.year}
+                      <small>{row.period}</small>
+                    </span>
+                    <input
+                      inputMode="decimal"
+                      disabled={!editable}
+                      value={String(row.installedTarget)}
+                      onChange={(e) => {
+                        const next = [...periodRows];
+                        next[idx] = { ...row, installedTarget: Number(e.target.value || 0) };
+                        setPeriodRows(next);
+                      }}
+                    />
+                  </label>
+                ))}
+                {periodRows.length === 0 && <p>Set start and end dates to create one target per month.</p>}
+              </div>
             </section>
 
             <section>

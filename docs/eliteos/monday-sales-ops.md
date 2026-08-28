@@ -9,6 +9,7 @@ Sales Ops talks to Monday.com **only through the eliteOS Brain**. The browser ne
 | Canonical eliteOS account identity | Account Directory UUID (`account_directory_accounts.id`) |
 | CRM source (assignment, operational fields, updates, files, docs, subitems) | Monday Account Master List |
 | Sales plan, ramp, KPI standards, scorecards, intelligence, plan lifecycle | eliteOS (never Monday) |
+| Historical credited SF | eliteOS attribution facts — never today's Monday owner |
 | Sales Ops fast list/filter | Layer B projection `sales_ops_accounts` (not a customer master) |
 
 Monday remains a **source system**. Do **not** create a new customer master. Do **not** treat Monday item IDs as canonical eliteOS identity.

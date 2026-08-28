@@ -42,6 +42,8 @@ export function createSalesOpsMemoryStore() {
   const mondayGroups = new Map();
   const mondaySyncState = new Map();
   const mondayAdLinks = new Map();
+  const externalLinks = new Map();
+  const attributionFacts = new Map();
   const metrics = {
     eavSelectChunks: 0,
     accountUpsertChunks: 0,
@@ -907,6 +909,88 @@ export function createSalesOpsMemoryStore() {
         unlinkedCount: acc.filter((a) => !a.accountDirectoryAccountId).length,
         unmappedMondayPeopleCount: people.filter((p) => !mappedIds.has(String(p.mondayUserId))).length
       };
+    },
+
+    async listAccountIdentityRows(organizationId) {
+      return [...accounts.values()]
+        .filter((a) => a.organizationId === organizationId && !a.archived && (a.sourceState || "active") === "active")
+        .map((a) => ({
+          id: a.id,
+          mondayBoardId: a.mondayBoardId,
+          mondayItemId: a.mondayItemId,
+          accountDirectoryAccountId: a.accountDirectoryAccountId ?? null,
+          assignedUserId: a.assignedUserId ?? null
+        }));
+    },
+
+    seedExternalLink(organizationId, externalSystem, externalId, accountId) {
+      const key = `${organizationId}:${externalSystem}:${externalId}`;
+      externalLinks.set(key, {
+        organizationId,
+        externalSystem,
+        externalId: String(externalId),
+        accountId,
+        isActive: true
+      });
+    },
+    async listActiveExternalLinks(organizationId, externalSystem) {
+      const system = String(externalSystem);
+      if (system === "monday") {
+        return [...mondayAdLinks.values()]
+          .filter((r) => r.organizationId === organizationId)
+          .map((r) => ({
+            accountId: r.accountId,
+            externalId: `${r.boardId}:${r.itemId}`,
+            mondayItemId: String(r.itemId),
+            boardId: r.boardId
+          }));
+      }
+      return [...externalLinks.values()]
+        .filter((r) => r.organizationId === organizationId && r.externalSystem === system && r.isActive !== false)
+        .map((r) => ({ accountId: r.accountId, externalId: r.externalId }));
+    },
+
+    async listPeriodTargetsForPlanIds(organizationId, planIds) {
+      const ids = new Set((planIds || []).map(String));
+      return [...periodTargets.values()]
+        .filter((r) => r.organizationId === organizationId && ids.has(String(r.planId)))
+        .sort((a, b) => a.period.localeCompare(b.period))
+        .map(clone);
+    },
+
+    async insertAttributionFact(row) {
+      const rec = {
+        id: row.id || randomUUID(),
+        organizationId: row.organizationId,
+        salespersonUserId: row.salespersonUserId,
+        accountDirectoryAccountId: row.accountDirectoryAccountId,
+        salesOpsAccountId: row.salesOpsAccountId ?? null,
+        morawareAccountId: row.morawareAccountId ?? null,
+        morawareJobId: row.morawareJobId ?? null,
+        qualifyingEvent: row.qualifyingEvent,
+        qualifyingDate: row.qualifyingDate,
+        performanceMonth: row.performanceMonth,
+        creditedSf: Number(row.creditedSf),
+        attributionBasis: row.attributionBasis || "explicit_fact",
+        sourceObservedAt: row.sourceObservedAt ?? nowIso(),
+        reversalOfId: row.reversalOfId ?? null,
+        status: row.status || "credited",
+        createdAt: nowIso()
+      };
+      attributionFacts.set(rec.id, rec);
+      return clone(rec);
+    },
+    async listAttributionFacts(organizationId, { userIds = null, periodFrom = null, periodTo = null } = {}) {
+      const allow = userIds ? new Set(userIds.map(String)) : null;
+      return [...attributionFacts.values()]
+        .filter((r) => {
+          if (r.organizationId !== organizationId) return false;
+          if (allow && !allow.has(String(r.salespersonUserId))) return false;
+          if (periodFrom && r.performanceMonth < periodFrom) return false;
+          if (periodTo && r.performanceMonth > periodTo) return false;
+          return true;
+        })
+        .map(clone);
     }
   };
 }
