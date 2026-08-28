@@ -43,7 +43,7 @@
     "account-directory:status:reconcile:dry-run": "node backend-core/src/scripts/accountDirectoryStatusReconcileDryRun.mjs --dry-run",
     "eos:build:account-directory": "npm run build --prefix app-account-directory",
     "eos:test:hr-workforce": "node backend-core/src/hr/workforceGradeEngine.test.mjs && node backend-core/src/hr/workforceDepartments.test.mjs && node backend-core/src/hr/workforceManagerialFinancials.test.mjs && node backend-core/src/hr/workforceRoster.test.mjs && node backend-core/src/hr/hrWorkforceApi.test.mjs",
-    "eos:test:sales-ops": "node backend-core/src/salesOps/salesOps.test.mjs && node backend-core/src/salesOps/salesOpsHttp.test.mjs && node backend-core/src/salesOps/salesOpsPerformance.test.mjs && node backend-core/src/salesOps/salesOpsIdentityReview.test.mjs && node backend-core/src/salesOps/salesOpsMondayMirror.test.mjs && node backend-core/src/salesOps/salesOpsMondayReconcile.test.mjs && npm test --prefix app-sales-ops",
+    "eos:test:sales-ops": "node backend-core/src/salesOps/salesOps.test.mjs && node backend-core/src/salesOps/salesOpsHttp.test.mjs && node backend-core/src/salesOps/salesOpsPerformance.test.mjs && node backend-core/src/salesOps/salesOpsIdentityReview.test.mjs && node backend-core/src/salesOps/salesOpsMondayMirror.test.mjs && node backend-core/src/salesOps/salesOpsMondayReconcile.test.mjs && node backend-core/src/salesOps/salesOpsMondaySchedule.test.mjs && npm test --prefix app-sales-ops",
     "eos:audit:coverage": "node backend-core/src/scripts/auditBrainCoverage.js",
     "eos:audit:operational": "node backend-core/src/scripts/auditOperationalCoverage.js",
     "eos:audit:operational-expansion": "node backend-core/src/scripts/auditOperationalExpansionCoverage.js",

@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  createMemoryMondayScheduleLockBackend,
+  createMondayScheduleLockMethods
+} from "./salesOpsMondayScheduleLock.mjs";
 
 function nowIso() {
   return new Date().toISOString();
@@ -41,6 +45,7 @@ export function createSalesOpsMemoryStore() {
   const mondayPeople = new Map();
   const mondayGroups = new Map();
   const mondaySyncState = new Map();
+  const mondayScheduleLocks = new Map();
   const mondayAdLinks = new Map();
   const externalLinks = new Map();
   const attributionFacts = new Map();
@@ -58,6 +63,7 @@ export function createSalesOpsMemoryStore() {
     columnUpsertChunks: 0,
     itemUpsertChunks: 0
   };
+  const mondayLock = createMondayScheduleLockMethods(createMemoryMondayScheduleLockBackend(mondayScheduleLocks));
 
   function orgEq(row, organizationId) {
     return row && row.organizationId === organizationId ? row : null;
@@ -300,6 +306,11 @@ export function createSalesOpsMemoryStore() {
     },
     async getMondayConfig(organizationId) {
       return clone(mondayConfig.get(organizationId) || null);
+    },
+    async listMondayReadConfigs() {
+      return [...mondayConfig.values()]
+        .filter((rec) => rec.readEnabled !== false && rec.accountMasterBoardId)
+        .map(clone);
     },
     async getOrganizationIdByBoardId(boardId) {
       const id = String(boardId ?? "").trim();
@@ -1185,6 +1196,7 @@ export function createSalesOpsMemoryStore() {
       return [...commissionReports.values()]
         .filter((r) => r.organizationId === organizationId && (!userId || r.userId === userId))
         .map(clone);
-    }
+    },
+    ...mondayLock
   };
 }

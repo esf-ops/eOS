@@ -59,6 +59,26 @@ Do **not** create production Monday webhooks in this phase. The webhook route re
 
 `MONDAY_APP_SIGNING_SECRET` is currently **missing** on production Brain. Therefore `webhook_ids` stay empty and inbound board subscriptions are not created. Future enablement (separate approval): store the App signing secret only on Brain, confirm the challenge/JWT path, then create the board webhook and persist its id in `sales_ops_monday_config.webhook_ids`. Do not invent a secret, do not put it in a head, and do not enable Monday **writes** as part of webhook setup.
 
+## Scheduled READ-ONLY sync
+
+Brain (`backend-core`) owns Monday schedules via **Vercel Cron** on the existing Brain project. Do **not** put Monday sync on the Moraware Mac mini. Do not create a second worker host.
+
+| Job | Path | Cadence (UTC) | What it does |
+|-----|------|----------------|--------------|
+| `LIGHT_ACCOUNT` | `GET /api/internal/sales-ops/monday-sync/light` | `*/5 * * * *` | Parent items + column values + Sales Executive → exact eliteOS person map → `sales_ops_accounts.assigned_user_id`. No updates/files/docs history. |
+| `DEEP_REFRESH` | `GET /api/internal/sales-ops/monday-sync/deep` | `15 * * * *` | Reuses `runFullMondayReconcile` without membership/unavailable. |
+| `FULL_RECONCILE` | `GET /api/internal/sales-ops/monday-sync/full` | `0 8 * * *` | Complete census including membership only after success. Nightly repair/safety net. |
+
+Authorization matches Takeoff: `CRON_SECRET` / `EOS_CRON_SECRET` / `ELITEOS_CRON_SECRET` as `Authorization: Bearer` or `x-eos-cron-secret`. There is no unauthenticated admin trigger.
+
+Concurrency: org-scoped lock `eos_sync_locks.lock_name = sales_ops_monday:{organizationId}` (not `moraware_population`). Light defers if deep/full holds the lock. Stale locks recover when `expires_at` has elapsed. Two lights cannot overlap.
+
+Current Monday ownership controls current CRM visibility only. Historical attribution / commission / scorecard facts do not move. Unmapped Monday people fail closed (`assigned_user_id` null). Failed light/deep/partial census does not mark membership unavailable.
+
+`write_enabled` stays false. `webhook_ids` stay empty until `MONDAY_APP_SIGNING_SECRET` is present and webhook enablement is separately approved. A future signed webhook may call targeted `runLightMondayAccountSync({ itemIds })`; the three schedules remain safety nets.
+
+Admin `GET /api/sales-ops/admin/sync/status` and `GET /api/sales-ops/integration/health` expose `schedules.LIGHT_ACCOUNT|DEEP_REFRESH|FULL_RECONCILE` plus `ownershipStale` (light success older than 15 minutes).
+
 ## Reconciliation
 
 Full census (maintenance, not per-page browsing):

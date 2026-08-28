@@ -6,6 +6,10 @@
  */
 
 import { SALES_OPS_MONDAY_EXTERNAL_SYSTEM, mondayExternalId } from "./salesOpsConstants.js";
+import {
+  createMondayScheduleLockMethods,
+  createSupabaseMondayScheduleLockBackend
+} from "./salesOpsMondayScheduleLock.mjs";
 
 const ACCOUNT_LIST_SELECT = [
   "id",
@@ -387,6 +391,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
     throw new Error("createSalesOpsSupabaseStore: getSupabase required");
   }
   const db = () => getSupabase();
+  const mondayLock = createMondayScheduleLockMethods(() => createSupabaseMondayScheduleLockBackend(db()));
 
   return {
     kind: "supabase",
@@ -754,6 +759,16 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .maybeSingle();
       if (error) throwDb(error, "Could not load Monday Sales Ops config.");
       return mapMondayConfig(data);
+    },
+
+    async listMondayReadConfigs() {
+      const { data, error } = await db()
+        .from("sales_ops_monday_config")
+        .select("*")
+        .eq("read_enabled", true)
+        .not("account_master_board_id", "is", null);
+      if (error) throwDb(error, "Could not list Monday Sales Ops configs.");
+      return (data || []).map(mapMondayConfig).filter((row) => row?.accountMasterBoardId);
     },
 
     async getOrganizationIdByBoardId(boardId) {
@@ -2301,7 +2316,9 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       const { data, error } = await q;
       if (error) throwDb(error, "Could not list commission reports.");
       return data || [];
-    }
+    },
+
+    ...mondayLock
   };
 }
 

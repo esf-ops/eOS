@@ -153,7 +153,7 @@ async function enrichDocsBatched(store, monday, organizationId, progress) {
   }
 }
 
-export async function runFullMondayReconcile(store, monday, { organizationId, cfg, actorUserId = null, markUnseen = true, progress: existingProgress = null, parentBoard: existingParentBoard = null } = {}) {
+export async function runFullMondayReconcile(store, monday, { organizationId, cfg, actorUserId = null, markUnseen = true, syncMode = "full", progress: existingProgress = null, parentBoard: existingParentBoard = null } = {}) {
   if (!cfg?.accountMasterBoardId) {
     throw new SalesOpsError("Account Master List board is not configured.", 409, "configuration_needed");
   }
@@ -171,7 +171,7 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
       store,
       organizationId,
       mondayBoardId: boardId,
-      syncMode: "full"
+      syncMode: syncMode === "deep" ? "deep" : "full"
     });
   if (typeof monday.setHooks === "function") {
     monday.setHooks({
@@ -327,21 +327,29 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
 
     await enrichDocsBatched(store, monday, organizationId, progress);
 
-    await progress.setStage("membership_reconcile");
-    if (markUnseen && typeof store.markUnseenMondaySourcesUnavailable === "function") {
-      await store.markUnseenMondaySourcesUnavailable(organizationId, boardId, censusStartedAt);
+    const applyMembership = Boolean(markUnseen) && syncMode !== "deep";
+    if (applyMembership) {
+      await progress.setStage("membership_reconcile");
+      if (typeof store.markUnseenMondaySourcesUnavailable === "function") {
+        await store.markUnseenMondaySourcesUnavailable(organizationId, boardId, censusStartedAt);
+      }
     }
 
     const doneIso = new Date().toISOString();
+    const mode = syncMode === "deep" ? "deep" : "full";
     await store.upsertMondayConfig({
       organizationId,
       boardSchema: { parent: parentSchema, subitem: subitemSchema },
       schemaInspectedAt: nowIso,
-      lastFullReconcileAt: doneIso,
-      lastFullSyncAt: doneIso,
+      ...(applyMembership
+        ? {
+            lastFullReconcileAt: doneIso,
+            lastFullSyncAt: doneIso,
+            membershipHash: `census:${censusStartedAt}`
+          }
+        : {}),
       lastSuccessAt: doneIso,
-      lastError: null,
-      membershipHash: `census:${censusStartedAt}`
+      lastError: null
     });
     const snapshot = await progress.complete({
       parentProcessed: parentCount,
@@ -356,9 +364,9 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
       await store.upsertMondaySyncState({
         organizationId,
         mondayBoardId: boardId,
-        syncMode: "full",
+        syncMode: mode,
         lastSuccessfulReconcileAt: doneIso,
-        lastCompleteCensusAt: doneIso,
+        ...(applyMembership ? { lastCompleteCensusAt: doneIso } : {}),
         lastError: null,
         metadata: snapshot
       });
@@ -367,7 +375,7 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
       organizationId,
       direction: "monday_to_eliteos",
       entity: "account",
-      operation: "full_reconcile",
+      operation: mode === "deep" ? "deep_refresh" : "full_reconcile",
       outcome: "success",
       actorUserId,
       metadata: {
@@ -383,19 +391,22 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
     return {
       ok: true,
       complete: true,
+      jobType: mode,
+      scheduleType: mode === "deep" ? "DEEP_REFRESH" : "FULL_RECONCILE",
       count: parentCount,
       columnMap: cfg.columnMap || {},
       progress: snapshot
     };
   } catch (e) {
     const msg = String(e?.message || e);
+    const mode = syncMode === "deep" ? "deep" : "full";
     await progress.fail(e);
     await store.upsertMondayConfig({ organizationId, lastError: msg.slice(0, 500) });
     if (typeof store.upsertMondaySyncState === "function") {
       await store.upsertMondaySyncState({
         organizationId,
         mondayBoardId: boardId,
-        syncMode: "full",
+        syncMode: mode,
         lastError: msg.slice(0, 500),
         metadata: progress.snapshot
       });
@@ -404,7 +415,7 @@ export async function runFullMondayReconcile(store, monday, { organizationId, cf
       organizationId,
       direction: "monday_to_eliteos",
       entity: "account",
-      operation: "full_reconcile",
+      operation: mode === "deep" ? "deep_refresh" : "full_reconcile",
       outcome: "error",
       error: msg.slice(0, 500),
       actorUserId

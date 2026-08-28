@@ -47,6 +47,7 @@ import {
 import { ingestIncrementalItem, runFullMondayReconcile } from "./salesOpsMondayReconcile.mjs";
 import { reprojectAccountsFromMirror } from "./salesOpsMondayBatch.mjs";
 import { createReconcileProgress, reconcileStatusFromSyncState } from "./salesOpsMondayProgress.mjs";
+import { loadMondayScheduleStatus, mondayScheduleHealthFields, withMondayScheduleLock } from "./salesOpsMondaySchedule.mjs";
 import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 import { assembleTeamPerformance, assembleUserPerformance, loadIdentityAudit } from "./salesOpsPerformanceQuery.mjs";
 import {
@@ -1119,16 +1120,23 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       }
       if (!mondayClient) throw new SalesOpsError("Monday client is unavailable.", 503, "monday_unavailable");
       try {
-        const board = await mondayClient.inspectBoard(cfg.accountMasterBoardId);
-        const columnMap = resolveColumnMapFromBoard(board?.columns || [], cfg.columnMap || {});
-        await store.upsertMondayConfig({ ...cfg, organizationId, columnMap });
-        return await runFullMondayReconcile(store, mondayClient, {
-          organizationId,
-          cfg: { ...cfg, columnMap, organizationId },
-          actorUserId: actor?.userId ?? null,
-          markUnseen: true,
-          parentBoard: board
+        const locked = await withMondayScheduleLock(store, { organizationId, jobType: "full" }, async () => {
+          const board = await mondayClient.inspectBoard(cfg.accountMasterBoardId);
+          const columnMap = resolveColumnMapFromBoard(board?.columns || [], cfg.columnMap || {});
+          await store.upsertMondayConfig({ ...cfg, organizationId, columnMap });
+          return runFullMondayReconcile(store, mondayClient, {
+            organizationId,
+            cfg: { ...cfg, columnMap, organizationId },
+            actorUserId: actor?.userId ?? null,
+            markUnseen: true,
+            syncMode: "full",
+            parentBoard: board
+          });
         });
+        if (locked.deferred) {
+          throw new SalesOpsError("Monday sync is already running for this organization.", 409, "monday_sync_busy");
+        }
+        return locked.result;
       } catch (e) {
         if (e instanceof SalesOpsError) throw e;
         throw new SalesOpsError("Monday sync failed.", 502, "monday_sync_failed");
@@ -1191,10 +1199,13 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
             (await store.getMondaySyncState(actor.organizationId, boardId, "reproject"))
           : null;
       const reconcile = reconcileStatusFromSyncState(state);
+      const schedules = await loadMondayScheduleStatus(store, actor.organizationId, boardId);
       return {
         writeEnabled: isMondayWriteEnabled(cfg),
         readEnabled: isMondayReadEnabled(cfg),
-        reconcile
+        webhookEnabled: Boolean(cfg?.webhookIds?.length),
+        reconcile,
+        ...mondayScheduleHealthFields({ cfg, schedules })
       };
     },
 
@@ -1320,6 +1331,8 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       }
       if (!mondayClient) return { ok: true, skipped: "no_client" };
       try {
+        // Future signed webhook (separate enablement): targeted LIGHT_ACCOUNT via
+        // runLightMondayAccountSync({ itemIds: [mondayItemId] }). Schedules remain the safety net.
         const result = await ingestIncrementalItem(store, mondayClient, {
           organizationId: org,
           cfg,
@@ -1350,42 +1363,54 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       assertActor(actor);
       if (!isOrgAdminRole(actor.role)) {
         const cfg = await store.getMondayConfig(actor.organizationId);
+        const boardId = cfg?.accountMasterBoardId ? String(cfg.accountMasterBoardId) : "";
+        const schedules = await loadMondayScheduleStatus(store, actor.organizationId, boardId);
+        const health = mondayScheduleHealthFields({ cfg, schedules });
         return {
           mondayEnabled: Boolean(cfg?.enabled),
           mondayReadEnabled: isMondayReadEnabled(cfg),
           mondayWriteEnabled: isMondayWriteEnabled(cfg),
-          lastSuccessAt: cfg?.lastSuccessAt ?? null,
-          lastFullReconcileAt: cfg?.lastFullReconcileAt ?? null,
-          stale: Boolean(cfg?.lastSuccessAt) ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000 : true
+          lastSuccessAt: health.lastSuccessAt,
+          lastFullReconcileAt: health.lastFullReconcileAt,
+          stale: Boolean(cfg?.lastSuccessAt)
+            ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000
+            : true,
+          ownershipStale: health.ownershipStale
         };
       }
       const cfg = await store.getMondayConfig(actor.organizationId);
       const stats = typeof store.countMondayMirrorStats === "function"
         ? await store.countMondayMirrorStats(actor.organizationId)
         : {};
-      const stale = Boolean(cfg?.lastSuccessAt)
-        ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000
-        : true;
       const boardId = cfg?.accountMasterBoardId ? String(cfg.accountMasterBoardId) : "";
       const syncState =
         boardId && typeof store.getMondaySyncState === "function"
           ? await store.getMondaySyncState(actor.organizationId, boardId, "full")
           : null;
+      const schedules = await loadMondayScheduleStatus(store, actor.organizationId, boardId);
+      const health = mondayScheduleHealthFields({ cfg, schedules });
       return {
         parentBoardId: cfg?.accountMasterBoardId ?? null,
         subitemBoardId: cfg?.subitemBoardId ?? null,
         readEnabled: isMondayReadEnabled(cfg),
         writeEnabled: isMondayWriteEnabled(cfg),
-        lastFullReconcileAt: cfg?.lastFullReconcileAt ?? cfg?.lastFullSyncAt ?? null,
+        webhookEnabled: Boolean(cfg?.webhookIds?.length),
+        lastFullReconcileAt: health.lastFullReconcileAt,
         lastIncrementalEventAt: cfg?.lastWebhookAt ?? null,
-        lastSuccessAt: cfg?.lastSuccessAt ?? null,
+        lastSuccessAt: health.lastSuccessAt,
         lastError: cfg?.lastError ? String(cfg.lastError).slice(0, 500) : null,
         schemaInspectedAt: cfg?.schemaInspectedAt ?? null,
         mirrorItemCount: stats.mirrorItemCount ?? 0,
         linkedAccountDirectoryCount: stats.linkedAccountDirectoryCount ?? 0,
         unlinkedCount: stats.unlinkedCount ?? 0,
         unmappedMondayPeopleCount: stats.unmappedMondayPeopleCount ?? 0,
-        stale,
+        stale: Boolean(cfg?.lastSuccessAt)
+          ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000
+          : true,
+        ownershipStale: health.ownershipStale,
+        deepRefreshStale: health.deepRefreshStale,
+        fullReconcileStale: health.fullReconcileStale,
+        schedules: health.schedules,
         reconcile: reconcileStatusFromSyncState(syncState)
       };
     }

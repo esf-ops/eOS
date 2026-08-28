@@ -4668,4 +4668,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Changing the hourly LaunchAgent, adding cron, Moraware/Monday/QuickBooks writes, kicking a full 60–90 minute pipeline solely to prove launchd. |
 | **Impacted** | `deploy/moraware-worker/*`, `runScheduledMorawarePipeline.js`, this doc, SYSTEM_BLUEPRINT. |
 
+### 345. Monday Sales Ops READ-ONLY sync is a Brain/Vercel Cron tiered schedule (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | Monday → Sales Ops synchronization is owned by **Brain / `backend-core` Vercel Cron**, not the Moraware Mac mini and not a new worker. Cadence: `LIGHT_ACCOUNT` every 5 minutes (parent columns + Sales Executive ownership projection only), `DEEP_REFRESH` hourly at minute 15 UTC (existing `runFullMondayReconcile` without membership), `FULL_RECONCILE` nightly at 08:00 UTC (complete census; membership/unavailable only after success). Routes: `/api/internal/sales-ops/monday-sync/{light,deep,full}` gated by the same cron secret as Takeoff. Org-scoped lock `sales_ops_monday:{organizationId}` on `eos_sync_locks`. Current ownership is current visibility only; historical attribution does not move. Unmapped Monday people fail closed. Writes remain disabled. Webhooks remain disabled (`webhook_ids=[]`) until signing secret enablement is separately approved; schedules stay as the safety net. Vercel `maxDuration` 300s bounds deep/full; if production evidence shows timeout, slow the expensive job rather than adding concurrency. |
+| **Why** | Account ownership changes need ~5 minute freshness without a manual reconcile, without Monday writes, and without a second host. |
+| **Out of scope** | Monday writes, webhook creation, `MONDAY_APP_SIGNING_SECRET` provisioning, running another expensive full census solely to prove the scheduler. |
+| **Impacted** | `backend-core` Sales Ops Monday modules, `backend-core/vercel.json`, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
+
 

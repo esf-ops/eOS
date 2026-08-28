@@ -13,6 +13,18 @@
     {
       "path": "/api/internal/takeoff/process-queued",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/sales-ops/monday-sync/light",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/sales-ops/monday-sync/deep",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/internal/sales-ops/monday-sync/full",
+      "schedule": "0 8 * * *"
     }
   ],
   "git": {

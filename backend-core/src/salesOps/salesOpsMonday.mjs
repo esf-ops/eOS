@@ -273,6 +273,33 @@ export function createSalesOpsMondayClient(overrides = {}) {
       return json?.data?.boards?.[0] || null;
     },
 
+    async listBoardItemsPageLight(boardId, cursor = null) {
+      if (overrides.listBoardItemsPageLight) return overrides.listBoardItemsPageLight(boardId, cursor);
+      if (overrides.listBoardItemsPage) return this.listBoardItemsPage(boardId, cursor);
+      if (overrides.listBoardItems) {
+        if (cursor) return { items: [], cursor: null };
+        return { items: (await overrides.listBoardItems(boardId)) || [], cursor: null };
+      }
+      const json = await gql(
+        `query ($ids: [ID!]!, $cursor: String) {
+          boards(ids: $ids) {
+            items_page(limit: 50, cursor: $cursor) {
+              cursor
+              items {
+                id name url created_at updated_at
+                board { id }
+                group { id title }
+                column_values { id text type value }
+              }
+            }
+          }
+        }`,
+        { ids: [String(boardId)], cursor }
+      );
+      const page = json?.data?.boards?.[0]?.items_page;
+      return { items: page?.items || [], cursor: page?.cursor || null };
+    },
+
     async listBoardItemsPage(boardId, cursor = null) {
       if (overrides.listBoardItemsPage) return overrides.listBoardItemsPage(boardId, cursor);
       if (overrides.listBoardItems) {
@@ -318,6 +345,32 @@ export function createSalesOpsMondayClient(overrides = {}) {
         cursor = page.cursor || null;
       } while (cursor);
       return items;
+    },
+
+    async getItemsLight(itemIds) {
+      if (overrides.getItemsLight) return overrides.getItemsLight(itemIds);
+      const ids = [...new Set((itemIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      if (overrides.getItem) {
+        const out = [];
+        for (const id of ids) {
+          const item = await overrides.getItem(id);
+          if (item) out.push(item);
+        }
+        return out;
+      }
+      const json = await gql(
+        `query ($ids: [ID!]!) {
+          items(ids: $ids) {
+            id name url created_at updated_at
+            board { id }
+            group { id title }
+            column_values { id text type value }
+          }
+        }`,
+        { ids }
+      );
+      return json?.data?.items || [];
     },
 
     async getItem(itemId) {
