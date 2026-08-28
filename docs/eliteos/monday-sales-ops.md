@@ -91,6 +91,8 @@ Lazy heavy (paginated, ownership-gated):
 - `.../docs`
 - `.../activity`
 
+The Sales Ops head Account 360 workspace lazy-loads those governed endpoints when an account is opened. The list stays a light `/me/accounts` page. File **content** is not proxied; the UI states that download is unavailable. Docs DTO omits `sourceUrl`. Deep links use `#account=<sales_ops_accounts.id>` and unknown/cross-rep UUIDs resolve to a safe not-found state (Brain 404). Authorization remains on Brain.
+
 Admin observability (org admin only):
 
 - `GET /api/sales-ops/admin/sync/status` — durable reconcile run (no PII / no provider payloads)

@@ -285,6 +285,26 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 .source-chip.automated { color: var(--green); border-color: #bfcfc5; }
 .workspace-ops { margin-top: 28px; display: grid; gap: 18px; }
 .workspace-ops form, .workspace-ops .note-composer { display: grid; gap: 10px; padding: 18px; border: 1px solid var(--line); background: #fbfaf7; }
+.workspace-tabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line); }
+.workspace-tabs button { border: 0; background: transparent; padding: 10px 14px; font: 700 10px var(--font-geist-mono), monospace; letter-spacing: .08em; text-transform: uppercase; color: #8a847e; }
+.workspace-tabs button.active { color: var(--ink); box-shadow: inset 0 -2px 0 var(--red); }
+.workspace-section { display: grid; gap: 14px; }
+.workspace-muted { margin: 0; color: #8a847e; font-size: 12px; line-height: 1.5; }
+.workspace-card { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); background: #fbfaf7; }
+.workspace-card-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.workspace-card-top small { color: #8a847e; text-transform: uppercase; letter-spacing: .08em; font: 700 8px var(--font-geist-mono), monospace; }
+.workspace-line { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #eee9e2; font-size: 12px; }
+.workspace-line span { color: #8a847e; }
+.workspace-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); background: #fbfaf7; }
+.workspace-columns > div { padding: 12px 14px; }
+.workspace-columns > div + div { border-left: 1px solid #eee9e2; }
+.workspace-columns > div:nth-child(n+3) { border-top: 1px solid #eee9e2; }
+.workspace-columns span { display: block; margin-bottom: 6px; color: #8a847e; text-transform: uppercase; letter-spacing: .08em; font: 700 8px var(--font-geist-mono), monospace; }
+.account-facts-wide { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 700px) {
+  .workspace-columns, .account-facts-wide { grid-template-columns: 1fr; }
+  .workspace-columns > div + div { border-left: 0; border-top: 1px solid #eee9e2; }
+}
 .activity-row { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid #ddd8d1; font-size: 12px; }
 .activity-row small { color: #8a847e; }
 .field-error { color: var(--red); font-size: 12px; }

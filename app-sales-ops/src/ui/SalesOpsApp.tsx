@@ -1,9 +1,14 @@
-import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import { apiGet, apiPatch, apiPost, apiPut, ApiError } from "../lib/api";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
+import Account360Workspace, {
+  type Account,
+  type AccountWorkspaceState,
+  type WorkspaceSection
+} from "./Account360Workspace";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -41,44 +46,6 @@ type Scorecard = {
   repeatShare: number;
   note: string;
   sources?: Record<string, string>;
-};
-
-type Account = {
-  id: string;
-  accountDirectoryAccountId?: string | null;
-  mondayItemId?: string | null;
-  accountName: string;
-  mondayUrl?: string | null;
-  status?: string | null;
-  lastContact?: string | null;
-  nextContact?: string | null;
-  market?: string | null;
-  branch?: string | null;
-  accountType?: string | null;
-  sampleProgram?: string | null;
-  currentPrimarySupplier?: string | null;
-  primaryPainPoint?: string | null;
-  esfSolution?: string | null;
-  nextStrategicMilestone?: string | null;
-  description?: string | null;
-  syncedAt?: string | null;
-  columns?: Array<{ columnId: string; title?: string | null; type?: string | null; text?: string | null }>;
-  intelligence?: {
-    recommendedTier?: string | null;
-    strategicPlay?: string | null;
-    recommendedMonthlyTarget?: number | null;
-    nextActions?: string[];
-    performance?: {
-      trailing12SqFt?: number;
-      trailing12Jobs?: number;
-      openTrailing12SqFt?: number;
-      averageJobSqFt?: number;
-      lastJobDate?: string | null;
-      matchedReportNames?: string[];
-      matchConfidence?: string;
-      yearOverYearPct?: number | null;
-    } | null;
-  } | null;
 };
 
 const DEFAULT_INSIGHTS: Record<string, Insight> = {
@@ -182,7 +149,9 @@ export default function SalesOpsApp() {
   const [yearFilter, setYearFilter] = useState("all");
   const [insight, setInsight] = useState<Insight | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
-  const [workspace, setWorkspace] = useState<Record<string, unknown> | null>(null);
+  const [workspace, setWorkspace] = useState<AccountWorkspaceState | null>(null);
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>("summary");
+  const workspaceGen = useRef(0);
   const [accountTier, setAccountTier] = useState("All");
   const [accountQuery, setAccountQuery] = useState("");
   const [noteBody, setNoteBody] = useState("");
@@ -338,17 +307,151 @@ export default function SalesOpsApp() {
     setAccountsCursor(acc.nextCursor || null);
   }
 
-  async function openAccount(account: Account) {
-    if (!sessionToken) return;
-    setSelectedAccount(account);
-    setWriteError(null);
-    const data = (await apiGet(`/api/sales-ops/accounts/${account.id}`, sessionToken)) as Record<string, unknown>;
-    const updates = (await apiGet(`/api/sales-ops/accounts/${account.id}/updates?limit=50`, sessionToken)) as {
-      updates?: Array<Record<string, unknown>>;
-    };
-    setWorkspace({ ...data, updates: updates.updates || [] });
-    setSelectedAccount((data.account as Account) || account);
+  function setAccountHash(accountId: string | null) {
+    const next = accountId ? `#account=${accountId}` : "";
+    const current = window.location.hash || "";
+    if (current === next) return;
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next}`);
   }
+
+  function closeAccount() {
+    workspaceGen.current += 1;
+    setSelectedAccount(null);
+    setWorkspace(null);
+    setWorkspaceSection("summary");
+    setWriteError(null);
+    setAccountHash(null);
+  }
+
+  async function loadWorkspaceSection(
+    accountId: string,
+    token: string,
+    gen: number,
+    key: "updates" | "subitems" | "files" | "docs" | "activities",
+    path: string,
+    append = false
+  ) {
+    try {
+      const data = (await apiGet(path, token)) as Record<string, unknown>;
+      if (gen !== workspaceGen.current) return;
+      const rows = (data[key] as Array<Record<string, unknown>>) || [];
+      const nextCursor = (data.nextCursor as string | null) || null;
+      setWorkspace((current) => {
+        if (!current) return current;
+        const prior = append ? ((current[key] as Array<Record<string, unknown>>) || []) : [];
+        return {
+          ...current,
+          [key]: [...prior, ...rows],
+          cursors: { ...(current.cursors || {}), [key]: nextCursor },
+          loading: { ...(current.loading || {}), [key]: false },
+          errors: { ...(current.errors || {}), [key]: undefined }
+        };
+      });
+    } catch (e) {
+      if (gen !== workspaceGen.current) return;
+      const status = e instanceof ApiError ? e.status : 0;
+      setWorkspace((current) => ({
+        ...(current || {}),
+        loading: { ...(current?.loading || {}), [key]: false },
+        errors: { ...(current?.errors || {}), [key]: status === 404 ? "not_found" : "error" }
+      }));
+    }
+  }
+
+  const openAccountById = useCallback(async (accountId: string, seed?: Account) => {
+    if (!sessionToken || !accountId) return;
+    const gen = workspaceGen.current + 1;
+    workspaceGen.current = gen;
+    setWriteError(null);
+    setWorkspaceSection("summary");
+    setSelectedAccount(seed || { id: accountId, accountName: "Account" });
+    setAccountHash(accountId);
+    setWorkspace({
+      updates: [],
+      subitems: [],
+      files: [],
+      docs: [],
+      activities: [],
+      cursors: {},
+      loading: { detail: true, updates: true, subitems: true, files: true, docs: true, activities: true },
+      errors: {},
+      notFound: false
+    });
+    try {
+      const data = (await apiGet(`/api/sales-ops/accounts/${accountId}`, sessionToken)) as Record<string, unknown>;
+      if (gen !== workspaceGen.current) return;
+      const acc = {
+        ...((data.account as Account) || seed || { id: accountId, accountName: "Account" }),
+        intelligence:
+          (data.intelligence as Account["intelligence"]) ||
+          ((data.account as Account | undefined)?.intelligence) ||
+          seed?.intelligence
+      };
+      setSelectedAccount(acc);
+      setWorkspace((current) => ({
+        ...(current || {}),
+        account: acc,
+        intelligence: data.intelligence as Account["intelligence"],
+        loading: { ...(current?.loading || {}), detail: false }
+      }));
+    } catch (e) {
+      if (gen !== workspaceGen.current) return;
+      const status = e instanceof ApiError ? e.status : 0;
+      setWorkspace({
+        notFound: true,
+        loading: { detail: false },
+        errors: { detail: status === 404 ? "not_found" : "error" }
+      });
+      return;
+    }
+    await Promise.all([
+      loadWorkspaceSection(accountId, sessionToken, gen, "updates", `/api/sales-ops/accounts/${accountId}/updates?limit=50`),
+      loadWorkspaceSection(accountId, sessionToken, gen, "subitems", `/api/sales-ops/accounts/${accountId}/subitems?limit=50`),
+      loadWorkspaceSection(accountId, sessionToken, gen, "files", `/api/sales-ops/accounts/${accountId}/files?limit=50`),
+      loadWorkspaceSection(accountId, sessionToken, gen, "docs", `/api/sales-ops/accounts/${accountId}/docs?limit=50`),
+      loadWorkspaceSection(accountId, sessionToken, gen, "activities", `/api/sales-ops/accounts/${accountId}/activity?limit=50`)
+    ]);
+  }, [sessionToken]);
+
+  async function openAccount(account: Account) {
+    await openAccountById(account.id, account);
+  }
+
+  async function loadMoreWorkspace(key: "updates" | "subitems" | "files" | "docs" | "activities") {
+    if (!sessionToken || !selectedAccount) return;
+    const cursor = workspace?.cursors?.[key];
+    if (!cursor) return;
+    const gen = workspaceGen.current;
+    const pathKey = key === "activities" ? "activity" : key;
+    setWorkspace((current) => ({
+      ...(current || {}),
+      loading: { ...(current?.loading || {}), [key]: true }
+    }));
+    await loadWorkspaceSection(
+      selectedAccount.id,
+      sessionToken,
+      gen,
+      key,
+      `/api/sales-ops/accounts/${selectedAccount.id}/${pathKey}?limit=50&cursor=${encodeURIComponent(cursor)}`,
+      true
+    );
+  }
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    const readHash = () => {
+      const match = /^#account=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(window.location.hash || "");
+      return match?.[1] || null;
+    };
+    const id = readHash();
+    if (id) void openAccountById(id);
+    const onHash = () => {
+      const next = readHash();
+      if (next) void openAccountById(next);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [sessionToken, openAccountById]);
 
   async function saveFollowUp() {
     if (!sessionToken || !selectedAccount) return;
@@ -856,85 +959,40 @@ export default function SalesOpsApp() {
       )}
 
       {selectedAccount && (
-        <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && setSelectedAccount(null)}>
+        <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && closeAccount()}>
           <section className="insight-modal account-modal" role="dialog">
-            <button className="modal-close" type="button" onClick={() => setSelectedAccount(null)}>
+            <button className="modal-close" type="button" onClick={closeAccount}>
               <span />Close
             </button>
             <div className="modal-rail"><span>ESF</span><small>Account workspace</small></div>
             <div className="modal-content">
               <p className="kicker">{selectedAccount.intelligence?.recommendedTier || "Account"} / {selectedAccount.intelligence?.strategicPlay || "Qualify"}</p>
-              <h2>{selectedAccount.accountName}</h2>
+              <h2>{workspace?.notFound ? "Account not found" : selectedAccount.accountName}</h2>
               <div className="account-facts">
                 <div><span>Monday status</span><strong>{selectedAccount.status || "Not set"}</strong></div>
                 <div><span>Next contact</span><strong>{selectedAccount.nextContact || "Needs a date"}</strong></div>
                 <div><span>Market</span><strong>{selectedAccount.market || selectedAccount.branch || "Not set"}</strong></div>
                 <div><span>Synced</span><strong>{selectedAccount.syncedAt ? String(selectedAccount.syncedAt).slice(0, 16) : "—"}</strong></div>
               </div>
-              {writeError && <div className="field-error">{writeError}</div>}
-              <div className="workspace-ops">
-                {integration.mondayWriteEnabled === false && (
-                  <p className="kicker">Monday writes are disabled. Account fields stay read-only until separately approved.</p>
-                )}
-                {selectedAccount.description && <p>{selectedAccount.description}</p>}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const fd = new FormData(e.currentTarget);
-                    void patchField("status", String(fd.get("status") || ""));
-                  }}
-                >
-                  <p className="kicker">Account profile</p>
-                  <label>
-                    Status
-                    <input name="status" defaultValue={selectedAccount.status || ""} />
-                  </label>
-                  <button type="submit">Save mapped field</button>
-                </form>
-                <div>
-                  <p className="kicker">Follow-up</p>
-                  <input placeholder="Summary" value={followSummary} onChange={(e) => setFollowSummary(e.target.value)} />
-                  <input type="date" value={followDate} onChange={(e) => setFollowDate(e.target.value)} />
-                  <button type="button" onClick={() => void saveFollowUp()}>Save follow-up</button>
-                </div>
-                <div className="note-composer">
-                  <p className="kicker">Notes</p>
-                  {((workspace?.updates as Array<Record<string, unknown>>) || []).map((a) => (
-                    <div className="activity-row" key={String(a.id || a.mondayUpdateId)}>
-                      <b>{String(a.bodyText || a.summary || "")}</b>
-                      <small>{String(a.mondayCreatedAt || a.occurredAt || "")} · {String(a.creatorName || "")}</small>
-                    </div>
-                  ))}
-                  <textarea value={noteBody} onChange={(e) => setNoteBody(e.target.value)} placeholder="Add a Monday update…" />
-                  <button type="button" onClick={() => void saveNote()}>Add note</button>
-                </div>
-                {(selectedAccount.intelligence?.nextActions || []).length > 0 && (
-                  <div>
-                    <p className="kicker">Next moves</p>
-                    <ol className="account-actions">
-                      {(selectedAccount.intelligence?.nextActions || []).map((action, index) => (
-                        <li key={action}>
-                          <span>0{index + 1}</span>
-                          <p>
-                            {action}{" "}
-                            <button type="button" onClick={() => { setFollowSummary(action); setTab("accounts"); }}>
-                              Convert to follow-up
-                            </button>
-                          </p>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-              </div>
-              <div className="account-modal-foot">
-                <p><b>Ownership rule:</b> Monday.com Account Master List is the source of truth.</p>
-                {selectedAccount.mondayUrl && (
-                  <a href={selectedAccount.mondayUrl} target="_blank" rel="noreferrer">
-                    Open account in Monday <ArrowIcon />
-                  </a>
-                )}
-              </div>
+              <Account360Workspace
+                account={selectedAccount}
+                workspace={workspace}
+                section={workspaceSection}
+                onSection={setWorkspaceSection}
+                writeError={writeError}
+                mondayWriteEnabled={integration.mondayWriteEnabled}
+                noteBody={noteBody}
+                followSummary={followSummary}
+                followDate={followDate}
+                onNoteBody={setNoteBody}
+                onFollowSummary={setFollowSummary}
+                onFollowDate={setFollowDate}
+                onSaveNote={() => void saveNote()}
+                onSaveFollowUp={() => void saveFollowUp()}
+                onPatchStatus={(status) => void patchField("status", status)}
+                onConvertFollowUp={(action) => { setFollowSummary(action); setTab("accounts"); }}
+                onLoadMore={(key) => void loadMoreWorkspace(key)}
+              />
             </div>
           </section>
         </div>

@@ -4603,3 +4603,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Cloudflare nameserver/provider moves, orange-cloud proxy, Monday writes, inbound webhook until `MONDAY_APP_SIGNING_SECRET` exists. |
 | **Impacted** | This doc, `monday-sales-ops.md`, CURRENT_SYSTEM_MAP. |
 
+### 339. Sales Ops Account 360 lazy-loads governed Monday children (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | Sales Ops Account 360 is the salesperson workspace for a **currently assigned** Monday-owned account. Opening an account loads governed **detail** first, then lazy-loads **updates**, **subitems**, **file metadata**, **Docs**, and **activity** from existing Brain routes. The account list remains the light paginated `/me/accounts` projection. File content stays unavailable (`asset_fetch_not_enabled`); the UI must not invent downloads or show private provider URLs. Docs DTO continues to omit `sourceUrl`. Deep links may use `#account=<projection UUID>`; unknown or cross-rep IDs are not-found. Brain authorization is authoritative (rep / manager-of-owner / org admin; cross-org denied). Monday writes remain disabled. |
+| **Why** | Production already exposed the child APIs, but the head only fetched detail + updates, so Account 360 was incomplete. |
+| **Schema** | None. |
+| **Out of scope** | Monday writes, asset content proxy, inbound webhook without `MONDAY_APP_SIGNING_SECRET`, Account Directory 360 financials. |
+| **Impacted** | `app-sales-ops/`, `backend-core/src/salesOps/` tests, `monday-sales-ops.md`, SYSTEM_BLUEPRINT, eliteOS-master-head-map, this doc. |
+
+

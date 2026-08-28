@@ -151,6 +151,40 @@ async function main() {
   });
   assert.equal(okHook.status, 200);
 
+  const accA = await store.upsertAccount({
+    organizationId: ORG,
+    mondayBoardId: "18397092941",
+    mondayItemId: "http-a",
+    accountName: "Sentinel A",
+    assignedUserId: REP_A,
+    sourceState: "active"
+  });
+  const accB = await store.upsertAccount({
+    organizationId: ORG,
+    mondayBoardId: "18397092941",
+    mondayItemId: "http-b",
+    accountName: "Sentinel B",
+    assignedUserId: REP_B,
+    sourceState: "active"
+  });
+  const unknownId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const authA = { headers: { Authorization: "Bearer a" } };
+  const authB = { headers: { Authorization: "Bearer b" } };
+  const authAdmin = { headers: { Authorization: "Bearer admin" } };
+  assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accA.id}`, authA)).status, 200);
+  assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accB.id}`, authA)).status, 404);
+  assert.equal((await fetch(`${base}/api/sales-ops/accounts/${unknownId}`, authA)).status, 404);
+  for (const suffix of ["subitems", "updates", "files", "docs", "activity"]) {
+    assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accA.id}/${suffix}`, authA)).status, 200);
+    assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accB.id}/${suffix}`, authA)).status, 404);
+    assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accA.id}/${suffix}`, authB)).status, 404);
+    assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accB.id}/${suffix}`, authAdmin)).status, 200);
+  }
+  const ownDetail = await (await fetch(`${base}/api/sales-ops/accounts/${accA.id}`, authA)).json();
+  assert.equal(Object.prototype.hasOwnProperty.call(ownDetail.account || {}, "sourceSnapshot"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ownDetail.account || {}, "rawColumns"), false);
+  assert.equal((await fetch(`${base}/api/sales-ops/accounts/${accB.id}`, authAdmin)).status, 200);
+
   await new Promise((r) => server.close(r));
   console.log("salesOpsHttp.test.mjs: ok");
 }

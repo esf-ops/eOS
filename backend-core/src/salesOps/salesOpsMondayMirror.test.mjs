@@ -106,6 +106,7 @@ async function main() {
   const serviceSrc = readFileSync(fileURLToPath(new URL("./salesOpsService.mjs", import.meta.url)), "utf8");
   const ingestSrc = readFileSync(fileURLToPath(new URL("./salesOpsMondayMirror.mjs", import.meta.url)), "utf8");
   const feSrc = readFileSync(fileURLToPath(new URL("../../../app-sales-ops/src/ui/SalesOpsApp.tsx", import.meta.url)), "utf8");
+  const feWorkspace = readFileSync(fileURLToPath(new URL("../../../app-sales-ops/src/ui/Account360Workspace.tsx", import.meta.url)), "utf8");
   const feApi = readFileSync(fileURLToPath(new URL("../../../app-sales-ops/src/lib/api.ts", import.meta.url)), "utf8");
 
   // 1. v2 migration is additive
@@ -579,7 +580,15 @@ async function main() {
   await assert.rejects(() => authSvc.getAccountFiles(user(REP_A, "sales"), bId), (e) => e.status === 404);
   await assert.rejects(() => authSvc.getAccountDocs(user(REP_A, "sales"), bId), (e) => e.status === 404);
   await assert.rejects(() => authSvc.getAccountSubitems(user(REP_A, "sales"), bId), (e) => e.status === 404);
+  await assert.rejects(() => authSvc.getAccountActivity(user(REP_A, "sales"), bId), (e) => e.status === 404);
+  await assert.rejects(
+    () => authSvc.getAccountWorkspace(user(REP_A, "sales"), "ffffffff-ffff-4fff-8fff-ffffffffffff"),
+    (e) => e.status === 404
+  );
   await authSvc.getAccountSubitems(user(REP_A, "sales"), aId);
+  await authSvc.getAccountActivity(user(REP_A, "sales"), aId);
+  await authSvc.getAccountWorkspace(user(ADMIN, "admin"), bId);
+  await authSvc.getAccountFiles(user(ADMIN, "admin"), bId);
   await authSvc.getAccountFiles(user(MGR, "sales"), aId);
   await assert.rejects(() => authSvc.getAccountFiles(user(MGR, "sales"), bId), (e) => e.status === 404);
   await assert.rejects(() => authSvc.getAccountWorkspace(user(REP_A, "sales", ORG_B), aId), (e) => e.status === 404 || e.code === "no_org");
@@ -608,7 +617,11 @@ async function main() {
   assert.equal(docsDto.docs.some((d) => Object.prototype.hasOwnProperty.call(d, "sourceUrl") || Object.prototype.hasOwnProperty.call(d, "source_url")), false);
 
   // 42. Monday credentials cannot enter frontend
-  assert.ok(!/MONDAY_API_TOKEN|SERVICE_ROLE|SIGNING_SECRET/.test(feSrc + feApi));
+  assert.ok(!/MONDAY_API_TOKEN|SERVICE_ROLE|SIGNING_SECRET/.test(feSrc + feWorkspace + feApi));
+  assert.ok(feSrc.includes("/subitems?limit=50"));
+  assert.ok(feSrc.includes("/files?limit=50"));
+  assert.ok(feSrc.includes("/docs?limit=50"));
+  assert.ok(!/\/files\/\$\{/.test(feSrc + feWorkspace));
 
   // 43–44. write-disabled blocks mutations; read-only still operates
   const writes = [];
