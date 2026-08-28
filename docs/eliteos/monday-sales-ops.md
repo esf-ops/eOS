@@ -29,7 +29,7 @@ Exact only:
 
 Do **not** collide with Excel `account_master_list`. Do **not** fuzzy-match. Name, alias, ownership, address, and starter-pack hints are **review candidates only**. If no exact link exists, `account_directory_account_id` stays NULL and the Monday-owned Sales Ops projection can still be visible by salesperson ownership.
 
-Admin **Account Identity Review** (`GET/POST /api/sales-ops/admin/identity-reviews*`) rebuilds a queue with statuses `EXACT_AUTO_LINKABLE`, `REVIEW_REQUIRED`, `NO_CANDIDATE`, and `CONFLICT`. Only `EXACT_AUTO_LINKABLE` (existing unique Monday external link or another conclusive source ID) may auto-commit. Human approval logs actor, timestamp, Monday item, Account Directory UUID, shown evidence, prior link, and reason. Unmatched Monday items do not create Account Directory rows.
+Admin **Account Identity Review** (`GET/POST /api/sales-ops/admin/identity-reviews*`) rebuilds a queue with statuses `EXACT_SOURCE_ID` (legacy alias `EXACT_AUTO_LINKABLE`), `REVIEW_REQUIRED`, `NO_CANDIDATE`, and `CONFLICT`. Only an existing unique Monday `{boardId}:{itemId}` external link (conclusive source ID) may auto-project on rebuild. Unique 1:1 **exact display name** candidates may be **bulk human-approved** after a preview (`POST .../bulk-preview`, `POST .../bulk`); exact name is not automatic identity. Weak aliases (including Epworth → Cabinet shop) and alias-only hits are excluded from bulk. Filters: salesperson (`assignedUserId`) and approved starter book (`packKey=starter_handoff_v1`). Human approval logs actor, timestamp, Monday item, Account Directory UUID, shown evidence, match method, prior link, and reason. Unmatched Monday items do not create Account Directory rows. Identity linkage and commission eligibility remain separate.
 
 QuickBooks ListIDs are never returned to the browser (linked yes/no only). Moraware Account IDs may be shown on identity review candidates.
 
@@ -112,7 +112,8 @@ Rep: own Monday-assigned accounts. Manager: explicit assigned reports. Admin/exe
 - v1 `eliteos_sales_ops_v1.sql` is **already applied** in production.
 - Additive v2 `eliteos_sales_ops_monday_full_mirror_v2.sql` **is applied** on production project `wbxbzhxsdlkpqsviyzkt`, plus follow-up `eliteos_sales_ops_monday_column_value_null_v2_1.sql` (empty column JSON null). Writes remain disabled.
 - Additive v3 `eliteos_sales_ops_performance_attribution_v3.sql` is applied (attribution facts; no seeded actuals).
-- Additive v4 `eliteos_sales_ops_identity_review_v4.sql` — identity review queue, compensation proposal/config, commission-report lifecycle. Apply before Brain deploy of this slice.
+- Additive v4 `eliteos_sales_ops_identity_review_v4.sql` — identity review queue, compensation proposal/config, commission-report lifecycle. Applied.
+- Additive v5 `eliteos_sales_ops_identity_review_v5.sql` — `EXACT_SOURCE_ID` status, bulk-approval audit actions, `match_method`. Apply before Brain deploy of the bulk-review slice.
 
 ## Environment
 

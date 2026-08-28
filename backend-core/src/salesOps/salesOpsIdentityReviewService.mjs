@@ -7,9 +7,12 @@ import { normalizeOrgMatchKey } from "../accountDirectory/accountDirectoryMaster
 import { MORAWARE_EXTERNAL_SYSTEM, QUICKBOOKS_EXTERNAL_SYSTEM } from "./salesOpsIdentityAudit.mjs";
 import {
   buildIdentityIndexes,
+  bulkSkipReason,
   canAutoCommit,
   classifyIdentityCase,
   groupLinksByExternal,
+  isExactNameBulkEligible,
+  matchMethodFromReview,
   mondayMatchesForAccount,
   summarizeReviewRows
 } from "./salesOpsIdentityReview.mjs";
@@ -133,17 +136,18 @@ export async function commitExactMondayLink(store, { organizationId, actorUserId
     actorUserId,
     action,
     reason: reason || null,
+    matchMethod: matchMethodFromReview(review),
     evidenceShown: review.candidates || [],
     priorAccountDirectoryAccountId: prior
   });
   return store.updateIdentityReview(organizationId, review.id, {
-    status: "EXACT_AUTO_LINKABLE",
+    status: "EXACT_SOURCE_ID",
     autoLinkable: true,
     linkedAccountDirectoryAccountId: adId
   });
 }
 
-export async function approveIdentityReview(store, { organizationId, actorUserId, review, accountDirectoryAccountId, reason }) {
+export async function approveIdentityReview(store, { organizationId, actorUserId, review, accountDirectoryAccountId, reason, action = "approve" }) {
   const adId = String(accountDirectoryAccountId || "").trim();
   const allowed = new Set((review.candidates || []).map((c) => String(c.accountDirectoryAccountId)));
   if (!allowed.has(adId)) {
@@ -157,12 +161,12 @@ export async function approveIdentityReview(store, { organizationId, actorUserId
     actorUserId,
     review,
     accountDirectoryAccountId: adId,
-    action: "approve",
+    action,
     reason
   });
 }
 
-export async function rejectIdentityReview(store, { organizationId, actorUserId, review, reason }) {
+export async function rejectIdentityReview(store, { organizationId, actorUserId, review, reason, action = "reject" }) {
   await store.insertIdentityReviewEvent({
     organizationId,
     reviewId: review.id,
@@ -171,12 +175,99 @@ export async function rejectIdentityReview(store, { organizationId, actorUserId,
     mondayBoardId: review.mondayBoardId,
     accountDirectoryAccountId: null,
     actorUserId,
-    action: "reject",
+    action,
     reason: reason || null,
+    matchMethod: matchMethodFromReview(review),
     evidenceShown: review.candidates || [],
     priorAccountDirectoryAccountId: review.linkedAccountDirectoryAccountId || null
   });
   return review;
+}
+
+export function previewBulkIdentityReviews(reviews, accountsById = new Map()) {
+  const items = [];
+  const skipped = [];
+  for (const review of reviews || []) {
+    const reason = bulkSkipReason(review);
+    if (reason) {
+      skipped.push({ reviewId: review.id, reason });
+      continue;
+    }
+    const candidate = (review.candidates || [])[0];
+    const account = accountsById.get(review.salesOpsAccountId) || null;
+    items.push({
+      reviewId: review.id,
+      mondayAccountName: review.mondayAccountName,
+      mondayBoardId: review.mondayBoardId,
+      mondayItemId: review.mondayItemId,
+      proposedAccountDirectoryAccountId: candidate.accountDirectoryAccountId,
+      proposedDisplayName: candidate.displayName || null,
+      morawareIdCount: (candidate.morawareIds || []).length,
+      morawareIds: candidate.morawareIds || [],
+      quickbooksLinked: Boolean(candidate.quickbooksLinked),
+      branch: account?.branch || null,
+      market: account?.market || null,
+      evidence: candidate.evidence || review.evidence || [],
+      matchMethod: matchMethodFromReview(review),
+      exclusionHint: Boolean(review.exclusionHint),
+      conflictWarning: review.conflictReason || (review.exclusionHint ? "exclusion_hint_non_commissionable" : null)
+    });
+  }
+  return { items, skipped, eligibleCount: items.length };
+}
+
+export async function bulkApproveIdentityReviews(store, { organizationId, actorUserId, reviews, reason }) {
+  const approved = [];
+  const skipped = [];
+  for (const review of reviews || []) {
+    const skip = bulkSkipReason(review);
+    if (skip) {
+      skipped.push({ reviewId: review.id, reason: skip });
+      continue;
+    }
+    const adId = review.candidates[0].accountDirectoryAccountId;
+    try {
+      await approveIdentityReview(store, {
+        organizationId,
+        actorUserId,
+        review,
+        accountDirectoryAccountId: adId,
+        reason: reason || "bulk_human_approved_exact_name",
+        action: "bulk_approve"
+      });
+      approved.push(review.id);
+    } catch (e) {
+      skipped.push({ reviewId: review.id, reason: e.code || "approve_failed" });
+    }
+  }
+  return { approved, skipped, approvedCount: approved.length };
+}
+
+export async function bulkRejectIdentityReviews(store, { organizationId, actorUserId, reviews, reason, action = "bulk_reject" }) {
+  const rejected = [];
+  const skipped = [];
+  for (const review of reviews || []) {
+    if (action === "skip") {
+      await rejectIdentityReview(store, {
+        organizationId,
+        actorUserId,
+        review,
+        reason: reason || "left_unresolved",
+        action: "skip"
+      });
+      rejected.push(review.id);
+      continue;
+    }
+    await rejectIdentityReview(store, {
+      organizationId,
+      actorUserId,
+      review,
+      reason: reason || "bulk_rejected",
+      action: "bulk_reject"
+    });
+    rejected.push(review.id);
+  }
+  return { rejected, skipped, rejectedCount: rejected.length };
 }
 
 export function dtoIdentityCandidate(candidate) {
@@ -191,7 +282,7 @@ export function dtoIdentityCandidate(candidate) {
   };
 }
 
-export function dtoIdentityReview(row, account = null) {
+export function dtoIdentityReview(row, account = null, extras = {}) {
   if (!row) return null;
   return {
     id: row.id,
@@ -202,6 +293,10 @@ export function dtoIdentityReview(row, account = null) {
     mondayUrl: account?.mondayUrl || null,
     branch: account?.branch || null,
     market: account?.market || null,
+    assignedUserId: account?.assignedUserId || null,
+    salespersonLabel: extras.salespersonLabel || null,
+    packKeys: extras.packKeys || [],
+    bulkEligible: isExactNameBulkEligible(row),
     status: row.status,
     autoLinkable: Boolean(row.autoLinkable),
     evidence: row.evidence || [],

@@ -51,10 +51,14 @@ import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 import { assembleTeamPerformance, assembleUserPerformance, loadIdentityAudit } from "./salesOpsPerformanceQuery.mjs";
 import {
   approveIdentityReview,
+  bulkApproveIdentityReviews,
+  bulkRejectIdentityReviews,
   dtoIdentityReview,
+  previewBulkIdentityReviews,
   rebuildIdentityReviews,
   rejectIdentityReview
 } from "./salesOpsIdentityReviewService.mjs";
+import { normalizeOrgMatchKey } from "../accountDirectory/accountDirectoryMasterList.mjs";
 import {
   COMMISSION_REPORT_STATUSES,
   COMPENSATION_BASES,
@@ -362,16 +366,93 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       });
     },
 
-    async listIdentityReviews(user, { status = null } = {}) {
+    async listIdentityReviews(user, filters = {}) {
       const actor = actorFromUser(user);
       assertActor(actor);
       if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
-      const [rows, accounts] = await Promise.all([
+      const status = filters.status || null;
+      const assignedUserId = filters.assignedUserId || null;
+      const packKey = filters.packKey || null;
+      const bulkEligibleOnly = filters.bulkEligible === true || filters.bulkEligible === "1" || filters.bulkEligible === "true";
+      const [rows, accounts, hints, mappings] = await Promise.all([
         store.listIdentityReviews(actor.organizationId, { status }),
-        store.listAccountIdentityRows(actor.organizationId)
+        store.listAccountIdentityRows(actor.organizationId),
+        store.listIdentityHints(actor.organizationId),
+        typeof store.listRepMappings === "function" ? store.listRepMappings(actor.organizationId) : []
       ]);
       const byId = new Map(accounts.map((a) => [a.id, a]));
-      return rows.map((row) => dtoIdentityReview(row, byId.get(row.salesOpsAccountId)));
+      const labelByUser = new Map((mappings || []).map((m) => [String(m.userId), m.salespersonLabel || null]));
+      const hintsByNorm = new Map();
+      for (const hint of hints || []) {
+        const key = normalizeOrgMatchKey(hint.mondayName);
+        if (!key) continue;
+        if (!hintsByNorm.has(key)) hintsByNorm.set(key, []);
+        hintsByNorm.get(key).push(hint);
+      }
+      let dtos = rows.map((row) => {
+        const account = byId.get(row.salesOpsAccountId);
+        const packKeys = [
+          ...new Set((hintsByNorm.get(normalizeOrgMatchKey(row.mondayAccountName)) || []).map((h) => h.packKey).filter(Boolean))
+        ];
+        return dtoIdentityReview(row, account, {
+          salespersonLabel: account?.assignedUserId ? labelByUser.get(String(account.assignedUserId)) || null : null,
+          packKeys
+        });
+      });
+      if (assignedUserId === "unmapped") dtos = dtos.filter((row) => !row.assignedUserId);
+      else if (assignedUserId) dtos = dtos.filter((row) => String(row.assignedUserId) === String(assignedUserId));
+      if (packKey) dtos = dtos.filter((row) => (row.packKeys || []).includes(packKey));
+      if (bulkEligibleOnly) dtos = dtos.filter((row) => row.bulkEligible);
+      return dtos;
+    },
+
+    async previewBulkIdentityReviews(user, reviewIds = []) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const ids = [...new Set((reviewIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) return { items: [], skipped: [], eligibleCount: 0 };
+      const wanted = new Set(ids);
+      const [accounts, listed] = await Promise.all([
+        store.listAccountIdentityRows(actor.organizationId),
+        store.listIdentityReviews(actor.organizationId)
+      ]);
+      const reviews = listed.filter((row) => wanted.has(String(row.id)));
+      const preview = previewBulkIdentityReviews(reviews, new Map(accounts.map((a) => [a.id, a])));
+      for (const id of ids) {
+        if (!reviews.some((r) => String(r.id) === id)) preview.skipped.push({ reviewId: id, reason: "missing_review" });
+      }
+      return preview;
+    },
+
+    async bulkIdentityReviews(user, payload = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const action = String(payload.action || "").trim();
+      const ids = [...new Set((payload.reviewIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) throw new SalesOpsError("Select at least one review.", 400, "reviews_required");
+      if (!["approve", "reject", "skip"].includes(action)) {
+        throw new SalesOpsError("Bulk action must be approve, reject, or skip.", 400, "bulk_action_required");
+      }
+      const wanted = new Set(ids);
+      const listed = await store.listIdentityReviews(actor.organizationId);
+      const reviews = listed.filter((row) => wanted.has(String(row.id)));
+      if (action === "approve") {
+        return bulkApproveIdentityReviews(store, {
+          organizationId: actor.organizationId,
+          actorUserId: actor.userId,
+          reviews,
+          reason: payload.reason || "bulk_human_approved_exact_name"
+        });
+      }
+      return bulkRejectIdentityReviews(store, {
+        organizationId: actor.organizationId,
+        actorUserId: actor.userId,
+        reviews,
+        reason: payload.reason || (action === "skip" ? "left_unresolved" : "bulk_rejected"),
+        action: action === "skip" ? "skip" : "bulk_reject"
+      });
     },
 
     async approveIdentityReview(user, reviewId, payload = {}) {

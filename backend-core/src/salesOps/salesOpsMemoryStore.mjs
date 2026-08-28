@@ -1133,6 +1133,9 @@ export function createSalesOpsMemoryStore() {
       identityReviewEvents.push(rec);
       return clone(rec);
     },
+    async listIdentityReviewEvents(organizationId) {
+      return identityReviewEvents.filter((r) => r.organizationId === organizationId).map(clone);
+    },
     async insertMondayAccountDirectoryLink({ organizationId, boardId, itemId, accountId, linkedBy = null }) {
       const existing = mondayAdLinks.get(`${organizationId}:${boardId}:${itemId}`);
       if (existing && String(existing.accountId) !== String(accountId)) {

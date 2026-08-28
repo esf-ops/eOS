@@ -224,6 +224,20 @@ async function main() {
   const listedBody = await listed.json();
   assert.ok(Array.isArray(listedBody.reviews));
   assert.equal(JSON.stringify(listedBody).includes("QB-ROOT"), false);
+  const bulkDenied = await fetch(`${base}/api/sales-ops/admin/identity-reviews/bulk-preview`, {
+    method: "POST",
+    headers: { Authorization: "Bearer a", "content-type": "application/json" },
+    body: JSON.stringify({ reviewIds: ["x"] })
+  });
+  assert.equal(bulkDenied.status, 404);
+  const bulkPreview = await fetch(`${base}/api/sales-ops/admin/identity-reviews/bulk-preview`, {
+    method: "POST",
+    headers: { Authorization: "Bearer admin", "content-type": "application/json" },
+    body: JSON.stringify({ reviewIds: [] })
+  });
+  assert.equal(bulkPreview.status, 200);
+  const people = await fetch(`${base}/api/sales-ops/admin/people`, authAdmin);
+  assert.equal(people.status, 200);
   const comp = await fetch(`${base}/api/sales-ops/admin/compensation`, authAdmin);
   assert.equal(comp.status, 200);
   const compBody = await comp.json();

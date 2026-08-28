@@ -2211,6 +2211,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         actor_user_id: row.actorUserId,
         action: row.action,
         reason: row.reason ?? null,
+        match_method: row.matchMethod ?? null,
         evidence_shown: row.evidenceShown || [],
         prior_account_directory_account_id: row.priorAccountDirectoryAccountId ?? null
       });

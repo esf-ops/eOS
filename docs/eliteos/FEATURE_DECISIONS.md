@@ -4636,4 +4636,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Publishing a real salesperson plan, auto-linking on name, crediting Moraware SF before worksheet first-install fields exist, Monday/Moraware/QuickBooks writes, treating compensation proposal values as approved. |
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v4 SQL, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
 
+### 342. Sales Ops bulk identity review + Moraware worksheet install source gap (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | Identity Review is the operational path for Monday → Account Directory links. Rebuild classifies `EXACT_SOURCE_ID` / `REVIEW_REQUIRED` / `NO_CANDIDATE` / `CONFLICT` and does not create name-based links. Unique 1:1 exact-display-name candidates may be bulk **human-approved** after a preview that shows Monday name, proposed AD account, Moraware ID count, QuickBooks linked yes/no, branch/market, and conflict/exclusion warnings. Weak aliases (Epworth → Cabinet shop) and alias-only hits are never bulk-eligible. `NO_CANDIDATE` stays unresolved. Unmatched Monday items do not create AD accounts. Salesperson filter is generic (mapped Monday owners); approved starter book is `packKey=starter_handoff_v1` evidence, not canonical identity. The seven starter exclusions remain non-commissionable independently of identity. **Moraware:** `brain_moraware_job_activities` install rows are job-grain. Observed payload keys: status, activityType, job, jobPhases, duration, startDate, schedTime, notes, description. **No form/worksheet id. No distinct completed-at.** `activity_status_name` is the completion state; `scheduled_date`/`startDate` are schedule, not credit dates. Job-level install is not attributed onto worksheets, including single-form jobs. Do not extend `sales_moraware_job_worksheet_facts` with manufactured first-install columns. Actuals stay `null` / `ACTUAL_SF_FIELD_GAP`. Do not populate `sales_ops_sf_attribution_facts` until identity and worksheet first-install evidence are both proven. Compensation proposals stay not finally approved. Plan Builder milestone drafts stay unpublished. |
+| **APIs** | `POST /api/sales-ops/admin/identity-reviews/rebuild`; `GET .../identity-reviews` (`status`, `assignedUserId`, `packKey`, `bulkEligible`); `POST .../bulk-preview`; `POST .../bulk` (`approve`/`reject`/`skip`); existing `.../approve` and `.../reject`. Org-admin only. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_identity_review_v5.sql`. Do not rewrite v1–v4. |
+| **Out of scope** | Monday/Moraware/QuickBooks writes, fuzzy auto-link, manufacturing worksheet install dates, publishing a real salesperson plan, marking compensation finally approved, crediting production SF. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v5 SQL, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
+
 

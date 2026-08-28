@@ -7,6 +7,7 @@ import { mondayExternalId } from "./salesOpsConstants.js";
 import { normalizeOrgMatchKey } from "../accountDirectory/accountDirectoryMasterList.mjs";
 
 export const IDENTITY_REVIEW_STATUSES = Object.freeze([
+  "EXACT_SOURCE_ID",
   "EXACT_AUTO_LINKABLE",
   "REVIEW_REQUIRED",
   "NO_CANDIDATE",
@@ -14,6 +15,13 @@ export const IDENTITY_REVIEW_STATUSES = Object.freeze([
 ]);
 
 export const AUTO_LINKABLE_EVIDENCE = Object.freeze(["existing_monday_external_link", "exact_source_id"]);
+export const BULK_EXACT_NAME_EVIDENCE = "exact_display_name";
+export const WEAK_ALIAS_EVIDENCE = "starter_package_weak_alias";
+export const STARTER_PACK_KEY = "starter_handoff_v1";
+
+export function isExactSourceIdStatus(status) {
+  return status === "EXACT_SOURCE_ID" || status === "EXACT_AUTO_LINKABLE";
+}
 
 function norm(value) {
   return normalizeOrgMatchKey(value);
@@ -95,7 +103,7 @@ export function classifyIdentityCase({
       };
     }
     return {
-      status: "EXACT_AUTO_LINKABLE",
+      status: "EXACT_SOURCE_ID",
       autoLinkable: true,
       canonicalAccountDirectoryAccountId: canonical,
       evidence: ["existing_monday_external_link"],
@@ -263,6 +271,7 @@ export function groupLinksByExternal(links) {
 
 export function summarizeReviewRows(rows) {
   const counts = {
+    exactSourceId: 0,
     exactAutoLinkable: 0,
     reviewRequired: 0,
     noCandidate: 0,
@@ -270,8 +279,10 @@ export function summarizeReviewRows(rows) {
     total: rows.length
   };
   for (const row of rows) {
-    if (row.status === "EXACT_AUTO_LINKABLE") counts.exactAutoLinkable += 1;
-    else if (row.status === "REVIEW_REQUIRED") counts.reviewRequired += 1;
+    if (isExactSourceIdStatus(row.status)) {
+      counts.exactSourceId += 1;
+      counts.exactAutoLinkable += 1;
+    } else if (row.status === "REVIEW_REQUIRED") counts.reviewRequired += 1;
     else if (row.status === "NO_CANDIDATE") counts.noCandidate += 1;
     else if (row.status === "CONFLICT") counts.conflict += 1;
   }
@@ -279,7 +290,53 @@ export function summarizeReviewRows(rows) {
 }
 
 export function canAutoCommit(classified) {
-  return Boolean(classified?.autoLinkable && classified.status === "EXACT_AUTO_LINKABLE" && classified.canonicalAccountDirectoryAccountId);
+  return Boolean(
+    classified?.autoLinkable &&
+      isExactSourceIdStatus(classified.status) &&
+      classified.canonicalAccountDirectoryAccountId
+  );
+}
+
+function candidateEvidence(row) {
+  const fromRow = Array.isArray(row?.evidence) ? row.evidence : [];
+  const fromCandidates = (row?.candidates || []).flatMap((c) => c.evidence || []);
+  return uniqueIds([...fromRow, ...fromCandidates]);
+}
+
+export function bulkSkipReason(row) {
+  if (!row) return "missing_review";
+  if (isExactSourceIdStatus(row.status)) return "already_linked";
+  if (row.status === "NO_CANDIDATE") return "no_candidate";
+  if (row.status === "CONFLICT") return "conflict";
+  if (row.status !== "REVIEW_REQUIRED") return "not_review_required";
+  const candidates = row.candidates || [];
+  if (candidates.length === 0) return "no_candidate";
+  if (candidates.length !== 1) return "not_unique_candidate";
+  const evidence = candidateEvidence(row);
+  if (evidence.includes(WEAK_ALIAS_EVIDENCE) || candidates[0].hintStrength === "weak") {
+    return "weak_alias_not_bulk_eligible";
+  }
+  if (!evidence.includes(BULK_EXACT_NAME_EVIDENCE)) return "not_exact_display_name";
+  return null;
+}
+
+/**
+ * Unique 1:1 exact-display-name candidates may be bulk *human-approved*.
+ * This is not automatic identity. Weak aliases and alias-only hits are excluded.
+ */
+export function isExactNameBulkEligible(row) {
+  return bulkSkipReason(row) == null;
+}
+
+export function matchMethodFromReview(row) {
+  const evidence = candidateEvidence(row);
+  if (evidence.includes("existing_monday_external_link") || evidence.includes("exact_source_id")) {
+    return "existing_monday_external_link";
+  }
+  if (evidence.includes(BULK_EXACT_NAME_EVIDENCE)) return BULK_EXACT_NAME_EVIDENCE;
+  if (evidence.includes("exact_alias")) return "exact_alias";
+  if (evidence.includes(WEAK_ALIAS_EVIDENCE)) return WEAK_ALIAS_EVIDENCE;
+  return (evidence[0] || "human_review");
 }
 
 export function baselineMonthTotals(facts) {

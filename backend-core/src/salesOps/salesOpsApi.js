@@ -448,9 +448,34 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
 
   app.get("/api/sales-ops/admin/identity-reviews", ...guard, async (req, res) => {
     try {
-      const rows = await svc.listIdentityReviews(actorUser(req), { status: req.query.status || null });
+      const rows = await svc.listIdentityReviews(actorUser(req), {
+        status: req.query.status || null,
+        assignedUserId: req.query.assignedUserId || req.query.salesperson || null,
+        packKey: req.query.packKey || null,
+        bulkEligible: req.query.bulkEligible || null
+      });
       jsonNoStore(res);
       res.json({ ok: true, reviews: rows });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/identity-reviews/bulk-preview", ...guard, jsonParser, async (req, res) => {
+    try {
+      const data = await svc.previewBulkIdentityReviews(actorUser(req), (req.body || {}).reviewIds || []);
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/identity-reviews/bulk", ...guard, jsonParser, async (req, res) => {
+    try {
+      const data = await svc.bulkIdentityReviews(actorUser(req), req.body || {});
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
     } catch (e) {
       sendError(res, e);
     }
