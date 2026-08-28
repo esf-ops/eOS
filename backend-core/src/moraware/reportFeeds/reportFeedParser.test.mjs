@@ -20,6 +20,10 @@ import {
   validateHeaderContract,
   buildIdentityMapFromHtmlRows,
   SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS,
+  SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+  SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE_HASH,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH,
   SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS,
   SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
   SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
@@ -375,6 +379,7 @@ async function run() {
   testCalendarScheduleLegacyUnexpectedOnlyDriftNotBlockingPromotion();
   await testCalendarSchedulePromotionDryRunAllowsLegacyDrift();
   testSalesWorksheetExtraColumnStillBlocksWithLockedHash();
+  testView219AcceptedHashesAllowBillableAndRejectUnknown();
 
   console.log("reportFeedParser.test.mjs: ok");
 }
@@ -933,6 +938,78 @@ async function testCalendarSchedulePromotionDryRunAllowsLegacyDrift() {
   const result = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: false });
   assert.equal(result.ok, true, "calendar promote dry-run: allowed with legacy unexpected-only drift");
   assert.equal(result.dryRun, true, "calendar promote dry-run: dry-run mode");
+}
+
+function testView219AcceptedHashesAllowBillableAndRejectUnknown() {
+  const challenging = processReportFeedLocal({
+    csvText: csvFixture,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: "sales_worksheet_facts",
+    expectedColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    requiredColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    expectedColumnHash: null,
+    acceptedHeaderHashes: SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+    morawareViewId: 219
+  });
+  assert.equal(challenging.schemaDrift.detected, false, "view 219: Challenging contract is accepted");
+  assert.equal(challenging.contractVersion, "v1_cs_challenging");
+  assert.equal(challenging.profile.headerHash, SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH);
+  assert.equal(isSchemaDriftBlocking(challenging.schemaDrift), false);
+
+  const billableCsv = csvFixture.replaceAll("Customer Service - Challenging", "Customer Service - Billable");
+  const billable = processReportFeedLocal({
+    csvText: billableCsv,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: "sales_worksheet_facts",
+    expectedColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    requiredColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    expectedColumnHash: null,
+    acceptedHeaderHashes: SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+    morawareViewId: 219
+  });
+  assert.equal(billable.schemaDrift.detected, false, "view 219: Billable CS variant is accepted");
+  assert.equal(billable.contractVersion, "v1_cs_billable");
+  assert.equal(billable.profile.headerHash, SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE_HASH);
+  assert.equal(isSchemaDriftBlocking(billable.schemaDrift), false);
+
+  const parsed = parseCsvReportRows(csvFixture);
+  const headers = [...parsed.headers, "Totally Unexpected Column"];
+  const rows = parsed.rows.map((row) => ({ ...row, "Totally Unexpected Column": "x" }));
+  const unknown = processReportFeedLocal({
+    csvText: csvFromHeadersAndRows(headers, rows),
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: "sales_worksheet_facts",
+    expectedColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    requiredColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    expectedColumnHash: null,
+    acceptedHeaderHashes: SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+    morawareViewId: 219
+  });
+  assert.equal(unknown.schemaDrift.detected, true, "view 219: unknown extra column fails");
+  assert.equal(unknown.schemaDrift.reason, "unknown_header_hash");
+  assert.equal(isSchemaDriftBlocking(unknown.schemaDrift), true);
+
+  const dropped = parsed.headers.filter((h) => h !== "First Install - Quartz Basic in Job Date");
+  const droppedRows = parsed.rows.map((row) => {
+    const next = { ...row };
+    delete next["First Install - Quartz Basic in Job Date"];
+    return next;
+  });
+  const missingDate = processReportFeedLocal({
+    csvText: csvFromHeadersAndRows(dropped, droppedRows),
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: "sales_worksheet_facts",
+    expectedColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    requiredColumns: SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+    acceptedHeaderHashes: SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+    morawareViewId: 219
+  });
+  assert.ok(missingDate.schemaDrift.missingHeaders.includes("First Install - Quartz Basic in Job Date"));
+  assert.equal(isSchemaDriftBlocking(missingDate.schemaDrift), true);
 }
 
 function testSalesWorksheetExtraColumnStillBlocksWithLockedHash() {

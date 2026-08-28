@@ -260,7 +260,11 @@ function pickUsernameField(fields) {
 function pickPasswordField(fields) {
   const override = env("MORAWARE_WEB_PASSWORD_FIELD");
   if (override && Object.prototype.hasOwnProperty.call(fields, override)) return override;
-  return Object.keys(fields).find((n) => /password/i.test(n)) ?? null;
+  return (
+    Object.keys(fields).find((n) => /password/i.test(n)) ??
+    Object.keys(fields).find((n) => /^(pwd|pass|passwd)$/i.test(n)) ??
+    null
+  );
 }
 
 function pickAccountIdField(fields) {

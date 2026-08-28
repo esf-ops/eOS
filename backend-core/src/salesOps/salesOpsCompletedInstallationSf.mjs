@@ -40,12 +40,27 @@ export const OBSERVED_WORKSHEET_FACT_COLUMNS = Object.freeze([
 export const COMPLETED_INSTALLATION_SF = "COMPLETED_INSTALLATION_SF";
 export const COMPLETED_FIRST_INSTALL_EVENT = "completed_first_install";
 
+export const COMPLETED_INSTALL_FORM_FACT_COLUMNS = Object.freeze([
+  "organization_id",
+  "source_job_id",
+  "source_form_id",
+  "source_account_id",
+  "completed_install_status",
+  "completed_install_activity_type",
+  "completed_install_date",
+  "sqft",
+  "report_feed_id",
+  "report_run_id",
+  "source_row_hashes",
+  "source_updated_at"
+]);
+
 export const REQUIRED_COMPLETED_INSTALLATION_EVIDENCE = Object.freeze({
-  jobIdentity: "sales_moraware_job_worksheet_facts.source_job_id",
-  formIdentity: "sales_moraware_job_worksheet_facts.source_form_id",
-  squareFeet: "sales_moraware_job_worksheet_facts.sqft",
-  completedFirstInstallEvent: "worksheet-row completed first-install event/status",
-  completedFirstInstallDate: "earliest completed first-install date on the worksheet row"
+  jobIdentity: "moraware_prepared_completed_install_form_facts.source_job_id",
+  formIdentity: "moraware_prepared_completed_install_form_facts.source_form_id",
+  squareFeet: "moraware_prepared_completed_install_form_facts.sqft",
+  completedFirstInstallEvent: "moraware_prepared_completed_install_form_facts.completed_install_status",
+  completedFirstInstallDate: "moraware_prepared_completed_install_form_facts.completed_install_date"
 });
 
 export const REJECTED_SF_PROXIES = Object.freeze([
@@ -116,6 +131,14 @@ export function evaluateCompletedInstallationSupport({
 }
 
 export const PRODUCTION_COMPLETED_INSTALLATION_SUPPORT = evaluateCompletedInstallationSupport({
+  worksheetColumns: COMPLETED_INSTALL_FORM_FACT_COLUMNS,
+  jobColumns: ["install_at_source", "completed_at_source", "created_at_source", "modified_at_source"],
+  worksheetFirstInstallDateColumn: "completed_install_date",
+  worksheetFirstInstallEventColumn: "completed_install_status"
+});
+
+/** XML/API worksheet facts still lack install event/date; do not use them as the metric source. */
+export const API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT = evaluateCompletedInstallationSupport({
   worksheetColumns: OBSERVED_WORKSHEET_FACT_COLUMNS,
   jobColumns: ["install_at_source", "completed_at_source", "created_at_source", "modified_at_source"]
 });

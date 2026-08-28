@@ -190,7 +190,7 @@ async function main() {
   const perfBody = await perfA.json();
   assert.equal(perfBody.ok, true);
   assert.equal(perfBody.currentMonth.actualSf, null);
-  assert.equal(perfBody.actualSfDefinition.status, "ACTUAL_SF_FIELD_GAP");
+  assert.equal(perfBody.actualSfDefinition.status, "IDENTITY_APPROVAL_REQUIRED");
   assert.equal((await fetch(`${base}/api/sales-ops/me/performance/months`, authA)).status, 200);
   assert.equal((await fetch(`${base}/api/sales-ops/me/performance/accounts`, authA)).status, 200);
   assert.equal((await fetch(`${base}/api/sales-ops/team/${REP_A}/performance`, authB)).status, 404);

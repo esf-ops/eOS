@@ -7,6 +7,7 @@ import {
   COMPLETED_INSTALLATION_SF,
   OBSERVED_WORKSHEET_FACT_COLUMNS,
   PRODUCTION_COMPLETED_INSTALLATION_SUPPORT,
+  API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT,
   buildCompletedInstallationFacts,
   reverseAttributionFact
 } from "./salesOpsCompletedInstallationSf.mjs";
@@ -34,9 +35,9 @@ function user(id, role) {
 
 async function main() {
   assert.deepEqual([...OBSERVED_WORKSHEET_FACT_COLUMNS], [...WORKSHEET_FACTS_WRITER_COLUMNS]);
-  assert.equal(PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.supported, false);
-  assert.ok(PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.missing.some((m) => /first-install date/i.test(m)));
-  assert.ok(PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.missing.some((m) => /first-install event/i.test(m)));
+  assert.equal(API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT.supported, false);
+  assert.ok(API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT.missing.some((m) => /completed_install_date/i.test(m) || /first-install date/i.test(m)));
+  assert.equal(PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.supported, true);
   assert.equal(PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.metric, COMPLETED_INSTALLATION_SF);
 
   const missing = buildCompletedInstallationFacts([

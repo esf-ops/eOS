@@ -45,7 +45,12 @@ export function profileReportColumns(parsed) {
  * Compare observed header hash to an expected contract hash.
  * @returns {{ ok: boolean, observedHash: string, expectedHash: string|null, missingHeaders: string[], unexpectedHeaders: string[] }}
  */
-export function validateHeaderContract(profile, expectedHeaders = [], expectedColumnHash = null) {
+export function validateHeaderContract(
+  profile,
+  expectedHeaders = [],
+  expectedColumnHash = null,
+  acceptedHeaderHashes = null
+) {
   // Normalize observed headers defensively — parseCsvReportRows already normalizes,
   // but guard against profiles built from other sources (NBSP, trailing spaces).
   const observed = new Set((profile.columns || []).map((c) => normalizeSpaces(c.header)).filter(Boolean));
@@ -53,11 +58,19 @@ export function validateHeaderContract(profile, expectedHeaders = [], expectedCo
   const missingHeaders = expected.filter((h) => !observed.has(h));
   const unexpectedHeaders = [...observed].filter((h) => !expected.includes(h));
   const observedHash = profile.headerHash;
-  const hashOk = expectedColumnHash ? observedHash === expectedColumnHash : missingHeaders.length === 0;
+  const accepted = Array.isArray(acceptedHeaderHashes) ? acceptedHeaderHashes.filter((v) => v?.hash) : [];
+  const acceptedMatch = accepted.find((v) => v.hash === observedHash) ?? null;
+  const hashOk = accepted.length
+    ? Boolean(acceptedMatch)
+    : expectedColumnHash
+      ? observedHash === expectedColumnHash
+      : missingHeaders.length === 0;
   return {
     ok: hashOk && missingHeaders.length === 0,
     observedHash,
     expectedHash: expectedColumnHash || null,
+    contractVersion: acceptedMatch?.version ?? null,
+    acceptedHashes: accepted.map((v) => v.hash),
     missingHeaders,
     unexpectedHeaders
   };

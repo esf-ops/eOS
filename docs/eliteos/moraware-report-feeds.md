@@ -168,6 +168,8 @@ Two canonical paths relative to the Moraware base URL (org-specific host from in
 
 **Date window:** Controlled by the **saved Moraware report view** (view 219), not by the downloader. For Sales Worksheet Facts, the intended default is **Year-to-Date / current year** as configured in Moraware Admin on that saved view.
 
+**Sales Ops actual-SF (2026-08-28):** View 219 is the governed `COMPLETED_INSTALLATION_SF` source. Header contract accepts two explicit hashes (CS Challenging and CS Billable). Unknown hashes block. Typed facts live in `moraware_prepared_completed_install_form_facts`. API-mirror job matching applies in 500-row RPC batches. Attribution stays off until Account Directory identity is approved. See `FEATURE_DECISIONS.md` §343.
+
 **v1 rule:** The downloader **must not** manipulate Moraware date pickers, query params for date ranges, or UI automation to change the window. If the saved view’s date range is wrong, fix it in Moraware Admin — do not scrape around it.
 
 `metadata` should include at minimum: `morawareViewId`, `reportType`, `organizationId`, `fetchedAt`, and optional `sourceHost` (no secrets).

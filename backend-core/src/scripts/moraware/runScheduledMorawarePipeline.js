@@ -22,6 +22,7 @@ const PIPELINE_DRY_RUN_AT_STARTUP = (() => {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const GENERATE_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/generateLiveCappedSnapshot.js");
 const IMPORT_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/importSnapshotToBrain.js");
+const VIEW_219_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/syncSalesWorksheetFactsFeed.js");
 const DEFAULT_SNAPSHOT_FILE = "debug/moraware/baseline-2026/chunked/manifest.json";
 const DEFAULT_SUMMARY_FILE = "debug/moraware/baseline-2026/baseline-2026-summary.json";
 const LOCK_FILE = path.join(REPO_ROOT, "debug/moraware/.pipeline.lock");
@@ -633,6 +634,31 @@ async function main() {
 
     if (!rebuild?.ok) {
       throw new Error(`Prepared facts rebuild returned non-ok status: ${JSON.stringify(rebuild)}`);
+    }
+
+    const skipView219 =
+      String(process.env.MORAWARE_VIEW_219_SYNC ?? "1").trim() === "0" ||
+      String(process.env.MORAWARE_VIEW_219_SYNC ?? "1").trim().toLowerCase() === "false";
+    if (skipView219) {
+      await logger.log("view_219_sync_skipped", { reason: "MORAWARE_VIEW_219_SYNC=0" });
+    } else {
+      await logger.log("view_219_sync_start", {
+        script: path.relative(REPO_ROOT, VIEW_219_SCRIPT),
+        organization_id: organizationId
+      });
+      const view219Started = Date.now();
+      const view219Result = spawnSync(process.execPath, [VIEW_219_SCRIPT], {
+        cwd: REPO_ROOT,
+        env: {
+          ...childProcessEnv(false),
+          SUPABASE_WRITE_ENABLED: String(process.env.SUPABASE_WRITE_ENABLED || "1")
+        },
+        stdio: "inherit"
+      });
+      if (view219Result.status !== 0) {
+        throw new Error(`Moraware view 219 completed-install facts failed with exit code ${view219Result.status ?? "unknown"}`);
+      }
+      await logger.log("view_219_sync_complete", { duration_ms: Date.now() - view219Started });
     }
 
     await logger.log("pipeline_success", {

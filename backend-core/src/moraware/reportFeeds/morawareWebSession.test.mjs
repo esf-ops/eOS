@@ -56,6 +56,21 @@ function testBuildLoginPostPayloadIncludesSubmit() {
   assert.equal(built.payload.btnLogin, "Log In");
 }
 
+function testPwdNamedPasswordField() {
+  const html = `<form method="post" action="/sys">
+    <input type="text" name="user" />
+    <input type="password" name="pwd" />
+    <input type="submit" name="LOGIN" value="Login" />
+  </form>`;
+  const form = extractLoginForm(html, "https://demo.moraware.net/sys");
+  const built = buildLoginPostPayload(form, { userName: "operator", password: "secret" });
+  assert.equal(built.ok, true);
+  assert.equal(built.userField, "user");
+  assert.equal(built.passField, "pwd");
+  assert.equal(built.payload.user, "operator");
+  assert.equal(built.payload.pwd, "secret");
+}
+
 function testCustomFieldOverrides() {
   const prevUser = process.env.MORAWARE_WEB_USERNAME_FIELD;
   const prevPass = process.env.MORAWARE_WEB_PASSWORD_FIELD;
@@ -305,6 +320,7 @@ const tests = [
   ["cookie jar", testCookieJar],
   ["extract login form action", testExtractLoginFormUsesAction],
   ["login payload includes submit", testBuildLoginPostPayloadIncludesSubmit],
+  ["pwd named password field", testPwdNamedPasswordField],
   ["custom field overrides", testCustomFieldOverrides],
   ["select best login form", testSelectBestLoginForm],
   ["looks like login html", testLooksLikeLoginHtml],

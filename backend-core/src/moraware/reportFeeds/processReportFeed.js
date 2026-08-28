@@ -4,7 +4,7 @@ import { parseReportHtmlIdentityRows } from "./parseReportHtml.js";
 import { buildIdentityMapFromHtmlRows } from "./buildIdentityMap.js";
 import { enrichReportRowsWithIdentity, IDENTITY_STATUS } from "./enrichReportRows.js";
 import { computeHeaderHash } from "./hashUtils.js";
-import { buildSchemaDrift } from "./schemaDriftPolicy.js";
+import { buildSchemaDrift, isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 
 export { IDENTITY_STATUS };
 
@@ -20,12 +20,15 @@ export function processReportFeedLocal(params) {
     reportType = "sales_worksheet_facts",
     expectedColumns = [],
     expectedColumnHash = null,
+    requiredColumns = null,
+    acceptedHeaderHashes = null,
     morawareViewId = null
   } = params;
 
   const parsed = parseCsvReportRows(csvText);
   const profile = profileReportColumns(parsed);
-  const headerValidation = validateHeaderContract(profile, expectedColumns, expectedColumnHash);
+  const required = Array.isArray(requiredColumns) && requiredColumns.length ? requiredColumns : expectedColumns;
+  const headerValidation = validateHeaderContract(profile, required, expectedColumnHash, acceptedHeaderHashes);
 
   const htmlIdentityRows = parseReportHtmlIdentityRows(htmlText);
   const identityMapResult = buildIdentityMapFromHtmlRows(htmlIdentityRows);
@@ -41,14 +44,17 @@ export function processReportFeedLocal(params) {
   const schemaDrift = buildSchemaDrift({
     expectedColumnHash,
     profile,
-    headerValidation
+    headerValidation,
+    acceptedHeaderHashes
   });
 
-  const runStatus = schemaDrift.detected
+  const runStatus = isSchemaDriftBlocking(schemaDrift)
+    ? "needs_review"
+    : schemaDrift.detected
     ? "needs_review"
     : enrichment.counts[IDENTITY_STATUS.AMBIGUOUS] > 0
-      ? "needs_review"
-      : "validated";
+    ? "needs_review"
+    : "validated";
 
   return {
     morawareViewId,
@@ -58,6 +64,7 @@ export function processReportFeedLocal(params) {
     runStatus,
     headerValidation,
     schemaDrift,
+    contractVersion: schemaDrift.contractVersion ?? headerValidation.contractVersion ?? null,
     profile,
     htmlIdentity: {
       rowCount: htmlIdentityRows.length,
@@ -90,9 +97,16 @@ export { computeHeaderHash, computeReportRowHash } from "./hashUtils.js";
 export { makeIdentityMatchKey, normalizeReportName } from "./textNormalize.js";
 export {
   SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS,
+  SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS,
+  SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE_HASH,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING,
+  SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH,
   SALES_WORKSHEET_FACTS_FEED_SEED,
   SALES_WORKSHEET_FACTS_REPORT_TYPE,
   SALES_WORKSHEET_FACTS_VIEW_ID,
+  FIRST_INSTALL_ACTIVITY_TYPES,
   SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS,
   SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
   SALES_WORKSHEET_HISTORY_FACTS_FEED_SEED,

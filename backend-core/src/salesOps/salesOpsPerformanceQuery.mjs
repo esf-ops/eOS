@@ -18,19 +18,19 @@ import {
 export const ACTUAL_SF_DEFINITION = Object.freeze({
   status: ACTUAL_SF_DEFINITION_STATUS,
   candidateMetric: COMPLETED_INSTALLATION_SF,
-  source: "moraware",
-  qualifyingEvent: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.observedEventColumn,
-  qualifyingDate: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.observedDateColumn,
-  sfField: "sales_moraware_job_worksheet_facts.sqft",
-  jobIdentity: "sales_moraware_job_worksheet_facts.source_job_id",
-  formIdentity: "sales_moraware_job_worksheet_facts.source_form_id",
+  source: "moraware_view_219",
+  qualifyingEvent: "First Install in Job",
+  qualifyingDate: "earliest qualifying First Install in Job Date",
+  sfField: "moraware_prepared_completed_install_form_facts.sqft",
+  jobIdentity: "moraware_prepared_completed_install_form_facts.source_job_id",
+  formIdentity: "moraware_prepared_completed_install_form_facts.source_form_id",
   requiredEvidence: REQUIRED_COMPLETED_INSTALLATION_EVIDENCE,
   missingEvidence: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.missing,
-  exclusions: null,
+  exclusions: "FORM_IDENTITY_UNRESOLVED holdout; Scheduled/Confirmed/Estimate excluded",
   reversalSemantics: "explicit_reversal_row_on_sales_ops_sf_attribution_facts",
-  confidence: "unproven",
+  confidence: "source_proven_identity_gated",
   rejectedProxies: REJECTED_SF_PROXIES,
-  note: "Worksheet prepared facts have job, form, and sqft. They do not expose a completed first-install event or date on the worksheet row. Job-level install_at_source / completed_at_source remain rejected proxies."
+  note: "View 219 typed completed-install form facts are the governed source. Attribution facts are not created until Account Directory identity and historical salesperson evidence exist. Unavailable stays unavailable, not zero."
 });
 
 function publishedPlans(plans) {

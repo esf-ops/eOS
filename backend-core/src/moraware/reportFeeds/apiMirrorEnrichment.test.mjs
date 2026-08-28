@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 import { buildApiMirrorIdentityMap } from "./buildApiMirrorIdentityMap.js";
 import { planApiMirrorEnrichment } from "./planApiMirrorEnrichment.js";
-import { enrichRunFromApiMirror } from "./enrichRunFromApiMirror.js";
+import { enrichRunFromApiMirror, applyMatchedIdentityRows, APPLY_IDENTITY_MATCHES_RPC } from "./enrichRunFromApiMirror.js";
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 
@@ -253,7 +253,7 @@ const STAGED_ROWS = [
 // ── enrichRunFromApiMirror (mock DB) ──────────────────────────────────────────
 
 /** Build a minimal mock Supabase client for enrichRunFromApiMirror tests. */
-function makeMockEnrichDb({ run, jobs = [], rawRows = [] } = {}) {
+function makeMockEnrichDb({ run, jobs = [], rawRows = [], rpcImpl = null } = {}) {
   const log = [];
 
   const db = {
@@ -313,6 +313,13 @@ function makeMockEnrichDb({ run, jobs = [], rawRows = [] } = {}) {
       return chain;
     }
   };
+
+  if (rpcImpl) {
+    db.rpc = async (name, args) => {
+      log.push({ op: "rpc", name, args });
+      return rpcImpl(name, args);
+    };
+  }
 
   return db;
 }
@@ -397,6 +404,54 @@ const FAKE_RAW_ROWS = [
   // No prepared facts written
   const preparedWrites = db._log.filter((e) => e.table === "moraware_prepared_sales_worksheet_facts");
   assert.equal(preparedWrites.length, 0, "apply: no prepared facts written");
+}
+
+{
+  // RPC apply: one batched round-trip, not one update per unique job
+  const db = makeMockEnrichDb({
+    run: FAKE_RUN,
+    jobs: SAMPLE_JOBS,
+    rawRows: FAKE_RAW_ROWS,
+    rpcImpl: async () => ({ data: 3, error: null })
+  });
+  const result = await enrichRunFromApiMirror(db, {
+    runId: FAKE_RUN_ID,
+    organizationId: FAKE_ORG,
+    dryRun: false
+  });
+  assert.equal(result.applied, true, "rpc-apply: applied");
+  const rpcs = db._log.filter((e) => e.op === "rpc");
+  assert.equal(rpcs.length, 1, "rpc-apply: one identity-match RPC batch");
+  assert.equal(rpcs[0].name, APPLY_IDENTITY_MATCHES_RPC, "rpc-apply: governed function name");
+  assert.equal(rpcs[0].args.p_organization_id, FAKE_ORG, "rpc-apply: org scoped");
+  assert.equal(rpcs[0].args.p_matches.length, 3, "rpc-apply: 3 matches in one payload");
+  const matchedRowUpdates = db._log.filter(
+    (e) => e.op === "update" && e.table === "moraware_report_raw_rows" && e.data?.identity_status === "matched"
+  );
+  assert.equal(matchedRowUpdates.length, 0, "rpc-apply: no per-job PostgREST matched updates");
+}
+
+{
+  // 1,200 unique job matches → 3 RPC batches of 500, never 1,200 round-trips
+  const many = Array.from({ length: 1200 }, (_, i) => ({
+    id: `row-${i}`,
+    account_id: `acct-${i}`,
+    job_id: `job-${i}`
+  }));
+  const rpcLog = [];
+  const db = {
+    rpc: async (name, args) => {
+      rpcLog.push({ name, n: args.p_matches.length });
+      return { data: args.p_matches.length, error: null };
+    }
+  };
+  const out = await applyMatchedIdentityRows(db, { organizationId: FAKE_ORG, toMatch: many });
+  assert.equal(out.mode, "rpc", "perf: rpc mode");
+  assert.equal(out.batches, 3, "perf: 3 batches of 500");
+  assert.equal(rpcLog[0].n, 500, "perf: first batch 500");
+  assert.equal(rpcLog[1].n, 500, "perf: second batch 500");
+  assert.equal(rpcLog[2].n, 200, "perf: remainder 200");
+  assert.ok(rpcLog.length < many.length, "perf: batches << unique jobs (no per-job N+1)");
 }
 
 {

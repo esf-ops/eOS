@@ -11,7 +11,8 @@
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# 1:30 AM US Central, nightly Moraware → Sales pipeline (~60–90 min typical)
+# 1:30 AM US Central, nightly Moraware incremental → worksheet rebuild → view 219 completed-install facts
+# (~60–90 min incremental typical; view 219 CSV fetch ~2 min additional)
 30 1 * * * TZ=America/Chicago /opt/eliteos/eOS/deploy/moraware-worker/run-moraware-worker.sh >> /var/log/eliteos/moraware-nightly.log 2>&1
 
 # Alternative: 2:00 AM Central

@@ -4647,4 +4647,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Monday/Moraware/QuickBooks writes, fuzzy auto-link, manufacturing worksheet install dates, publishing a real salesperson plan, marking compensation finally approved, crediting production SF. |
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v5 SQL, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
 
+### 343. COMPLETED_INSTALLATION_SF source is JobTracker view 219 report export (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | `COMPLETED_INSTALLATION_SF` is ingested from JobTracker **view 219** via the existing report-feed worker path (`fetchReportFeedArtifacts` → stage → API-mirror job ids → unique form-name join → `moraware_prepared_completed_install_form_facts`). Crediting rule: First Install **in Job**, statuses Complete/Installed (Completed spelling accepted), earliest qualifying in-Job Date, worksheet/form SF summed at `organization_id + source_job_id + source_form_id`. Ambiguous job+form-name groups stay `FORM_IDENTITY_UNRESOLVED` and are not creditable. Header contract accepts two explicit hashes (CS Challenging May 2026 and CS Billable Report 4 / live); unknown hashes block. View 219 runs on the Mac mini **after** the existing incremental pipeline (`runScheduledMorawarePipeline`); do not add a second worker host. Moraware salesperson fields never establish Sales Ops ownership. Current Monday ownership does not rewrite history. **Do not** populate `sales_ops_sf_attribution_facts` until Account Directory identity and historical salesperson evidence exist. Actuals stay unavailable (`IDENTITY_APPROVAL_REQUIRED`), never coerced to zero. |
+| **Why** | The business-accepted baseline is this report’s First Install Complete/Installed date plus worksheet SF. The API/activity mirror cannot reconstruct that grain. |
+| **Schema** | Additive `backend-core/supabase/eliteos_moraware_completed_install_form_facts_v1.sql` and `eliteos_moraware_report_feed_identity_match_apply_v1.sql`. Do not rewrite `eliteos_moraware_report_feeds.sql`. API-mirror identity apply uses a service_role RPC in 500-row batches (grouped PostgREST fallback if the function is missing). |
+| **Out of scope** | Creating attribution facts, Monday/Moraware/QuickBooks writes, fuzzy identity, publishing a Thera plan, finally approving compensation. |
+| **Impacted** | report-feed modules, `runScheduledMorawarePipeline.js`, Sales Ops actual-SF definition, this doc, SYSTEM_BLUEPRINT, `docs/eliteos/moraware-report-feeds.md`. |
+
 

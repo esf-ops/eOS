@@ -104,6 +104,64 @@ export const SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS = [
   "Total Job Worksheet - Sq.Ft. by Job Creation Date"
 ];
 
+/** Columns that must be present on every accepted view 219 variant. */
+export const SALES_WORKSHEET_FACTS_REQUIRED_COLUMNS = Object.freeze([
+  "Account Name",
+  "Job Name",
+  "Job Worksheet - Form Name",
+  "Total Job Worksheet - Sq.Ft. by Job Creation Date",
+  "First Install - Quartz Basic in Job Status",
+  "First Install - Quartz Basic in Job Date",
+  "First Install - Quartz Challenging in Job Status",
+  "First Install - Quartz Challenging in Job Date",
+  "First Install - Granite Basic in Job Status",
+  "First Install - Granite Basic in Job Date",
+  "First Install - Granite Challenging in Job Status",
+  "First Install - Granite Challenging in Job Date",
+  "First Install - Quartzite/Marble in Job Status",
+  "First Install - Quartzite/Marble in Job Date",
+  "First Install - Waterfalls in Job Status",
+  "First Install - Waterfalls in Job Date",
+  "First Install - Special Edge in Job Status",
+  "First Install - Special Edge in Job Date",
+  "First Install - Fireplace/Shower Walls in Job Status",
+  "First Install - Fireplace/Shower Walls in Job Date"
+]);
+
+export const FIRST_INSTALL_ACTIVITY_TYPES = Object.freeze([
+  "Quartz Basic",
+  "Quartz Challenging",
+  "Granite Basic",
+  "Granite Challenging",
+  "Quartzite/Marble",
+  "Waterfalls",
+  "Special Edge",
+  "Fireplace/Shower Walls"
+]);
+
+/** May 2026 live export — Customer Service Challenging (historical hash lock). */
+export const SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING = "v1_cs_challenging";
+export const SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH =
+  "8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade";
+
+/** Live/Report (4) — Customer Service Billable substitution (verified 2026-08-28). */
+export const SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE = "v1_cs_billable";
+export const SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE_HASH =
+  "f08ad089002e593a212d49d716c06cf32776daa583d8ebaff7bf1bea74143c8b";
+
+export const SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES = Object.freeze([
+  {
+    version: SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING,
+    hash: SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH,
+    label: "Customer Service Challenging (May 2026 contract)"
+  },
+  {
+    version: SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE,
+    hash: SALES_WORKSHEET_FACTS_CONTRACT_CS_BILLABLE_HASH,
+    label: "Customer Service Billable (Report 4 / live 2026-08-28)"
+  }
+]);
+
 export const SALES_WORKSHEET_FACTS_FEED_SEED = {
   name: "eliteOS - Sales Worksheet Facts",
   moraware_view_id: SALES_WORKSHEET_FACTS_VIEW_ID,
@@ -111,9 +169,11 @@ export const SALES_WORKSHEET_FACTS_FEED_SEED = {
   export_path: SALES_WORKSHEET_FACTS_EXPORT_PATH,
   html_path: SALES_WORKSHEET_FACTS_HTML_PATH,
   expected_columns: SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS,
-  cadence: "manual",
+  expected_column_hash: SALES_WORKSHEET_FACTS_CONTRACT_CS_CHALLENGING_HASH,
+  accepted_header_hashes: SALES_WORKSHEET_FACTS_ACCEPTED_HEADER_HASHES,
+  cadence: "daily_after_incremental",
   notes:
-    "Additive report-feed lane beside Moraware API sync. CSV supplies business columns; HTML supplies /sys/job and /sys/account IDs."
+    "Additive report-feed lane beside Moraware API sync. CSV supplies business columns and First Install in-Job fields; HTML supplies /sys/job and /sys/account IDs. Accepted header hashes version Challenging vs Billable CS columns."
 };
 
 // ── View 220: Sales Worksheet History Facts ───────────────────────────────────

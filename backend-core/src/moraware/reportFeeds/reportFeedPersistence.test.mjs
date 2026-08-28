@@ -99,6 +99,23 @@ function makeProcessResult(overrides = {}) {
   assert.equal(typeof payload.observed_header_hash, "string", "run insert: header hash is string");
   assert.equal(payload.observed_header_hash.length, 64, "run insert: header hash is sha256");
   assert.equal(payload.row_count, 5, "run insert: row count from fixtures");
+}
+
+{
+  const result = makeProcessResult({
+    contractVersion: "v1_cs_billable",
+    schemaDrift: { detected: false, contractVersion: "v1_cs_billable" }
+  });
+  const payload = buildReportRunInsert({
+    feed: FAKE_FEED,
+    processResult: result,
+    sourceFiles: { fetchMode: "moraware_live" }
+  });
+  assert.equal(payload.observed_contract_version, "v1_cs_billable", "run insert: records accepted contract version");
+  assert.equal(payload.source_mode, "moraware_live", "run insert: live fetch source_mode");
+  const update = buildRunFinalUpdate({ runId: FAKE_RUN_ID, processResult: result });
+  assert.equal(update.observed_contract_version, "v1_cs_billable", "final update: records accepted contract version");
+  assert.equal(update.summary.contractVersion, "v1_cs_billable", "final update: summary.contractVersion");
   assert.equal(payload.error_message, null, "run insert: no error message initially");
 }
 

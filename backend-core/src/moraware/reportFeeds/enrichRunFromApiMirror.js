@@ -21,6 +21,7 @@ const JOBS_PAGE_SIZE = 1000;
 const RAW_ROWS_PAGE_SIZE = 1000;
 const UPDATE_BATCH_SIZE = 500;
 const IDENTITY_LINKS_BATCH_SIZE = 500;
+export const APPLY_IDENTITY_MATCHES_RPC = "eliteos_apply_report_feed_raw_row_identity_matches";
 
 /** Wrap a bare Supabase/PostgREST error object so it has a usable .stack. */
 function toError(err) {
@@ -62,6 +63,63 @@ async function fetchAllPages(db, table, filters, select, pageSize) {
     from += pageSize;
   }
   return all;
+}
+
+/**
+ * Apply matched identity in 500-row batches via RPC (one round-trip per batch).
+ * Falls back to grouped PostgREST updates when the function is unavailable.
+ */
+export async function applyMatchedIdentityRows(db, { organizationId, toMatch }) {
+  if (!toMatch.length) return { mode: "noop", batches: 0 };
+
+  if (typeof db.rpc === "function") {
+    try {
+      let batches = 0;
+      for (let i = 0; i < toMatch.length; i += UPDATE_BATCH_SIZE) {
+        const chunk = toMatch.slice(i, i + UPDATE_BATCH_SIZE).map((entry) => ({
+          id: entry.id,
+          account_id: entry.account_id,
+          job_id: entry.job_id
+        }));
+        const { error } = await db.rpc(APPLY_IDENTITY_MATCHES_RPC, {
+          p_organization_id: organizationId,
+          p_matches: chunk
+        });
+        if (error) throw toError(error);
+        batches += 1;
+      }
+      return { mode: "rpc", batches };
+    } catch {
+      // Function missing or RPC denied — grouped updates still correct, just slower.
+    }
+  }
+
+  const matchGroups = new Map();
+  for (const entry of toMatch) {
+    const gKey = `${entry.account_id}||${entry.job_id}`;
+    if (!matchGroups.has(gKey)) {
+      matchGroups.set(gKey, { account_id: entry.account_id, job_id: entry.job_id, ids: [] });
+    }
+    matchGroups.get(gKey).ids.push(entry.id);
+  }
+  let batches = 0;
+  for (const { account_id, job_id, ids } of matchGroups.values()) {
+    for (let i = 0; i < ids.length; i += UPDATE_BATCH_SIZE) {
+      const chunk = ids.slice(i, i + UPDATE_BATCH_SIZE);
+      const { error } = await db
+        .from("moraware_report_raw_rows")
+        .update({
+          account_id,
+          job_id,
+          identity_status: "matched",
+          identity_reason: "api_mirror_exact_account_job"
+        })
+        .in("id", chunk);
+      if (error) throw toError(error);
+      batches += 1;
+    }
+  }
+  return { mode: "grouped", batches };
 }
 
 /**
@@ -138,30 +196,8 @@ export async function enrichRunFromApiMirror(db, { runId, organizationId, dryRun
     };
   }
 
-  // Step 7: Apply — write matched updates, grouped by (account_id, job_id) for efficiency
-  const matchGroups = new Map();
-  for (const entry of plan.toMatch) {
-    const gKey = `${entry.account_id}||${entry.job_id}`;
-    if (!matchGroups.has(gKey)) {
-      matchGroups.set(gKey, { account_id: entry.account_id, job_id: entry.job_id, ids: [] });
-    }
-    matchGroups.get(gKey).ids.push(entry.id);
-  }
-  for (const { account_id, job_id, ids } of matchGroups.values()) {
-    for (let i = 0; i < ids.length; i += UPDATE_BATCH_SIZE) {
-      const chunk = ids.slice(i, i + UPDATE_BATCH_SIZE);
-      const { error } = await db
-        .from("moraware_report_raw_rows")
-        .update({
-          account_id,
-          job_id,
-          identity_status: "matched",
-          identity_reason: "api_mirror_exact_account_job"
-        })
-        .in("id", chunk);
-      if (error) throw toError(error);
-    }
-  }
+  // Step 7: Apply matched identity in 500-row batches (RPC, with grouped fallback)
+  await applyMatchedIdentityRows(db, { organizationId, toMatch: plan.toMatch });
 
   // Apply — write ambiguous updates (all get the same field values)
   const ambiguousIds = plan.toAmbiguous.map((r) => r.id);

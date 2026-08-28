@@ -61,10 +61,12 @@ export function buildReportRunInsert({ feed, processResult, sourceFiles = {} }) 
     report_feed_id: feed.id,
     status: "running",
     started_at: now,
-    source_mode: "local_file",
+    source_mode: sourceFiles.fetchMode || "local_file",
     csv_storage_path: sourceFiles.csvPath ?? null,
     html_storage_path: sourceFiles.htmlPath ?? null,
     observed_header_hash: processResult.profile?.headerHash ?? null,
+    observed_contract_version:
+      processResult.contractVersion ?? processResult.schemaDrift?.contractVersion ?? null,
     expected_header_hash: feed.expected_column_hash ?? null,
     row_count: processResult.profile?.rowCount ?? 0,
     matched_identity_count: processResult.enrichment?.counts?.matched ?? 0,
@@ -178,9 +180,12 @@ export function buildRunFinalUpdate({ runId, processResult, error = null }) {
     unmatched_identity_count: processResult.enrichment?.counts?.needs_identity_review ?? 0,
     ambiguous_identity_count: processResult.enrichment?.counts?.ambiguous_identity ?? 0,
     observed_header_hash: processResult.profile?.headerHash ?? null,
+    observed_contract_version:
+      processResult.contractVersion ?? processResult.schemaDrift?.contractVersion ?? null,
     schema_drift: processResult.schemaDrift ?? {},
     summary: {
       headerValidation: processResult.headerValidation ?? null,
+      contractVersion: processResult.contractVersion ?? processResult.schemaDrift?.contractVersion ?? null,
       duplicatePreparedFacts: processResult.enrichment?.duplicatePreparedFacts ?? [],
       htmlIdentityRowCount: processResult.htmlIdentity?.rowCount ?? 0,
       htmlIdentityUniqueKeyCount: processResult.htmlIdentity?.uniqueKeyCount ?? 0,
