@@ -1053,18 +1053,15 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const actor = actorFromUser(user);
       assertActor(actor);
       if (!isOrgAdminRole(actor.role)) {
-        const reports = await store.listReportsForManager(actor.organizationId, actor.userId);
-        if (!reports.length) {
-          const cfg = await store.getMondayConfig(actor.organizationId);
-          return {
-            mondayEnabled: Boolean(cfg?.enabled),
-            mondayReadEnabled: isMondayReadEnabled(cfg),
-            mondayWriteEnabled: isMondayWriteEnabled(cfg),
-            lastSuccessAt: cfg?.lastSuccessAt ?? null,
-            lastFullReconcileAt: cfg?.lastFullReconcileAt ?? null,
-            stale: Boolean(cfg?.lastSuccessAt) ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000 : true
-          };
-        }
+        const cfg = await store.getMondayConfig(actor.organizationId);
+        return {
+          mondayEnabled: Boolean(cfg?.enabled),
+          mondayReadEnabled: isMondayReadEnabled(cfg),
+          mondayWriteEnabled: isMondayWriteEnabled(cfg),
+          lastSuccessAt: cfg?.lastSuccessAt ?? null,
+          lastFullReconcileAt: cfg?.lastFullReconcileAt ?? null,
+          stale: Boolean(cfg?.lastSuccessAt) ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000 : true
+        };
       }
       const cfg = await store.getMondayConfig(actor.organizationId);
       const stats = typeof store.countMondayMirrorStats === "function"

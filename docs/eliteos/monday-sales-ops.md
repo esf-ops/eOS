@@ -52,6 +52,8 @@ This phase is **read-only**.
 
 Do **not** create production Monday webhooks in this phase. The webhook route remains: event-id idempotency, fetch-after-event, source `updated_at` comparison. **There is no 120-second echo suppression window.**
 
+`MONDAY_APP_SIGNING_SECRET` is currently **missing** on production Brain. Therefore `webhook_ids` stay empty and inbound board subscriptions are not created. Future enablement (separate approval): store the App signing secret only on Brain, confirm the challenge/JWT path, then create the board webhook and persist its id in `sales_ops_monday_config.webhook_ids`. Do not invent a secret, do not put it in a head, and do not enable Monday **writes** as part of webhook setup.
+
 ## Reconciliation
 
 Full census (maintenance, not per-page browsing):

@@ -28,6 +28,9 @@ for (const f of files) {
 const app = read("src/ui/SalesOpsApp.tsx");
 assert.ok(app.includes("/api/sales-ops/me/accounts?limit=50"));
 assert.ok(app.includes("/updates?limit=50"));
+assert.ok(app.includes("cursor="));
+assert.ok(!app.includes("api.monday.com"));
+assert.ok(!app.includes("localhost:3001"));
 assert.ok(app.includes("EliteosTopbar"));
 assert.ok(app.includes("PlanAdmin"));
 assert.ok(!app.includes("Thera's path"));

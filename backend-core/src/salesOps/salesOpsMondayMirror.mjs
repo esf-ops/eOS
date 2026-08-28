@@ -193,8 +193,7 @@ export function toDocDto(row) {
     mondayDocId: row.mondayDocId,
     title: row.title ?? null,
     columnId: row.columnId ?? null,
-    accessibility: row.accessibility || "unknown",
-    sourceUrl: row.sourceUrl ?? null
+    accessibility: row.accessibility || "unknown"
   };
 }
 

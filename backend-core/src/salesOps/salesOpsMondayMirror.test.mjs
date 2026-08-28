@@ -589,6 +589,23 @@ async function main() {
   assertNoForbiddenDto(detail.account);
   assert.ok(Array.isArray(detail.account.columns));
   assert.equal(detail.account.columns.some((c) => Object.prototype.hasOwnProperty.call(c, "value")), false);
+  await authStore.upsertMondayAsset({
+    organizationId: ORG,
+    mondayBoardId: BOARD,
+    mondayItemId: "a",
+    mondayAssetId: "asset-a1",
+    filename: "quote.pdf",
+    associatedKind: "item"
+  });
+  const files = await authSvc.getAccountFiles(user(REP_A, "sales"), aId);
+  assert.ok(files.files.some((f) => f.mondayAssetId === "asset-a1"));
+  assert.equal(files.files.some((f) => Object.prototype.hasOwnProperty.call(f, "url") || Object.prototype.hasOwnProperty.call(f, "publicUrl")), false);
+  await assert.rejects(
+    () => authSvc.getAccountFile(user(REP_A, "sales"), aId, files.files.find((f) => f.mondayAssetId === "asset-a1").id),
+    (e) => e.status === 409 && e.code === "asset_fetch_not_enabled"
+  );
+  const docsDto = await authSvc.getAccountDocs(user(REP_A, "sales"), aId);
+  assert.equal(docsDto.docs.some((d) => Object.prototype.hasOwnProperty.call(d, "sourceUrl") || Object.prototype.hasOwnProperty.call(d, "source_url")), false);
 
   // 42. Monday credentials cannot enter frontend
   assert.ok(!/MONDAY_API_TOKEN|SERVICE_ROLE|SIGNING_SECRET/.test(feSrc + feApi));

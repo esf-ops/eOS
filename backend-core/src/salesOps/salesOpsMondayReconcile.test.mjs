@@ -9,7 +9,7 @@ import { createSalesOpsMemoryStore } from "./salesOpsMemoryStore.mjs";
 import { createSalesOpsService } from "./salesOpsService.mjs";
 import { createSalesOpsMondayClient } from "./salesOpsMonday.mjs";
 import { reprojectAccountsFromMirror } from "./salesOpsMondayBatch.mjs";
-import { createReconcileProgress, deriveActivityState, sanitizeProgress } from "./salesOpsMondayProgress.mjs";
+import { createReconcileProgress, deriveActivityState, sanitizeProgress, RECONCILE_STAGES } from "./salesOpsMondayProgress.mjs";
 import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 import { attachSalesOpsRoutes } from "./salesOpsApi.js";
 import { SALES_OPS_ACCOUNT_UPSERT_BATCH, SALES_OPS_EAV_ITEM_ID_BATCH, SALES_OPS_RECONCILE_STALL_MS } from "./salesOpsConstants.js";
@@ -220,14 +220,34 @@ async function main() {
   const cfg = await store.getMondayConfig(ORG);
   const result = await reprojectAccountsFromMirror(store, { organizationId: ORG, cfg });
   assert.equal(result.parents, 1000);
-  assert.equal(counts.getRepMappingByMondayUser || 0, 0);
-  assert.equal(counts.listRepMappings, 1);
-  assert.equal(counts.listMondayColumnValues || 0, 0);
-  assert.equal(counts.listMondayColumnValuesForItems, 1);
-  assert.equal(counts.upsertAccount || 0, 0);
-  assert.ok(counts.upsertAccountsBatch <= Math.ceil(1000 / SALES_OPS_ACCOUNT_UPSERT_BATCH));
-  assert.equal(store.metrics.eavSelectChunks, Math.ceil(1000 / SALES_OPS_EAV_ITEM_ID_BATCH));
-  assert.ok(store.metrics.accountUpsertChunks <= Math.ceil(1000 / SALES_OPS_ACCOUNT_UPSERT_BATCH));
+  const expectedEavBatches = Math.ceil(1000 / SALES_OPS_EAV_ITEM_ID_BATCH);
+  const expectedUpsertBatches = Math.ceil(1000 / SALES_OPS_ACCOUNT_UPSERT_BATCH);
+  const n1Proof = {
+    syntheticAccounts: 1000,
+    getRepMappingByMondayUser: counts.getRepMappingByMondayUser || 0,
+    listRepMappings: counts.listRepMappings || 0,
+    listMondayColumnValues: counts.listMondayColumnValues || 0,
+    listMondayColumnValuesForItems: counts.listMondayColumnValuesForItems || 0,
+    eavSelectChunks: store.metrics.eavSelectChunks,
+    upsertAccount: counts.upsertAccount || 0,
+    upsertAccountsBatch: counts.upsertAccountsBatch || 0,
+    accountUpsertChunks: store.metrics.accountUpsertChunks,
+    inspectBoard: counts.inspectBoard || 0,
+    mondayApiCalls: 0
+  };
+  console.log(`SALES_OPS_N1_PROOF ${JSON.stringify(n1Proof)}`);
+  assert.equal(n1Proof.getRepMappingByMondayUser, 0);
+  assert.equal(n1Proof.listRepMappings, 1);
+  assert.equal(n1Proof.listMondayColumnValues, 0);
+  assert.equal(n1Proof.listMondayColumnValuesForItems, 1);
+  assert.equal(n1Proof.eavSelectChunks, expectedEavBatches);
+  assert.equal(n1Proof.upsertAccount, 0);
+  assert.equal(n1Proof.upsertAccountsBatch, expectedUpsertBatches);
+  assert.equal(n1Proof.accountUpsertChunks, expectedUpsertBatches);
+  assert.equal(n1Proof.inspectBoard, 0);
+  assert.equal(n1Proof.mondayApiCalls, 0);
+  assert.ok(expectedEavBatches < 1000);
+  assert.ok(expectedUpsertBatches < 1000);
   const mapped = await store.getAccountByMondayItem(ORG, "n1-1");
   assert.equal(mapped.assignedUserId, REP_A);
   const unmappedPerson = await store.getAccountByMondayItem(ORG, "n1-7");
@@ -351,6 +371,33 @@ async function main() {
     Date.now()
   );
   assert.equal(stalled, "STALLED");
+  const now = Date.now();
+  const recent = new Date(now).toISOString();
+  const staleIso = new Date(now - SALES_OPS_RECONCILE_STALL_MS - 1000).toISOString();
+  assert.equal(deriveActivityState({ status: "running", lastProgressAt: recent, rateLimitActive: false }, now), "ACTIVE");
+  assert.equal(
+    deriveActivityState({ status: "running", lastProgressAt: staleIso, rateLimitActive: true }, now),
+    "RATE_LIMITED"
+  );
+  assert.equal(deriveActivityState({ status: "completed", lastProgressAt: staleIso, rateLimitActive: false }, now), "COMPLETE");
+  assert.equal(deriveActivityState({ status: "failed", lastProgressAt: staleIso, rateLimitActive: false }, now), "FAILED");
+  for (const stage of [
+    "schema",
+    "parent_items",
+    "column_values",
+    "subitems",
+    "updates",
+    "replies",
+    "assets",
+    "docs",
+    "users",
+    "groups",
+    "projection",
+    "membership_reconcile",
+    "complete"
+  ]) {
+    assert.ok(RECONCILE_STAGES.includes(stage), stage);
+  }
   const safe = sanitizeProgress({
     runId: "run-1",
     status: "running",
@@ -487,6 +534,13 @@ async function main() {
   const health = await mapSvc.integrationHealth(user(ADMIN, "admin"));
   assert.equal(health.writeEnabled, false);
   assert.ok(health.reconcile);
+  const mgrHealth = await mapSvc.integrationHealth(user(MGR, "sales"));
+  assert.equal(Object.prototype.hasOwnProperty.call(mgrHealth, "reconcile"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(mgrHealth, "parentBoardId"), false);
+  const repHealth = await mapSvc.integrationHealth(user(REP_A, "sales"));
+  assert.equal(Object.prototype.hasOwnProperty.call(repHealth, "reconcile"), false);
+  await assert.rejects(() => mapSvc.getReconcileStatus(user(REP_A, "sales")), (e) => e.status === 403);
+  await assert.rejects(() => mapSvc.getReconcileStatus(user(MGR, "sales")), (e) => e.status === 403);
 
   // Status endpoint authorization
   const app = express();
