@@ -147,6 +147,21 @@ export const SALES_OPS_ACCOUNT_LIST_MAX_LIMIT = 100;
 export const SALES_OPS_HEAVY_DEFAULT_LIMIT = 50;
 export const SALES_OPS_HEAVY_MAX_LIMIT = 100;
 
+/** Bounded persist/read chunks. Keep statements well under PostgREST payload limits. */
+export const SALES_OPS_ITEM_PAGE_SIZE = 50;
+export const SALES_OPS_EAV_ITEM_ID_BATCH = 100;
+export const SALES_OPS_COLUMN_UPSERT_BATCH = 200;
+export const SALES_OPS_ACCOUNT_UPSERT_BATCH = 100;
+export const SALES_OPS_ITEM_UPSERT_BATCH = 50;
+export const SALES_OPS_UPDATE_UPSERT_BATCH = 100;
+export const SALES_OPS_ASSET_UPSERT_BATCH = 100;
+export const SALES_OPS_DOC_UPSERT_BATCH = 50;
+export const SALES_OPS_USER_UPSERT_BATCH = 50;
+export const SALES_OPS_GROUP_UPSERT_BATCH = 50;
+export const SALES_OPS_UPDATES_ITEM_ID_BATCH = 5;
+export const SALES_OPS_DOC_FETCH_BATCH = 10;
+export const SALES_OPS_RECONCILE_STALL_MS = 180000;
+
 /** Account Directory exact Monday link. Distinct from Excel `account_master_list`. */
 export const SALES_OPS_MONDAY_EXTERNAL_SYSTEM = "monday";
 

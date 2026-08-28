@@ -323,7 +323,7 @@ function mapCommission(row) {
 }
 
 function accountWrite(row) {
-  return {
+  const payload = {
     organization_id: row.organizationId,
     monday_board_id: row.mondayBoardId,
     monday_item_id: String(row.mondayItemId),
@@ -354,10 +354,15 @@ function accountWrite(row) {
     last_seen_at: row.lastSeenAt ?? null,
     source_state: row.sourceState || (row.archived ? "archived" : "active"),
     synced_at: row.syncedAt ?? null,
-    archived: Boolean(row.archived),
-    last_eliteos_mutation_hash: row.lastEliteosMutationHash ?? null,
-    last_eliteos_mutation_at: row.lastEliteosMutationAt ?? null
+    archived: Boolean(row.archived)
   };
+  if (row.lastEliteosMutationHash !== undefined) {
+    payload.last_eliteos_mutation_hash = row.lastEliteosMutationHash ?? null;
+  }
+  if (row.lastEliteosMutationAt !== undefined) {
+    payload.last_eliteos_mutation_at = row.lastEliteosMutationAt ?? null;
+  }
+  return payload;
 }
 
 /**
@@ -803,6 +808,38 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) throwDb(error, "Could not load Monday rep mapping.");
       return mapRepMapping(data);
     },
+    async listRepMappings(organizationId) {
+      const { data, error } = await db()
+        .from("sales_ops_monday_rep_mappings")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("active", true);
+      if (error) throwDb(error, "Could not list Monday rep mappings.");
+      return (data || []).map(mapRepMapping);
+    },
+    async listActiveOrganizationUsers(organizationId) {
+      const { data, error } = await db()
+        .from("user_profiles")
+        .select("id,email,is_active,organization_id")
+        .eq("organization_id", organizationId)
+        .eq("is_active", true);
+      if (error) throwDb(error, "Could not list organization users.");
+      return (data || []).map((u) => ({
+        id: u.id,
+        email: u.email || null,
+        isActive: u.is_active !== false,
+        organizationId: u.organization_id
+      }));
+    },
+    async listDistinctMondayAssignedUserIds(organizationId) {
+      const { data, error } = await db()
+        .from("sales_ops_accounts")
+        .select("monday_assigned_user_id")
+        .eq("organization_id", organizationId)
+        .not("monday_assigned_user_id", "is", null);
+      if (error) throwDb(error, "Could not list Monday assigned people.");
+      return [...new Set((data || []).map((r) => String(r.monday_assigned_user_id)).filter(Boolean))];
+    },
 
     async upsertAccount(row) {
       const existing = await this.getAccountByMondayItem(row.organizationId, row.mondayItemId);
@@ -821,6 +858,16 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       const { data, error } = await db().from("sales_ops_accounts").insert(payload).select("*").single();
       if (error) throwDb(error, "Could not create Sales Ops account.");
       return mapAccount(data);
+    },
+    async upsertAccountsBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const payload = list.map(accountWrite);
+      const { error } = await db()
+        .from("sales_ops_accounts")
+        .upsert(payload, { onConflict: "organization_id,monday_board_id,monday_item_id" });
+      if (error) throwDb(error, "Could not batch-save Sales Ops accounts.");
+      return payload;
     },
 
     async getAccount(organizationId, accountId) {
@@ -1440,6 +1487,24 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) return null;
       return data?.account_id ? { accountId: data.account_id } : null;
     },
+    async listMondayAccountDirectoryLinks(organizationId, boardId = null) {
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("account_id,external_id")
+        .eq("organization_id", organizationId)
+        .eq("external_system", SALES_OPS_MONDAY_EXTERNAL_SYSTEM)
+        .eq("is_active", true);
+      if (error) return [];
+      const out = [];
+      const prefix = boardId ? `${boardId}:` : null;
+      for (const row of data || []) {
+        const ext = String(row.external_id || "");
+        if (prefix && !ext.startsWith(prefix)) continue;
+        const itemId = ext.includes(":") ? ext.slice(ext.indexOf(":") + 1) : ext;
+        if (itemId && row.account_id) out.push({ mondayItemId: itemId, accountId: row.account_id, boardId });
+      }
+      return out;
+    },
 
     async getMondayItem(organizationId, boardId, mondayItemId) {
       const { data, error } = await db()
@@ -1460,6 +1525,15 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .single();
       if (error) throwDb(error, "Could not save Monday item mirror.");
       return mapMondayItem(data);
+    },
+    async upsertMondayItemsBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_items")
+        .upsert(list.map(mondayItemWrite), { onConflict: "organization_id,monday_board_id,monday_item_id" });
+      if (error) throwDb(error, "Could not batch-save Monday item mirror.");
+      return list;
     },
     async listMondayItems(organizationId, { boardId = null, parentMondayItemId = null, itemKind = null } = {}) {
       let q = db().from("sales_ops_monday_items").select("*").eq("organization_id", organizationId);
@@ -1492,6 +1566,17 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) throwDb(error, "Could not save Monday column value.");
       return mapMondayColumn(data);
     },
+    async upsertMondayColumnValuesBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_column_values")
+        .upsert(list.map(mondayColumnWrite), {
+          onConflict: "organization_id,monday_board_id,monday_item_id,column_id"
+        });
+      if (error) throwDb(error, "Could not batch-save Monday column values.");
+      return list;
+    },
     async listMondayColumnValues(organizationId, boardId, mondayItemId) {
       const { data, error } = await db()
         .from("sales_ops_monday_column_values")
@@ -1501,6 +1586,30 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .eq("monday_item_id", String(mondayItemId));
       if (error) throwDb(error, "Could not list Monday column values.");
       return (data || []).map(mapMondayColumn);
+    },
+    async listMondayColumnValuesForItems(organizationId, mondayItemIds, { chunkSize = 100 } = {}) {
+      const ids = [...new Set((mondayItemIds || []).map(String).filter(Boolean))];
+      const out = [];
+      const n = Math.max(1, Number(chunkSize) || 100);
+      const pageSize = 1000;
+      for (let i = 0; i < ids.length; i += n) {
+        const chunkIds = ids.slice(i, i + n);
+        let from = 0;
+        for (;;) {
+          const { data, error } = await db()
+            .from("sales_ops_monday_column_values")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .in("monday_item_id", chunkIds)
+            .range(from, from + pageSize - 1);
+          if (error) throwDb(error, "Could not list Monday column values.");
+          const rows = data || [];
+          out.push(...rows.map(mapMondayColumn));
+          if (rows.length < pageSize) break;
+          from += pageSize;
+        }
+      }
+      return out;
     },
     async upsertMondayUpdate(row) {
       const { data, error } = await db()
@@ -1526,6 +1635,15 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .single();
       if (error) throwDb(error, "Could not save Monday update.");
       return mapMondayUpdate(data);
+    },
+    async upsertMondayUpdatesBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_updates")
+        .upsert(list.map(mondayUpdateWrite), { onConflict: "organization_id,monday_update_id" });
+      if (error) throwDb(error, "Could not batch-save Monday updates.");
+      return list;
     },
     async listMondayUpdatesPage(organizationId, mondayItemId, { limit = 50, offset = 0 } = {}) {
       const { data, error, count } = await db()
@@ -1564,6 +1682,15 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .single();
       if (error) throwDb(error, "Could not save Monday asset metadata.");
       return mapMondayAsset(data);
+    },
+    async upsertMondayAssetsBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_assets")
+        .upsert(list.map(mondayAssetWrite), { onConflict: "organization_id,monday_asset_id" });
+      if (error) throwDb(error, "Could not batch-save Monday asset metadata.");
+      return list;
     },
     async listMondayAssetsPage(organizationId, mondayItemId, { limit = 50, offset = 0 } = {}) {
       const { data, error } = await db()
@@ -1611,6 +1738,15 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) throwDb(error, "Could not save Monday doc metadata.");
       return mapMondayDoc(data);
     },
+    async upsertMondayDocsBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_docs")
+        .upsert(list.map(mondayDocWrite), { onConflict: "organization_id,monday_doc_id,monday_item_id" });
+      if (error) throwDb(error, "Could not batch-save Monday doc metadata.");
+      return list;
+    },
     async listMondayDocs(organizationId, { mondayItemId = null, limit = 50, offset = 0 } = {}) {
       let q = db()
         .from("sales_ops_monday_docs")
@@ -1654,6 +1790,15 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) throwDb(error, "Could not save Monday user cache.");
       return mapMondayUser(data);
     },
+    async upsertMondayUsersBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_users")
+        .upsert(list.map(mondayUserWrite), { onConflict: "organization_id,monday_user_id" });
+      if (error) throwDb(error, "Could not batch-save Monday user cache.");
+      return list;
+    },
     async listMondayUsers(organizationId) {
       const { data, error } = await db().from("sales_ops_monday_users").select("*").eq("organization_id", organizationId);
       if (error) throwDb(error, "Could not list Monday users.");
@@ -1678,7 +1823,39 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       if (error) throwDb(error, "Could not save Monday group.");
       return data;
     },
+    async upsertMondayGroupsBatch(rows) {
+      const list = rows || [];
+      if (!list.length) return [];
+      const { error } = await db()
+        .from("sales_ops_monday_groups")
+        .upsert(list.map(mondayGroupWrite), { onConflict: "organization_id,monday_board_id,monday_group_id" });
+      if (error) throwDb(error, "Could not batch-save Monday groups.");
+      return list;
+    },
+    async getMondaySyncState(organizationId, boardId, syncMode = "full") {
+      const { data, error } = await db()
+        .from("sales_ops_monday_sync_state")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("monday_board_id", String(boardId))
+        .eq("sync_mode", syncMode)
+        .maybeSingle();
+      if (error) throwDb(error, "Could not load Monday sync state.");
+      if (!data) return null;
+      return {
+        organizationId: data.organization_id,
+        mondayBoardId: data.monday_board_id,
+        syncMode: data.sync_mode,
+        lastSuccessfulReconcileAt: data.last_successful_reconcile_at,
+        lastCompleteCensusAt: data.last_complete_census_at,
+        lastCursor: data.last_cursor,
+        membershipHash: data.membership_hash,
+        lastError: data.last_error,
+        metadata: data.metadata || {}
+      };
+    },
     async upsertMondaySyncState(row) {
+      const existing = await this.getMondaySyncState(row.organizationId, row.mondayBoardId, row.syncMode || "full");
       const { data, error } = await db()
         .from("sales_ops_monday_sync_state")
         .upsert(
@@ -1686,12 +1863,16 @@ export function createSalesOpsSupabaseStore(getSupabase) {
             organization_id: row.organizationId,
             monday_board_id: String(row.mondayBoardId),
             sync_mode: row.syncMode || "full",
-            last_successful_reconcile_at: row.lastSuccessfulReconcileAt ?? null,
-            last_complete_census_at: row.lastCompleteCensusAt ?? null,
-            last_cursor: row.lastCursor ?? null,
-            membership_hash: row.membershipHash ?? null,
-            last_error: row.lastError ?? null,
-            metadata: row.metadata ?? {}
+            last_successful_reconcile_at:
+              row.lastSuccessfulReconcileAt !== undefined
+                ? row.lastSuccessfulReconcileAt
+                : existing?.lastSuccessfulReconcileAt ?? null,
+            last_complete_census_at:
+              row.lastCompleteCensusAt !== undefined ? row.lastCompleteCensusAt : existing?.lastCompleteCensusAt ?? null,
+            last_cursor: row.lastCursor !== undefined ? row.lastCursor : existing?.lastCursor ?? null,
+            membership_hash: row.membershipHash !== undefined ? row.membershipHash : existing?.membershipHash ?? null,
+            last_error: row.lastError !== undefined ? row.lastError : existing?.lastError ?? null,
+            metadata: row.metadata !== undefined ? row.metadata : existing?.metadata ?? {}
           },
           { onConflict: "organization_id,monday_board_id,sync_mode" }
         )
@@ -1821,6 +2002,93 @@ function mapMondayItem(row) {
     mondayUpdatedAt: row.monday_updated_at ?? null,
     sourceState: row.source_state,
     lastSeenAt: row.last_seen_at ?? null
+  };
+}
+
+function mondayColumnWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_board_id: String(row.mondayBoardId),
+    monday_item_id: String(row.mondayItemId),
+    column_id: String(row.columnId),
+    column_title: row.columnTitle ?? null,
+    column_type: row.columnType ?? null,
+    display_text: row.displayText ?? null,
+    value: row.value === undefined ? null : row.value,
+    monday_updated_at: row.mondayUpdatedAt ?? null
+  };
+}
+
+function mondayUpdateWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_board_id: String(row.mondayBoardId),
+    monday_item_id: String(row.mondayItemId),
+    monday_update_id: String(row.mondayUpdateId),
+    parent_monday_update_id: row.parentMondayUpdateId ?? null,
+    creator_monday_id: row.creatorMondayId ?? null,
+    creator_name: row.creatorName ?? null,
+    body_text: row.bodyText ?? null,
+    body_html: row.bodyHtml ?? null,
+    monday_created_at: row.mondayCreatedAt ?? null,
+    monday_updated_at: row.mondayUpdatedAt ?? null,
+    source_metadata: row.sourceMetadata ?? {}
+  };
+}
+
+function mondayAssetWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_board_id: String(row.mondayBoardId),
+    monday_item_id: row.mondayItemId ? String(row.mondayItemId) : null,
+    monday_update_id: row.mondayUpdateId ? String(row.mondayUpdateId) : null,
+    monday_asset_id: String(row.mondayAssetId),
+    column_id: row.columnId ?? null,
+    filename: row.filename ?? null,
+    file_extension: row.fileExtension ?? null,
+    file_size: row.fileSize ?? null,
+    mime_type: row.mimeType ?? null,
+    associated_kind: row.associatedKind || "item",
+    monday_created_at: row.mondayCreatedAt ?? null,
+    source_metadata: row.sourceMetadata ?? {}
+  };
+}
+
+function mondayDocWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_board_id: String(row.mondayBoardId),
+    monday_item_id: String(row.mondayItemId),
+    column_id: row.columnId ?? null,
+    monday_doc_id: String(row.mondayDocId),
+    title: row.title ?? null,
+    source_url: row.sourceUrl ?? null,
+    accessibility: row.accessibility || "unknown",
+    blocks: row.blocks ?? [],
+    source_metadata: row.sourceMetadata ?? {}
+  };
+}
+
+function mondayUserWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_user_id: String(row.mondayUserId),
+    kind: row.kind || "person",
+    display_name: row.displayName ?? null,
+    email: row.email ?? null,
+    source_metadata: row.sourceMetadata ?? {},
+    last_seen_at: row.lastSeenAt ?? null
+  };
+}
+
+function mondayGroupWrite(row) {
+  return {
+    organization_id: row.organizationId,
+    monday_board_id: String(row.mondayBoardId),
+    monday_group_id: String(row.mondayGroupId),
+    title: row.title ?? null,
+    position: row.position ?? null,
+    archived: Boolean(row.archived)
   };
 }
 

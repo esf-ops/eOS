@@ -4581,3 +4581,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Enabling writes, seeding eliteOS UUID mappings, fuzzy AD linking, public asset proxy, inbound Monday webhook until `MONDAY_APP_SIGNING_SECRET` exists. |
 | **Impacted** | `backend-core/src/salesOps/`, `backend-core/supabase/eliteos_sales_ops_monday_full_mirror_v2.sql`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT, CURRENT_SYSTEM_MAP, eliteOS-master-head-map, `monday-sales-ops.md`. |
 
+### 337. Sales Ops reconcile batching, observability, and exact person mapping (2026-08-27)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-27 |
+| **Decision** | Full Monday census and Layer B reprojection must scale by **page/batch**, not per account. Organization Monday-person mappings load once per run. EAV is read in bounded `monday_item_id` IN-lists. Projection upserts use chunked `sales_ops_accounts` writes. Monday updates/docs/users are fetched in bounded ID batches. Schema/users/groups are cached for the run. Rate-limit/complexity responses back off explicitly. Durable progress lives in existing `sales_ops_monday_sync_state.metadata` (no parallel sync architecture). Operators poll admin status; activity is `ACTIVE` / `RATE_LIMITED` / `STALLED` / `FAILED` / `COMPLETE`. Person mapping is **exact unique email only** (Monday user email == one active eliteOS `user_profiles.email` in the same org). Ambiguous/unmatched stay fail-closed. Applying mappings reprojects Layer B only — it does not re-census Monday. Writes remain disabled. |
+| **Why** | First production census (~836 parents) was dominated by per-item Monday update fetches and per-account Supabase round-trips (`getRepMapping`, EAV list, upsert). Operators had no pollable progress. Ownership could not be used until exact mappings existed. |
+| **Schema** | No new DDL. v2 remains immutable history; v2.1 null-value follow-up already applied. Mapping rows use existing `sales_ops_monday_rep_mappings`. |
+| **Out of scope** | Monday writes, fuzzy identity, Cloudflare DNS provider changes, inbound webhook without `MONDAY_APP_SIGNING_SECRET`. |
+| **Impacted** | `backend-core/src/salesOps/`, this doc, `monday-sales-ops.md`, SYSTEM_BLUEPRINT. |
+

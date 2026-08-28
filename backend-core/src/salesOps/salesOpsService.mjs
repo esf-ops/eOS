@@ -45,6 +45,9 @@ import {
   toUpdateDto
 } from "./salesOpsMondayMirror.mjs";
 import { ingestIncrementalItem, runFullMondayReconcile } from "./salesOpsMondayReconcile.mjs";
+import { reprojectAccountsFromMirror } from "./salesOpsMondayBatch.mjs";
+import { createReconcileProgress, reconcileStatusFromSyncState } from "./salesOpsMondayProgress.mjs";
+import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 
 export { SalesOpsError };
 
@@ -800,16 +803,23 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       return rec;
     },
 
-    async syncMonday(user) {
+    async syncMonday(user, { mode = "full" } = {}) {
       const actor = user ? actorFromUser(user) : null;
       const organizationId = actor?.organizationId;
       if (!organizationId) throw new SalesOpsError("Organization context is required.", 403, "no_org");
+      if (actor) {
+        assertActor(actor);
+        if (!isOrgAdminRole(actor.role)) throw new SalesOpsError("You do not have access to this head.", 403, "forbidden");
+      }
       const cfg = await store.getMondayConfig(organizationId);
       if (!cfg?.accountMasterBoardId) {
         throw new SalesOpsError("Account Master List board is not configured.", 409, "configuration_needed");
       }
       if (!isMondayReadEnabled(cfg)) {
         throw new SalesOpsError("Monday read sync is disabled for this organization.", 409, "monday_read_disabled");
+      }
+      if (mode === "reproject") {
+        return reprojectAccountsFromMirror(store, { organizationId, cfg });
       }
       if (!mondayClient) throw new SalesOpsError("Monday client is unavailable.", 503, "monday_unavailable");
       try {
@@ -820,12 +830,176 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
           organizationId,
           cfg: { ...cfg, columnMap, organizationId },
           actorUserId: actor?.userId ?? null,
-          markUnseen: true
+          markUnseen: true,
+          parentBoard: board
         });
       } catch (e) {
         if (e instanceof SalesOpsError) throw e;
         throw new SalesOpsError("Monday sync failed.", 502, "monday_sync_failed");
       }
+    },
+
+    async reprojectAccounts(user, { mondayPersonIds = null } = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw new SalesOpsError("You do not have access to this head.", 403, "forbidden");
+      const cfg = await store.getMondayConfig(actor.organizationId);
+      if (!cfg?.accountMasterBoardId) {
+        throw new SalesOpsError("Account Master List board is not configured.", 409, "configuration_needed");
+      }
+      const boardId = String(cfg.accountMasterBoardId);
+      const progress = createReconcileProgress({
+        store,
+        organizationId: actor.organizationId,
+        mondayBoardId: boardId,
+        syncMode: "reproject"
+      });
+      await progress.start();
+      await progress.setStage("projection");
+      try {
+        const result = await reprojectAccountsFromMirror(store, {
+          organizationId: actor.organizationId,
+          cfg,
+          mondayPersonIds,
+          progress
+        });
+        const snapshot = await progress.complete({
+          projectionProcessed: result.written,
+          projectionTotal: result.parents
+        });
+        await store.insertSyncLog({
+          organizationId: actor.organizationId,
+          direction: "monday_to_eliteos",
+          entity: "account",
+          operation: "reproject",
+          outcome: "success",
+          actorUserId: actor.userId,
+          metadata: { written: result.written, runId: progress.runId, elapsedMs: result.elapsedMs }
+        });
+        return { ...result, progress: snapshot, writeEnabled: isMondayWriteEnabled(cfg), readEnabled: isMondayReadEnabled(cfg) };
+      } catch (e) {
+        await progress.fail(e);
+        throw e;
+      }
+    },
+
+    async getReconcileStatus(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw new SalesOpsError("You do not have access to this head.", 403, "forbidden");
+      const cfg = await store.getMondayConfig(actor.organizationId);
+      const boardId = cfg?.accountMasterBoardId ? String(cfg.accountMasterBoardId) : "";
+      const state =
+        boardId && typeof store.getMondaySyncState === "function"
+          ? (await store.getMondaySyncState(actor.organizationId, boardId, "full")) ||
+            (await store.getMondaySyncState(actor.organizationId, boardId, "reproject"))
+          : null;
+      const reconcile = reconcileStatusFromSyncState(state);
+      return {
+        writeEnabled: isMondayWriteEnabled(cfg),
+        readEnabled: isMondayReadEnabled(cfg),
+        reconcile
+      };
+    },
+
+    async previewMondayPersonMappings(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw new SalesOpsError("You do not have access to this head.", 403, "forbidden");
+      const assigned =
+        typeof store.listDistinctMondayAssignedUserIds === "function"
+          ? await store.listDistinctMondayAssignedUserIds(actor.organizationId)
+          : [];
+      let mondayPeople = typeof store.listMondayUsers === "function" ? await store.listMondayUsers(actor.organizationId) : [];
+      if (mondayClient?.listUsers) {
+        const live = await mondayClient.listUsers();
+        const byId = new Map(mondayPeople.map((p) => [String(p.mondayUserId), p]));
+        for (const u of live || []) {
+          const id = String(u.id);
+          const prev = byId.get(id) || { mondayUserId: id, kind: "person" };
+          byId.set(id, {
+            ...prev,
+            mondayUserId: id,
+            kind: "person",
+            displayName: u.name || prev.displayName || null,
+            email: u.email || prev.email || null
+          });
+        }
+        mondayPeople = [...byId.values()];
+        if (typeof store.upsertMondayUsersBatch === "function") {
+          await store.upsertMondayUsersBatch(
+            mondayPeople.map((p) => ({
+              organizationId: actor.organizationId,
+              mondayUserId: p.mondayUserId,
+              kind: p.kind || "person",
+              displayName: p.displayName || null,
+              email: p.email || null,
+              lastSeenAt: new Date().toISOString()
+            }))
+          );
+        }
+      }
+      const eliteOsUsers =
+        typeof store.listActiveOrganizationUsers === "function"
+          ? await store.listActiveOrganizationUsers(actor.organizationId)
+          : [];
+      const existingMappings =
+        typeof store.listRepMappings === "function" ? await store.listRepMappings(actor.organizationId) : [];
+      const preview = previewExactPersonMappings({
+        mondayPeople,
+        eliteOsUsers,
+        existingMappings,
+        assignedMondayPersonIds: assigned
+      });
+      return {
+        people: preview.results.map((r) => ({
+          mondayPersonId: r.mondayPersonId,
+          eliteosUserId: r.eliteosUserId,
+          status: r.status,
+          matchBasis: r.matchBasis,
+          applied: r.applied
+        })),
+        exactApplyableCount: preview.exactApplyable.length,
+        unmatchedCount: preview.unmatched.length,
+        ambiguousCount: preview.ambiguous.length
+      };
+    },
+
+    async applyMondayPersonMappings(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw new SalesOpsError("You do not have access to this head.", 403, "forbidden");
+      const preview = await this.previewMondayPersonMappings(user);
+      const applyable = preview.people.filter((p) => p.status === "EXACT" && !p.applied && p.eliteosUserId);
+      const applied = [];
+      for (const row of applyable) {
+        await store.upsertRepMapping({
+          organizationId: actor.organizationId,
+          userId: row.eliteosUserId,
+          mondayUserId: row.mondayPersonId,
+          salespersonLabel: null,
+          active: true
+        });
+        applied.push({
+          mondayPersonId: row.mondayPersonId,
+          eliteosUserId: row.eliteosUserId,
+          status: "EXACT",
+          matchBasis: row.matchBasis,
+          applied: true
+        });
+      }
+      let reproject = null;
+      if (applied.length) {
+        reproject = await this.reprojectAccounts(user, {
+          mondayPersonIds: applied.map((a) => a.mondayPersonId)
+        });
+      }
+      return {
+        applied,
+        skippedAmbiguous: preview.people.filter((p) => p.status === "AMBIGUOUS"),
+        skippedUnmatched: preview.people.filter((p) => p.status === "UNMATCHED"),
+        reproject
+      };
     },
 
     async processWebhook({ organizationId, eventId, eventType, itemId, pulseId }) {
@@ -899,6 +1073,11 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const stale = Boolean(cfg?.lastSuccessAt)
         ? Date.now() - new Date(cfg.lastSuccessAt).getTime() > 36 * 60 * 60 * 1000
         : true;
+      const boardId = cfg?.accountMasterBoardId ? String(cfg.accountMasterBoardId) : "";
+      const syncState =
+        boardId && typeof store.getMondaySyncState === "function"
+          ? await store.getMondaySyncState(actor.organizationId, boardId, "full")
+          : null;
       return {
         parentBoardId: cfg?.accountMasterBoardId ?? null,
         subitemBoardId: cfg?.subitemBoardId ?? null,
@@ -913,7 +1092,8 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         linkedAccountDirectoryCount: stats.linkedAccountDirectoryCount ?? 0,
         unlinkedCount: stats.unlinkedCount ?? 0,
         unmappedMondayPeopleCount: stats.unmappedMondayPeopleCount ?? 0,
-        stale
+        stale,
+        reconcile: reconcileStatusFromSyncState(syncState)
       };
     }
   };

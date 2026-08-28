@@ -56,17 +56,24 @@ Do **not** create production Monday webhooks in this phase. The webhook route re
 
 Full census (maintenance, not per-page browsing):
 
-1. Inspect parent + subitem board schema
-2. Page all parent items (bounded GraphQL pages)
-3. Ingest every column value, description, nested subitems, paged updates/replies, asset metadata, docs (graceful if unsupported)
-4. Refresh users/groups and Layer B projection
-5. Update `last_seen_at`
-6. **Only after complete success** mark previously known-but-unseen rows `unavailable` / archived
-7. Never hard-delete history
+1. Inspect parent + subitem board schema once per run (schema is cached for the reconcile)
+2. Page parent items (bounded GraphQL pages of 50) **with column values and nested subitems**
+3. Batch-persist Layer A (items, EAV, users, assets, docs) and Layer B projection
+4. Fetch updates/replies in bounded item-id batches (not one Monday request per account)
+5. Refresh Monday users/groups once; enrich docs in bounded ID batches
+6. Update `last_seen_at`
+7. **Only after complete success** mark previously known-but-unseen rows `unavailable` / archived
+8. Never hard-delete history
+
+Progress is written to `sales_ops_monday_sync_state.metadata` and emitted as PII-safe JSON (`sales_ops_reconcile`). Poll `GET /api/sales-ops/admin/sync/status` or admin integration health. Activity states: `ACTIVE`, `RATE_LIMITED`, `STALLED` (no progress for 180s without backoff), `FAILED`, `COMPLETE`. A valid Monday backoff is `RATE_LIMITED`, not stalled.
+
+Layer B ownership remapping uses `POST /api/sales-ops/admin/reproject` (or `sync?mode=reproject`) against the existing mirror — do **not** re-census Monday to apply person mappings.
 
 If a census fails halfway, **do not** mark unseen records unavailable. Normal Sales Ops browsing reads the local mirror, not live Monday.
 
 Source states: `active`, `archived`, `deleted`, `unavailable`.
+
+Rep mappings: exact unique email only (`Monday user.email` == active eliteOS `user_profiles.email` in the same org). Preview: `GET /api/sales-ops/admin/person-mappings/preview`. Apply: `POST /api/sales-ops/admin/person-mappings/apply`. Fail closed on ambiguity.
 
 ## APIs
 
@@ -81,6 +88,13 @@ Lazy heavy (paginated, ownership-gated):
 - `.../files` (metadata only; content fetch returns `asset_fetch_not_enabled`)
 - `.../docs`
 - `.../activity`
+
+Admin observability (org admin only):
+
+- `GET /api/sales-ops/admin/sync/status` — durable reconcile run (no PII / no provider payloads)
+- `GET /api/sales-ops/integration/health` — includes latest `reconcile` snapshot for admins
+- `POST /api/sales-ops/admin/reproject` — Layer B only
+- `GET /api/sales-ops/admin/person-mappings/preview` / `POST .../apply` — exact unique email only
 
 Rep: own Monday-assigned accounts. Manager: explicit assigned reports. Admin/executive/super_admin: organization scope. Unmapped Monday owners are hidden from normal rep lists.
 

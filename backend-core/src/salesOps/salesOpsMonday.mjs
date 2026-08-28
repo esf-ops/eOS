@@ -24,34 +24,86 @@ function signingSecret() {
   return String(process.env.MONDAY_APP_SIGNING_SECRET ?? process.env.MONDAY_SIGNING_SECRET ?? "").trim();
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function mondayErrorMessage(json, fallback) {
+  const errs = json?.errors;
+  if (!Array.isArray(errs) || !errs.length) return fallback;
+  return errs.map((e) => (e && typeof e.message === "string" ? e.message : JSON.stringify(e))).join("; ");
+}
+
+function isRetryableMonday(res, json) {
+  if (res.status === 429 || res.status === 503 || res.status === 502) return true;
+  const msg = mondayErrorMessage(json, "").toLowerCase();
+  return (
+    msg.includes("complexity") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limited") ||
+    msg.includes("hourly_rate") ||
+    msg.includes("429")
+  );
+}
+
+function retryAfterMs(res, attempt) {
+  const header = res.headers?.get?.("retry-after");
+  const sec = Number(header);
+  if (Number.isFinite(sec) && sec >= 0) return Math.min(60000, sec * 1000);
+  return Math.min(30000, 1000 * 2 ** Math.max(0, attempt));
+}
+
 /**
  * @param {string} token
  * @param {string} query
  * @param {Record<string, unknown>} [variables]
+ * @param {{ onBackoff?: Function, onRequest?: Function, maxRetries?: number }} [opts]
  */
-export async function mondayGraphql(token, query, variables = {}) {
-  const res = await fetch(MONDAY_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: String(token).trim()
-    },
-    body: JSON.stringify({ query, variables })
-  });
-  const text = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new SalesOpsMondayError(`Monday returned non-JSON (HTTP ${res.status})`, "monday_http");
+export async function mondayGraphql(token, query, variables = {}, opts = {}) {
+  const maxRetries = Number.isFinite(opts.maxRetries) ? opts.maxRetries : 8;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    opts.onRequest?.();
+    const res = await fetch(MONDAY_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: String(token).trim()
+      },
+      body: JSON.stringify({ query, variables })
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      lastErr = new SalesOpsMondayError(`Monday returned non-JSON (HTTP ${res.status})`, "monday_http");
+      if (res.status >= 500 && attempt < maxRetries) {
+        const waitMs = retryAfterMs(res, attempt);
+        await opts.onBackoff?.({ waitMs, attempt, reason: "http" });
+        await sleep(waitMs);
+        continue;
+      }
+      throw lastErr;
+    }
+    if (isRetryableMonday(res, json) && attempt < maxRetries) {
+      const waitMs = retryAfterMs(res, attempt);
+      await opts.onBackoff?.({
+        waitMs,
+        attempt,
+        reason: res.status === 429 ? "rate_limit" : "complexity"
+      });
+      await sleep(waitMs);
+      continue;
+    }
+    if (!res.ok) throw new SalesOpsMondayError(`Monday HTTP ${res.status}`, "monday_http");
+    const errs = json?.errors;
+    if (Array.isArray(errs) && errs.length) {
+      throw new SalesOpsMondayError(mondayErrorMessage(json, "Monday GraphQL error"), "monday_graphql");
+    }
+    return json;
   }
-  if (!res.ok) throw new SalesOpsMondayError(`Monday HTTP ${res.status}`, "monday_http");
-  const errs = json?.errors;
-  if (Array.isArray(errs) && errs.length) {
-    const msg = errs.map((e) => (e && typeof e.message === "string" ? e.message : JSON.stringify(e))).join("; ");
-    throw new SalesOpsMondayError(msg || "Monday GraphQL error", "monday_graphql");
-  }
-  return json;
+  throw lastErr || new SalesOpsMondayError("Monday request failed after retries", "monday_http");
 }
 
 export function resolveColumnMapFromBoard(columns, existingMap = {}) {
@@ -183,17 +235,32 @@ export function buildMondayColumnPayload(semanticPatch, columnMap) {
 }
 
 export function createSalesOpsMondayClient(overrides = {}) {
+  const hooks = {
+    onBackoff: overrides.onBackoff || null,
+    onRequest: overrides.onRequest || null
+  };
+  const stubbed = Boolean(overrides.inspectBoard || overrides.listBoardItems || overrides.getItem);
+  const gql = (query, variables) => {
+    const token = overrides.token ?? mondayToken();
+    if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
+    return mondayGraphql(token, query, variables, {
+      onBackoff: (...args) => hooks.onBackoff?.(...args),
+      onRequest: () => hooks.onRequest?.()
+    });
+  };
+
   return {
     tokenPresent: () => Boolean(overrides.token ?? mondayToken()),
     signingSecretPresent: () => Boolean(overrides.signingSecret ?? signingSecret()),
     getSigningSecret: () => overrides.signingSecret ?? signingSecret(),
+    setHooks(next = {}) {
+      if (next.onBackoff !== undefined) hooks.onBackoff = next.onBackoff;
+      if (next.onRequest !== undefined) hooks.onRequest = next.onRequest;
+    },
 
     async inspectBoard(boardId) {
       if (overrides.inspectBoard) return overrides.inspectBoard(boardId);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      const json = await mondayGraphql(
-        token,
+      const json = await gql(
         `query ($ids: [ID!]!) {
           boards(ids: $ids) {
             id name
@@ -206,52 +273,56 @@ export function createSalesOpsMondayClient(overrides = {}) {
       return json?.data?.boards?.[0] || null;
     },
 
-    async listBoardItems(boardId) {
-      if (overrides.listBoardItems) return overrides.listBoardItems(boardId);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      const items = [];
-      let cursor = null;
-      do {
-        const json = await mondayGraphql(
-          token,
-          `query ($ids: [ID!]!, $cursor: String) {
-            boards(ids: $ids) {
-              items_page(limit: 50, cursor: $cursor) {
-                cursor
-                items {
+    async listBoardItemsPage(boardId, cursor = null) {
+      if (overrides.listBoardItemsPage) return overrides.listBoardItemsPage(boardId, cursor);
+      if (overrides.listBoardItems) {
+        if (cursor) return { items: [], cursor: null };
+        return { items: (await overrides.listBoardItems(boardId)) || [], cursor: null };
+      }
+      const json = await gql(
+        `query ($ids: [ID!]!, $cursor: String) {
+          boards(ids: $ids) {
+            items_page(limit: 50, cursor: $cursor) {
+              cursor
+              items {
+                id name url created_at updated_at
+                board { id }
+                group { id title }
+                column_values { id text type value }
+                assets { id name file_extension file_size created_at }
+                subitems {
                   id name url created_at updated_at
                   board { id }
                   group { id title }
+                  parent_item { id }
                   column_values { id text type value }
                   assets { id name file_extension file_size created_at }
-                  subitems {
-                    id name url created_at updated_at
-                    board { id }
-                    group { id title }
-                    parent_item { id }
-                    column_values { id text type value }
-                    assets { id name file_extension file_size created_at }
-                  }
                 }
               }
             }
-          }`,
-          { ids: [String(boardId)], cursor }
-        );
-        const page = json?.data?.boards?.[0]?.items_page;
-        items.push(...(page?.items || []));
-        cursor = page?.cursor || null;
+          }
+        }`,
+        { ids: [String(boardId)], cursor }
+      );
+      const page = json?.data?.boards?.[0]?.items_page;
+      return { items: page?.items || [], cursor: page?.cursor || null };
+    },
+
+    async listBoardItems(boardId) {
+      if (overrides.listBoardItems) return overrides.listBoardItems(boardId);
+      const items = [];
+      let cursor = null;
+      do {
+        const page = await this.listBoardItemsPage(boardId, cursor);
+        items.push(...(page.items || []));
+        cursor = page.cursor || null;
       } while (cursor);
       return items;
     },
 
     async getItem(itemId) {
       if (overrides.getItem) return overrides.getItem(itemId);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      const json = await mondayGraphql(
-        token,
+      const json = await gql(
         `query ($ids: [ID!]!) {
           items(ids: $ids) {
             id name url created_at updated_at board { id }
@@ -275,14 +346,11 @@ export function createSalesOpsMondayClient(overrides = {}) {
 
     async listItemUpdates(itemId) {
       if (overrides.listItemUpdates) return overrides.listItemUpdates(itemId);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
       const all = [];
       for (let page = 1; page <= 50; page += 1) {
         let batch = [];
         try {
-          const json = await mondayGraphql(
-            token,
+          const json = await gql(
             `query ($ids: [ID!]!, $limit: Int!, $page: Int!) {
               items(ids: $ids) {
                 updates(limit: $limit, page: $page) {
@@ -302,8 +370,7 @@ export function createSalesOpsMondayClient(overrides = {}) {
           batch = json?.data?.items?.[0]?.updates || [];
         } catch (e) {
           if (page === 1) {
-            const json = await mondayGraphql(
-              token,
+            const json = await gql(
               `query ($ids: [ID!]!) {
                 items(ids: $ids) {
                   updates(limit: 100) {
@@ -330,28 +397,79 @@ export function createSalesOpsMondayClient(overrides = {}) {
       return all;
     },
 
+    async listItemsUpdates(itemIds) {
+      if (overrides.listItemsUpdates) return overrides.listItemsUpdates(itemIds);
+      const ids = [...new Set((itemIds || []).map(String).filter(Boolean))];
+      const out = new Map(ids.map((id) => [id, []]));
+      if (overrides.listItemUpdates) {
+        for (const id of ids) out.set(id, (await overrides.listItemUpdates(id)) || []);
+        return out;
+      }
+      if (!ids.length) return out;
+      const json = await gql(
+        `query ($ids: [ID!]!) {
+          items(ids: $ids) {
+            id
+            updates(limit: 100) {
+              id body text_body created_at updated_at
+              creator { id name }
+              assets { id name file_extension file_size created_at }
+              replies {
+                id body text_body created_at
+                creator { id name }
+                assets { id name file_extension file_size created_at }
+              }
+            }
+          }
+        }`,
+        { ids }
+      );
+      for (const item of json?.data?.items || []) {
+        out.set(String(item.id), item.updates || []);
+      }
+      return out;
+    },
+
+    async listUsers() {
+      if (overrides.listUsers) return overrides.listUsers();
+      if (stubbed) return [];
+      try {
+        const json = await gql(`query { users { id name email enabled is_guest } }`);
+        return json?.data?.users || [];
+      } catch {
+        return [];
+      }
+    },
+
+    async getDocs(docIds) {
+      if (overrides.getDocs) return overrides.getDocs(docIds);
+      const ids = [...new Set((docIds || []).map(String).filter(Boolean))];
+      if (overrides.getDoc) {
+        const out = [];
+        for (const id of ids) out.push(await overrides.getDoc(id));
+        return out;
+      }
+      if (!ids.length) return [];
+      try {
+        const json = await gql(
+          `query ($ids: [ID!]!) { docs(ids: $ids) { id name url blocks { id type content } } }`,
+          { ids }
+        );
+        return json?.data?.docs || [];
+      } catch {
+        return ids.map(() => ({ accessibility: "unsupported" }));
+      }
+    },
+
     async getDoc(docId) {
       if (overrides.getDoc) return overrides.getDoc(docId);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      try {
-        const json = await mondayGraphql(
-          token,
-          `query ($ids: [ID!]!) { docs(ids: $ids) { id name url blocks { id type content } } }`,
-          { ids: [String(docId)] }
-        );
-        return json?.data?.docs?.[0] || null;
-      } catch {
-        return { accessibility: "unsupported" };
-      }
+      const rows = await this.getDocs([docId]);
+      return rows[0] || { accessibility: "unsupported" };
     },
 
     async changeColumnValues(boardId, itemId, columnValues) {
       if (overrides.changeColumnValues) return overrides.changeColumnValues(boardId, itemId, columnValues);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      const json = await mondayGraphql(
-        token,
+      const json = await gql(
         `mutation ($boardId: ID!, $itemId: ID!, $vals: JSON!) {
           change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $vals) { id }
         }`,
@@ -362,10 +480,7 @@ export function createSalesOpsMondayClient(overrides = {}) {
 
     async createUpdate(itemId, body) {
       if (overrides.createUpdate) return overrides.createUpdate(itemId, body);
-      const token = overrides.token ?? mondayToken();
-      if (!token) throw new SalesOpsMondayError("Monday token is not configured", "monday_unconfigured");
-      const json = await mondayGraphql(
-        token,
+      const json = await gql(
         `mutation ($itemId: ID!, $body: String!) { create_update(item_id: $itemId, body: $body) { id body created_at } }`,
         { itemId: String(itemId), body: String(body) }
       );

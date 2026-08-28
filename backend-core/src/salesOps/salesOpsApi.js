@@ -445,7 +445,48 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
 
   app.post("/api/sales-ops/admin/sync", ...guard, async (req, res) => {
     try {
-      const data = await svc.syncMonday(actorUser(req));
+      const mode = String(req.query.mode || req.body?.mode || "full").trim() || "full";
+      const data = await svc.syncMonday(actorUser(req), { mode });
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/sync/status", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getReconcileStatus(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/reproject", ...guard, async (req, res) => {
+    try {
+      const data = await svc.reprojectAccounts(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/person-mappings/preview", ...guard, async (req, res) => {
+    try {
+      const data = await svc.previewMondayPersonMappings(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/person-mappings/apply", ...guard, async (req, res) => {
+    try {
+      const data = await svc.applyMondayPersonMappings(actorUser(req));
       jsonNoStore(res);
       res.json({ ok: true, ...data });
     } catch (e) {

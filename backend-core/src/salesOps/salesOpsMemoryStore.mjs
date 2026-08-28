@@ -42,13 +42,68 @@ export function createSalesOpsMemoryStore() {
   const mondayGroups = new Map();
   const mondaySyncState = new Map();
   const mondayAdLinks = new Map();
+  const metrics = {
+    eavSelectChunks: 0,
+    accountUpsertChunks: 0,
+    columnUpsertChunks: 0,
+    itemUpsertChunks: 0
+  };
 
   function orgEq(row, organizationId) {
     return row && row.organizationId === organizationId ? row : null;
   }
 
+  function putAccount(row) {
+    const existing = [...accounts.values()].find(
+      (a) =>
+        a.organizationId === row.organizationId &&
+        a.mondayBoardId === row.mondayBoardId &&
+        a.mondayItemId === String(row.mondayItemId)
+    );
+    const rec = {
+      id: existing?.id || row.id || randomUUID(),
+      archived: false,
+      ...existing,
+      ...row,
+      mondayItemId: String(row.mondayItemId),
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    };
+    accounts.set(rec.id, rec);
+    return clone(rec);
+  }
+
+  function putMondayItem(row) {
+    const key = `${row.organizationId}:${row.mondayBoardId}:${row.mondayItemId}`;
+    const existing = mondayItems.get(key);
+    const rec = {
+      id: existing?.id || row.id || randomUUID(),
+      ...existing,
+      ...row,
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    };
+    mondayItems.set(key, rec);
+    return clone(rec);
+  }
+
+  function putMondayColumn(row) {
+    const key = `${row.organizationId}:${row.mondayBoardId}:${row.mondayItemId}:${row.columnId}`;
+    const existing = mondayColumnValues.get(key);
+    const rec = {
+      id: existing?.id || randomUUID(),
+      ...existing,
+      ...row,
+      createdAt: existing?.createdAt || nowIso(),
+      updatedAt: nowIso()
+    };
+    mondayColumnValues.set(key, rec);
+    return clone(rec);
+  }
+
   return {
     kind: "memory",
+    metrics,
 
     seedUser(user) {
       users.set(user.id, clone(user));
@@ -282,25 +337,31 @@ export function createSalesOpsMemoryStore() {
       }
       return null;
     },
+    async listRepMappings(organizationId) {
+      return [...repMappings.values()]
+        .filter((r) => r.organizationId === organizationId && r.active)
+        .map(clone);
+    },
+    async listActiveOrganizationUsers(organizationId) {
+      return [...users.values()]
+        .filter((u) => String(u.organizationId || u.organization_id) === String(organizationId))
+        .filter((u) => u.isActive !== false && u.is_active !== false)
+        .map((u) => ({
+          id: u.id,
+          email: u.email || null,
+          isActive: true,
+          organizationId
+        }));
+    },
 
     async upsertAccount(row) {
-      const existing = [...accounts.values()].find(
-        (a) =>
-          a.organizationId === row.organizationId &&
-          a.mondayBoardId === row.mondayBoardId &&
-          a.mondayItemId === String(row.mondayItemId)
-      );
-      const rec = {
-        id: existing?.id || row.id || randomUUID(),
-        archived: false,
-        ...existing,
-        ...row,
-        mondayItemId: String(row.mondayItemId),
-        createdAt: existing?.createdAt || nowIso(),
-        updatedAt: nowIso()
-      };
-      accounts.set(rec.id, rec);
-      return clone(rec);
+      return putAccount(row);
+    },
+    async upsertAccountsBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(putAccount(row));
+      metrics.accountUpsertChunks += 1;
+      return out;
     },
     async getAccount(organizationId, accountId) {
       return clone(orgEq(accounts.get(accountId), organizationId));
@@ -603,22 +664,27 @@ export function createSalesOpsMemoryStore() {
     async getMondayAccountDirectoryLink(organizationId, boardId, itemId) {
       return clone(mondayAdLinks.get(`${organizationId}:${boardId}:${itemId}`) || null);
     },
+    async listMondayAccountDirectoryLinks(organizationId, boardId = null) {
+      const out = [];
+      for (const rec of mondayAdLinks.values()) {
+        if (rec.organizationId !== organizationId) continue;
+        if (boardId && String(rec.boardId) !== String(boardId)) continue;
+        out.push({ mondayItemId: String(rec.itemId), accountId: rec.accountId, boardId: rec.boardId });
+      }
+      return out;
+    },
 
     async getMondayItem(organizationId, boardId, mondayItemId) {
       return clone(mondayItems.get(`${organizationId}:${boardId}:${mondayItemId}`) || null);
     },
     async upsertMondayItem(row) {
-      const key = `${row.organizationId}:${row.mondayBoardId}:${row.mondayItemId}`;
-      const existing = mondayItems.get(key);
-      const rec = {
-        id: existing?.id || row.id || randomUUID(),
-        ...existing,
-        ...row,
-        createdAt: existing?.createdAt || nowIso(),
-        updatedAt: nowIso()
-      };
-      mondayItems.set(key, rec);
-      return clone(rec);
+      return putMondayItem(row);
+    },
+    async upsertMondayItemsBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(putMondayItem(row));
+      metrics.itemUpsertChunks += 1;
+      return out;
     },
     async listMondayItems(organizationId, { boardId = null, parentMondayItemId = null, itemKind = null } = {}) {
       return [...mondayItems.values()]
@@ -632,17 +698,13 @@ export function createSalesOpsMemoryStore() {
         .map(clone);
     },
     async upsertMondayColumnValue(row) {
-      const key = `${row.organizationId}:${row.mondayBoardId}:${row.mondayItemId}:${row.columnId}`;
-      const existing = mondayColumnValues.get(key);
-      const rec = {
-        id: existing?.id || randomUUID(),
-        ...existing,
-        ...row,
-        createdAt: existing?.createdAt || nowIso(),
-        updatedAt: nowIso()
-      };
-      mondayColumnValues.set(key, rec);
-      return clone(rec);
+      return putMondayColumn(row);
+    },
+    async upsertMondayColumnValuesBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(putMondayColumn(row));
+      metrics.columnUpsertChunks += 1;
+      return out;
     },
     async listMondayColumnValues(organizationId, boardId, mondayItemId) {
       return [...mondayColumnValues.values()]
@@ -653,6 +715,19 @@ export function createSalesOpsMemoryStore() {
             String(r.mondayItemId) === String(mondayItemId)
         )
         .map(clone);
+    },
+    async listMondayColumnValuesForItems(organizationId, mondayItemIds, { chunkSize = 100 } = {}) {
+      const ids = [...new Set((mondayItemIds || []).map(String))];
+      const out = [];
+      const n = Math.max(1, Number(chunkSize) || 100);
+      for (let i = 0; i < ids.length; i += n) {
+        metrics.eavSelectChunks += 1;
+        const set = new Set(ids.slice(i, i + n));
+        for (const r of mondayColumnValues.values()) {
+          if (r.organizationId === organizationId && set.has(String(r.mondayItemId))) out.push(clone(r));
+        }
+      }
+      return out;
     },
     async upsertMondayUpdate(row) {
       const key = `${row.organizationId}:${row.mondayUpdateId}`;
@@ -666,6 +741,11 @@ export function createSalesOpsMemoryStore() {
       };
       mondayUpdates.set(key, rec);
       return clone(rec);
+    },
+    async upsertMondayUpdatesBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(await this.upsertMondayUpdate(row));
+      return out;
     },
     async listMondayUpdatesPage(organizationId, mondayItemId, { limit = 50, offset = 0 } = {}) {
       const rows = [...mondayUpdates.values()]
@@ -685,6 +765,11 @@ export function createSalesOpsMemoryStore() {
       };
       mondayAssets.set(key, rec);
       return clone(rec);
+    },
+    async upsertMondayAssetsBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(await this.upsertMondayAsset(row));
+      return out;
     },
     async listMondayAssetsPage(organizationId, mondayItemId, { limit = 50, offset = 0 } = {}) {
       const rows = [...mondayAssets.values()].filter(
@@ -712,6 +797,11 @@ export function createSalesOpsMemoryStore() {
       };
       mondayDocs.set(key, rec);
       return clone(rec);
+    },
+    async upsertMondayDocsBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(await this.upsertMondayDoc(row));
+      return out;
     },
     async listMondayDocs(organizationId, { mondayItemId = null, limit = 50, offset = 0 } = {}) {
       const rows = [...mondayDocs.values()].filter((r) => {
@@ -742,6 +832,11 @@ export function createSalesOpsMemoryStore() {
       mondayPeople.set(key, rec);
       return clone(rec);
     },
+    async upsertMondayUsersBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(await this.upsertMondayUser(row));
+      return out;
+    },
     async listMondayUsers(organizationId) {
       return [...mondayPeople.values()].filter((r) => r.organizationId === organizationId).map(clone);
     },
@@ -751,6 +846,19 @@ export function createSalesOpsMemoryStore() {
       const rec = { id: existing?.id || randomUUID(), ...existing, ...row, updatedAt: nowIso() };
       mondayGroups.set(key, rec);
       return clone(rec);
+    },
+    async upsertMondayGroupsBatch(rows) {
+      const out = [];
+      for (const row of rows || []) out.push(await this.upsertMondayGroup(row));
+      return out;
+    },
+    async listDistinctMondayAssignedUserIds(organizationId) {
+      const ids = new Set();
+      for (const a of accounts.values()) {
+        if (a.organizationId !== organizationId) continue;
+        if (a.mondayAssignedUserId) ids.add(String(a.mondayAssignedUserId));
+      }
+      return [...ids];
     },
     async upsertMondaySyncState(row) {
       const key = `${row.organizationId}:${row.mondayBoardId}:${row.syncMode || "full"}`;

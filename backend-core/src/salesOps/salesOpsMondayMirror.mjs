@@ -385,25 +385,20 @@ export function extractFileAssets(item, records, boardId) {
   return assets;
 }
 
-export async function ingestMondayItem(store, ctx) {
+export function prepareMondayItemRows(item, ctx) {
   const {
     organizationId,
     boardId,
-    item,
     columnMap = {},
     schema = {},
     itemKind = "item",
     parentMondayItemId = null,
-    nowIso = new Date().toISOString()
+    nowIso = new Date().toISOString(),
+    repMap = null,
+    adLinkMap = null
   } = ctx;
   const titleById = titleMapFromSchema(schema);
   const records = (item.column_values || []).map((c) => parseColumnRecord(c, titleById));
-  const existingItem = await store.getMondayItem(organizationId, boardId, String(item.id));
-  const incomingUpdated = item.updated_at || item.mondayUpdatedAt;
-  if (existingItem && shouldSkipStaleIncoming(existingItem.mondayUpdatedAt, incomingUpdated)) {
-    return { skippedStale: true, item: existingItem, records };
-  }
-
   const snapshot = {
     id: item.id,
     name: item.name,
@@ -413,8 +408,7 @@ export async function ingestMondayItem(store, ctx) {
     group: item.group || null,
     description: item.description ?? null
   };
-
-  const mirrored = await store.upsertMondayItem({
+  const itemRow = {
     organizationId,
     mondayBoardId: String(boardId),
     mondayItemId: String(item.id),
@@ -430,11 +424,10 @@ export async function ingestMondayItem(store, ctx) {
     sourceState: "active",
     lastSeenAt: nowIso,
     sourceSnapshot: snapshot
-  });
-
-  for (const rec of records) {
-    if (!rec.columnId) continue;
-    await store.upsertMondayColumnValue({
+  };
+  const columnRows = records
+    .filter((rec) => rec.columnId)
+    .map((rec) => ({
       organizationId,
       mondayBoardId: String(boardId),
       mondayItemId: String(item.id),
@@ -444,48 +437,35 @@ export async function ingestMondayItem(store, ctx) {
       displayText: rec.displayText,
       value: rec.value,
       mondayUpdatedAt: item.updated_at || null
-    });
-  }
-
-  for (const person of records.flatMap((r) => parsePeopleAssignments({ value: r.value }))) {
-    await store.upsertMondayUser({
-      organizationId,
-      mondayUserId: person.id,
-      kind: person.kind,
-      lastSeenAt: nowIso
-    });
-  }
-
-  for (const asset of extractFileAssets(item, records, boardId)) {
-    await store.upsertMondayAsset({
-      organizationId,
-      ...asset,
-      associatedKind: itemKind === "subitem" && asset.associatedKind === "item" ? "subitem" : asset.associatedKind
-    });
-  }
-
-  for (const doc of extractDocIds(records)) {
-    await store.upsertMondayDoc({
-      organizationId,
-      mondayBoardId: String(boardId),
-      mondayItemId: String(item.id),
-      columnId: doc.columnId,
-      mondayDocId: doc.mondayDocId,
-      accessibility: "unknown",
-      blocks: []
-    });
-  }
-
+    }));
+  const userRows = records.flatMap((r) => parsePeopleAssignments({ value: r.value })).map((person) => ({
+    organizationId,
+    mondayUserId: person.id,
+    kind: person.kind,
+    lastSeenAt: nowIso
+  }));
+  const assetRows = extractFileAssets(item, records, boardId).map((asset) => ({
+    organizationId,
+    ...asset,
+    associatedKind: itemKind === "subitem" && asset.associatedKind === "item" ? "subitem" : asset.associatedKind
+  }));
+  const docRows = extractDocIds(records).map((doc) => ({
+    organizationId,
+    mondayBoardId: String(boardId),
+    mondayItemId: String(item.id),
+    columnId: doc.columnId,
+    mondayDocId: doc.mondayDocId,
+    accessibility: "unknown",
+    blocks: []
+  }));
+  let accountRow = null;
   if (itemKind === "item") {
     const projected = projectParentFields(item, columnMap, records);
-    const mapping = projected.mondayAssignedUserId
-      ? await store.getRepMappingByMondayUser(organizationId, projected.mondayAssignedUserId)
-      : null;
-    const link =
-      typeof store.getMondayAccountDirectoryLink === "function"
-        ? await store.getMondayAccountDirectoryLink(organizationId, boardId, String(item.id))
-        : null;
-    await store.upsertAccount({
+    const mappedUserId = projected.mondayAssignedUserId && repMap instanceof Map
+      ? repMap.get(String(projected.mondayAssignedUserId)) || null
+      : undefined;
+    const linkedAccountId = adLinkMap instanceof Map ? adLinkMap.get(String(item.id)) || null : undefined;
+    accountRow = {
       organizationId,
       mondayBoardId: String(boardId),
       mondayItemId: String(item.id),
@@ -494,8 +474,8 @@ export async function ingestMondayItem(store, ctx) {
       mondayGroup: projected.mondayGroup,
       groupId: projected.groupId,
       mondayAssignedUserId: projected.mondayAssignedUserId,
-      assignedUserId: mapping?.userId ?? null,
-      accountDirectoryAccountId: link?.accountId ?? null,
+      assignedUserId: mappedUserId,
+      accountDirectoryAccountId: linkedAccountId,
       status: projected.status,
       lastContact: projected.lastContact,
       nextContact: projected.nextContact,
@@ -516,18 +496,23 @@ export async function ingestMondayItem(store, ctx) {
       lastSeenAt: nowIso,
       sourceState: "active",
       archived: false,
-      syncedAt: nowIso
-    });
+      syncedAt: nowIso,
+      _needsRepLookup: mappedUserId === undefined && Boolean(projected.mondayAssignedUserId),
+      _needsAdLookup: linkedAccountId === undefined
+    };
   }
-
-  return { skippedStale: false, item: mirrored, records };
+  return { records, itemRow, columnRows, userRows, assetRows, docRows, accountRow };
 }
 
-export async function ingestUpdates(store, { organizationId, boardId, itemId, updates }) {
-  const saved = [];
-  async function walk(list, parentId = null) {
+export function prepareUpdateRows({ organizationId, boardId, itemId, updates }) {
+  const updateRows = [];
+  const userRows = [];
+  const assetRows = [];
+  let repliesProcessed = 0;
+  function walk(list, parentId = null) {
     for (const u of list || []) {
-      const rec = await store.upsertMondayUpdate({
+      if (!u?.id) continue;
+      updateRows.push({
         organizationId,
         mondayBoardId: String(boardId),
         mondayItemId: String(itemId),
@@ -541,9 +526,9 @@ export async function ingestUpdates(store, { organizationId, boardId, itemId, up
         mondayUpdatedAt: u.updated_at || null,
         sourceMetadata: { hasReplies: Array.isArray(u.replies) && u.replies.length > 0 }
       });
-      saved.push(rec);
+      if (parentId) repliesProcessed += 1;
       if (u.creator?.id) {
-        await store.upsertMondayUser({
+        userRows.push({
           organizationId,
           mondayUserId: String(u.creator.id),
           kind: "person",
@@ -551,7 +536,8 @@ export async function ingestUpdates(store, { organizationId, boardId, itemId, up
         });
       }
       for (const a of u.assets || []) {
-        await store.upsertMondayAsset({
+        if (!a?.id) continue;
+        assetRows.push({
           organizationId,
           mondayBoardId: String(boardId),
           mondayItemId: String(itemId),
@@ -564,13 +550,122 @@ export async function ingestUpdates(store, { organizationId, boardId, itemId, up
           sourceMetadata: { name: a.name || null }
         });
       }
-      if (Array.isArray(u.replies) && u.replies.length) {
-        await walk(u.replies, String(u.id));
-      }
+      if (Array.isArray(u.replies) && u.replies.length) walk(u.replies, String(u.id));
     }
   }
-  await walk(updates, null);
-  return saved;
+  walk(updates, null);
+  return { updateRows, userRows, assetRows, repliesProcessed };
+}
+
+export function buildAccountProjectionRow({
+  organizationId,
+  boardId,
+  item,
+  columnMap,
+  records,
+  nowIso,
+  assignedUserId = null,
+  accountDirectoryAccountId = null
+}) {
+  const projected = projectParentFields(item, columnMap, records);
+  return {
+    organizationId,
+    mondayBoardId: String(boardId),
+    mondayItemId: String(item.id || item.mondayItemId),
+    accountName: projected.accountName,
+    mondayUrl: projected.mondayUrl,
+    mondayGroup: projected.mondayGroup,
+    groupId: projected.groupId,
+    mondayAssignedUserId: projected.mondayAssignedUserId,
+    assignedUserId,
+    accountDirectoryAccountId,
+    status: projected.status,
+    lastContact: projected.lastContact,
+    nextContact: projected.nextContact,
+    market: projected.market,
+    branch: projected.branch,
+    accountType: projected.accountType,
+    sampleProgram: projected.sampleProgram,
+    currentPrimarySupplier: projected.currentPrimarySupplier,
+    primaryPainPoint: projected.primaryPainPoint,
+    esfSolution: projected.esfSolution,
+    nextStrategicMilestone: projected.nextStrategicMilestone,
+    targetSqFtPerMonth: Number.isFinite(projected.targetSqFtPerMonth) ? projected.targetSqFtPerMonth : null,
+    keyContact: projected.keyContact,
+    estKitchensPerMonth: Number.isFinite(projected.estKitchensPerMonth) ? projected.estKitchensPerMonth : null,
+    description: resolveItemDescription(item, records),
+    mondayCreatedAt: projected.mondayCreatedAt,
+    mondayUpdatedAt: projected.mondayUpdatedAt,
+    lastSeenAt: nowIso,
+    sourceState: item.sourceState || "active",
+    archived: false,
+    syncedAt: nowIso
+  };
+}
+
+export async function ingestMondayItem(store, ctx) {
+  const {
+    organizationId,
+    boardId,
+    item,
+    nowIso = new Date().toISOString()
+  } = ctx;
+  const prepared = prepareMondayItemRows(item, { ...ctx, nowIso });
+  const existingItem = await store.getMondayItem(organizationId, boardId, String(item.id));
+  const incomingUpdated = item.updated_at || item.mondayUpdatedAt;
+  if (existingItem && shouldSkipStaleIncoming(existingItem.mondayUpdatedAt, incomingUpdated)) {
+    return { skippedStale: true, item: existingItem, records: prepared.records };
+  }
+
+  const mirrored = await store.upsertMondayItem(prepared.itemRow);
+  if (typeof store.upsertMondayColumnValuesBatch === "function") {
+    await store.upsertMondayColumnValuesBatch(prepared.columnRows);
+  } else {
+    for (const row of prepared.columnRows) await store.upsertMondayColumnValue(row);
+  }
+  for (const row of prepared.userRows) await store.upsertMondayUser(row);
+  for (const row of prepared.assetRows) await store.upsertMondayAsset(row);
+  for (const row of prepared.docRows) await store.upsertMondayDoc(row);
+
+  if (prepared.accountRow) {
+    const accountRow = { ...prepared.accountRow };
+    if (accountRow._needsRepLookup) {
+      const mapping = await store.getRepMappingByMondayUser(organizationId, accountRow.mondayAssignedUserId);
+      accountRow.assignedUserId = mapping?.userId ?? null;
+    }
+    if (accountRow._needsAdLookup) {
+      const link =
+        typeof store.getMondayAccountDirectoryLink === "function"
+          ? await store.getMondayAccountDirectoryLink(organizationId, boardId, String(item.id))
+          : null;
+      accountRow.accountDirectoryAccountId = link?.accountId ?? null;
+    }
+    delete accountRow._needsRepLookup;
+    delete accountRow._needsAdLookup;
+    await store.upsertAccount(accountRow);
+  }
+
+  return { skippedStale: false, item: mirrored, records: prepared.records };
+}
+
+export async function ingestUpdates(store, { organizationId, boardId, itemId, updates }) {
+  const prepared = prepareUpdateRows({ organizationId, boardId, itemId, updates });
+  if (typeof store.upsertMondayUpdatesBatch === "function") {
+    await store.upsertMondayUpdatesBatch(prepared.updateRows);
+  } else {
+    for (const row of prepared.updateRows) await store.upsertMondayUpdate(row);
+  }
+  if (typeof store.upsertMondayUsersBatch === "function") {
+    await store.upsertMondayUsersBatch(prepared.userRows);
+  } else {
+    for (const row of prepared.userRows) await store.upsertMondayUser(row);
+  }
+  if (typeof store.upsertMondayAssetsBatch === "function") {
+    await store.upsertMondayAssetsBatch(prepared.assetRows);
+  } else {
+    for (const row of prepared.assetRows) await store.upsertMondayAsset(row);
+  }
+  return prepared.updateRows;
 }
 
 export { SALES_OPS_MONDAY_EXTERNAL_SYSTEM, mondayExternalId };
