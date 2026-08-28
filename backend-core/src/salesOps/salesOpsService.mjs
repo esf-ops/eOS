@@ -97,6 +97,17 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
   const recordAudit = typeof audit === "function" ? audit : async () => {};
   const planAdmin = createPlanAdmin({ store, audit: recordAudit, now });
 
+  async function salespersonLabelMap(organizationId) {
+    const mappings = typeof store.listRepMappings === "function" ? await store.listRepMappings(organizationId) : [];
+    const mondayPeople = typeof store.listMondayUsers === "function" ? await store.listMondayUsers(organizationId) : [];
+    const mondayName = new Map((mondayPeople || []).map((p) => [String(p.mondayUserId), p.displayName || null]));
+    const labelByUser = new Map();
+    for (const m of mappings || []) {
+      labelByUser.set(String(m.userId), m.salespersonLabel || mondayName.get(String(m.mondayUserId)) || null);
+    }
+    return { mappings, labelByUser };
+  }
+
   async function canAccessUser(actor, targetUserId, { forCommission = false, forMutate = false } = {}) {
     assertActor(actor);
     const target = String(targetUserId ?? "").trim();
@@ -374,14 +385,14 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const assignedUserId = filters.assignedUserId || null;
       const packKey = filters.packKey || null;
       const bulkEligibleOnly = filters.bulkEligible === true || filters.bulkEligible === "1" || filters.bulkEligible === "true";
-      const [rows, accounts, hints, mappings] = await Promise.all([
+      const [rows, accounts, hints, labels] = await Promise.all([
         store.listIdentityReviews(actor.organizationId, { status }),
         store.listAccountIdentityRows(actor.organizationId),
         store.listIdentityHints(actor.organizationId),
-        typeof store.listRepMappings === "function" ? store.listRepMappings(actor.organizationId) : []
+        salespersonLabelMap(actor.organizationId)
       ]);
       const byId = new Map(accounts.map((a) => [a.id, a]));
-      const labelByUser = new Map((mappings || []).map((m) => [String(m.userId), m.salespersonLabel || null]));
+      const labelByUser = labels.labelByUser;
       const hintsByNorm = new Map();
       for (const hint of hints || []) {
         const key = normalizeOrgMatchKey(hint.mondayName);
@@ -538,11 +549,11 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         const reports = await store.listReportsForManager(actor.organizationId, actor.userId);
         if (!reports.length) throw NOT_FOUND();
       }
-      const mappings = typeof store.listRepMappings === "function" ? await store.listRepMappings(actor.organizationId) : [];
+      const { mappings, labelByUser } = await salespersonLabelMap(actor.organizationId);
       return mappings.map((m) => ({
         userId: m.userId,
         mondayUserId: m.mondayUserId,
-        salespersonLabel: m.salespersonLabel || null
+        salespersonLabel: labelByUser.get(String(m.userId)) || null
       }));
     },
 

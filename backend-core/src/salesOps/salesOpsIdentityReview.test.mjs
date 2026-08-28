@@ -302,6 +302,8 @@ async function main() {
   assert.equal(audit.morawareLinked, 2);
   assert.equal(audit.quickbooksLinked, 2);
 
+  const people = await svc.listAdminPeople(admin);
+  assert.ok(people.some((p) => p.userId === CASEY && p.salespersonLabel === "Other Sentinel"));
   const bySalesperson = await svc.listIdentityReviews(admin, { assignedUserId: CASEY });
   assert.ok(bySalesperson.length >= 1);
   assert.ok(bySalesperson.every((r) => r.assignedUserId === CASEY));
