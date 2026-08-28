@@ -436,6 +436,56 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.post("/api/sales-ops/admin/identity-reviews/rebuild", ...guard, jsonParser, async (req, res) => {
+    try {
+      const data = await svc.rebuildIdentityReviews(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/identity-reviews", ...guard, async (req, res) => {
+    try {
+      const rows = await svc.listIdentityReviews(actorUser(req), { status: req.query.status || null });
+      jsonNoStore(res);
+      res.json({ ok: true, reviews: rows });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/identity-reviews/:id/approve", ...guard, jsonParser, async (req, res) => {
+    try {
+      const review = await svc.approveIdentityReview(actorUser(req), req.params.id, req.body || {});
+      jsonNoStore(res);
+      res.json({ ok: true, review });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.post("/api/sales-ops/admin/identity-reviews/:id/reject", ...guard, jsonParser, async (req, res) => {
+    try {
+      const review = await svc.rejectIdentityReview(actorUser(req), req.params.id, req.body || {});
+      jsonNoStore(res);
+      res.json({ ok: true, review });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/compensation", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getCompensationConfig(actorUser(req), { admin: true });
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.get("/api/sales-ops/admin/plans/:planId", ...guard, async (req, res) => {
     try {
       const data = await svc.getAdminPlan(actorUser(req), req.params.planId);

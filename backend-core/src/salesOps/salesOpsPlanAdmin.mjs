@@ -24,6 +24,7 @@ import {
 import {
   applyRollingConvenience,
   generateLinearRamp,
+  generateMilestoneRamp,
   mergeExplicitMonthlyTargets,
   uniquePeriodTargets
 } from "./salesOpsMonths.mjs";
@@ -590,31 +591,41 @@ export function createPlanAdmin({ store, audit, now }) {
 
     async generateRamp(actor, planId, payload = {}) {
       const plan = await requirePlanForAuthor(actor, planId, { mutate: true });
+      const anchors = Array.isArray(payload.anchors) ? payload.anchors : null;
       let generated;
       try {
-        generated = generateLinearRamp({
-          startMonth: payload.startMonth,
-          startSf: payload.startSf,
-          endMonth: payload.endMonth,
-          endSf: payload.endSf
-        });
+        generated = anchors?.length
+          ? generateMilestoneRamp(anchors)
+          : generateLinearRamp({
+              startMonth: payload.startMonth,
+              startSf: payload.startSf,
+              endMonth: payload.endMonth,
+              endSf: payload.endSf
+            });
       } catch (e) {
         throw new SalesOpsError(e.message || "Could not generate ramp.", 400, e.code || "ramp_invalid");
       }
       const existing = await store.listPeriodTargets(actor.organizationId, plan.id);
       const byPeriod = new Map(existing.map((r) => [r.period, r]));
       for (const row of generated) byPeriod.set(row.period, row);
-      const rangeStart = payload.startMonth || plan.effectiveStartDate || plan.startDate;
-      const rangeEnd = payload.endMonth || plan.effectiveEndDate || plan.endDate;
+      const rangeStart = anchors?.length
+        ? generated[0].period
+        : payload.startMonth || plan.effectiveStartDate || plan.startDate;
+      const rangeEnd = anchors?.length
+        ? generated.at(-1).period
+        : payload.endMonth || plan.effectiveEndDate || plan.endDate;
       const merged = mergeExplicitMonthlyTargets([...byPeriod.values()], rangeStart, rangeEnd);
       await store.replacePeriodTargets(actor.organizationId, plan.id, merged);
       const updated = await store.getPlanById(actor.organizationId, plan.id);
       await emit(updated, "ramp_generated", actor, {
-        startMonth: payload.startMonth,
-        endMonth: payload.endMonth,
-        monthCount: generated.length
+        startMonth: generated[0]?.period || payload.startMonth,
+        endMonth: generated.at(-1)?.period || payload.endMonth,
+        monthCount: generated.length,
+        draft: true,
+        source: anchors?.length ? "milestone_anchors" : "linear_ramp"
       });
-      return loadPlanBundle(store, actor.organizationId, plan.id);
+      const bundle = await loadPlanBundle(store, actor.organizationId, plan.id);
+      return { ...bundle, draftGenerated: true };
     },
 
     async listTemplates(actor) {

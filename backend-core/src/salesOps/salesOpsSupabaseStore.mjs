@@ -1956,7 +1956,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
           () =>
             db()
               .from("sales_ops_accounts")
-              .select("id,monday_board_id,monday_item_id,account_directory_account_id,assigned_user_id")
+              .select("id,monday_board_id,monday_item_id,account_directory_account_id,assigned_user_id,account_name,branch,market,monday_url")
               .eq("organization_id", organizationId)
               .eq("archived", false)
               .eq("source_state", "active")
@@ -1966,7 +1966,11 @@ export function createSalesOpsSupabaseStore(getSupabase) {
             mondayBoardId: row.monday_board_id,
             mondayItemId: row.monday_item_id,
             accountDirectoryAccountId: row.account_directory_account_id ?? null,
-            assignedUserId: row.assigned_user_id ?? null
+            assignedUserId: row.assigned_user_id ?? null,
+            accountName: row.account_name,
+            branch: row.branch ?? null,
+            market: row.market ?? null,
+            mondayUrl: row.monday_url ?? null
           })
         );
       } catch (error) {
@@ -2023,11 +2027,13 @@ export function createSalesOpsSupabaseStore(getSupabase) {
           sales_ops_account_id: row.salesOpsAccountId ?? null,
           moraware_account_id: row.morawareAccountId ?? null,
           moraware_job_id: row.morawareJobId ?? null,
+          moraware_form_id: row.morawareFormId ?? null,
           qualifying_event: row.qualifyingEvent,
           qualifying_date: row.qualifyingDate,
           performance_month: row.performanceMonth,
           credited_sf: Number(row.creditedSf),
           attribution_basis: row.attributionBasis || "explicit_fact",
+          commission_eligible: row.commissionEligible == null ? null : Boolean(row.commissionEligible),
           source_observed_at: row.sourceObservedAt ?? null,
           reversal_of_id: row.reversalOfId ?? null,
           status: row.status || "credited"
@@ -2060,7 +2066,262 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       } catch (error) {
         throwDb(error, "Could not list attribution facts.");
       }
+    },
+
+    async listDirectoryIdentityAccounts(organizationId) {
+      try {
+        return await pageSelect(
+          () =>
+            db()
+              .from("account_directory_accounts")
+              .select("id,display_name")
+              .eq("organization_id", organizationId)
+              .is("archived_at", null)
+              .order("id", { ascending: true }),
+          (row) => ({ id: row.id, displayName: row.display_name })
+        );
+      } catch (error) {
+        throwDb(error, "Could not list Account Directory identity rows.");
+      }
+    },
+
+    async listDirectoryAliases(organizationId) {
+      try {
+        return await pageSelect(
+          () =>
+            db()
+              .from("account_directory_aliases")
+              .select("account_id,alias_value,normalized_match_value")
+              .eq("organization_id", organizationId)
+              .eq("is_active", true)
+              .order("id", { ascending: true }),
+          (row) => ({
+            accountId: row.account_id,
+            aliasValue: row.alias_value,
+            normalizedMatchValue: row.normalized_match_value
+          })
+        );
+      } catch (error) {
+        throwDb(error, "Could not list Account Directory aliases.");
+      }
+    },
+
+    async listIdentityHints(organizationId) {
+      try {
+        const { data, error } = await db()
+          .from("sales_ops_identity_review_hints")
+          .select("monday_name,suggested_directory_name,evidence_kind,strength,notes,pack_key")
+          .eq("organization_id", organizationId);
+        if (error) throw error;
+        return (data || []).map((row) => ({
+          mondayName: row.monday_name,
+          suggestedDirectoryName: row.suggested_directory_name,
+          evidenceKind: row.evidence_kind,
+          strength: row.strength || "standard",
+          notes: row.notes,
+          packKey: row.pack_key
+        }));
+      } catch (error) {
+        throwDb(error, "Could not list identity review hints.");
+      }
+    },
+
+    async replaceIdentityReviews(organizationId, rows) {
+      const { error: delError } = await db()
+        .from("sales_ops_account_identity_reviews")
+        .delete()
+        .eq("organization_id", organizationId);
+      if (delError) throwDb(delError, "Could not clear stale identity reviews.");
+      if (!rows?.length) return [];
+      const out = [];
+      const chunk = 200;
+      for (let i = 0; i < rows.length; i += chunk) {
+        const payload = rows.slice(i, i + chunk).map((row) => ({
+          organization_id: organizationId,
+          sales_ops_account_id: row.salesOpsAccountId,
+          monday_board_id: row.mondayBoardId,
+          monday_item_id: row.mondayItemId,
+          monday_account_name: row.mondayAccountName,
+          status: row.status,
+          auto_linkable: Boolean(row.autoLinkable),
+          candidates: row.candidates || [],
+          evidence: row.evidence || [],
+          conflict_reason: row.conflictReason ?? null,
+          exclusion_hint: Boolean(row.exclusionHint),
+          linked_account_directory_account_id: row.linkedAccountDirectoryAccountId ?? null,
+          rebuilt_at: new Date().toISOString()
+        }));
+        const { data, error } = await db().from("sales_ops_account_identity_reviews").insert(payload).select("*");
+        if (error) throwDb(error, "Could not save identity reviews.");
+        out.push(...(data || []).map(mapIdentityReview));
+      }
+      return out;
+    },
+
+    async listIdentityReviews(organizationId, { status = null } = {}) {
+      let q = db()
+        .from("sales_ops_account_identity_reviews")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("monday_account_name", { ascending: true });
+      if (status) q = q.eq("status", status);
+      const { data, error } = await q;
+      if (error) throwDb(error, "Could not list identity reviews.");
+      return (data || []).map(mapIdentityReview);
+    },
+
+    async getIdentityReview(organizationId, reviewId) {
+      const { data, error } = await db()
+        .from("sales_ops_account_identity_reviews")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", reviewId)
+        .maybeSingle();
+      if (error) throwDb(error, "Could not load identity review.");
+      return mapIdentityReview(data);
+    },
+
+    async updateIdentityReview(organizationId, reviewId, patch) {
+      const write = {};
+      if (patch.status != null) write.status = patch.status;
+      if (patch.autoLinkable != null) write.auto_linkable = patch.autoLinkable;
+      if (patch.linkedAccountDirectoryAccountId !== undefined) {
+        write.linked_account_directory_account_id = patch.linkedAccountDirectoryAccountId;
+      }
+      write.updated_at = new Date().toISOString();
+      const { data, error } = await db()
+        .from("sales_ops_account_identity_reviews")
+        .update(write)
+        .eq("organization_id", organizationId)
+        .eq("id", reviewId)
+        .select("*")
+        .single();
+      if (error) throwDb(error, "Could not update identity review.");
+      return mapIdentityReview(data);
+    },
+
+    async insertIdentityReviewEvent(row) {
+      const { error } = await db().from("sales_ops_account_identity_review_events").insert({
+        organization_id: row.organizationId,
+        review_id: row.reviewId ?? null,
+        sales_ops_account_id: row.salesOpsAccountId ?? null,
+        monday_item_id: row.mondayItemId,
+        monday_board_id: row.mondayBoardId,
+        account_directory_account_id: row.accountDirectoryAccountId ?? null,
+        actor_user_id: row.actorUserId,
+        action: row.action,
+        reason: row.reason ?? null,
+        evidence_shown: row.evidenceShown || [],
+        prior_account_directory_account_id: row.priorAccountDirectoryAccountId ?? null
+      });
+      if (error) throwDb(error, "Could not record identity review event.");
+      return true;
+    },
+
+    async insertMondayAccountDirectoryLink({ organizationId, boardId, itemId, accountId, linkedBy = null }) {
+      const externalId = mondayExternalId(boardId, itemId);
+      const existing = await db()
+        .from("account_directory_external_links")
+        .select("account_id")
+        .eq("organization_id", organizationId)
+        .eq("external_system", SALES_OPS_MONDAY_EXTERNAL_SYSTEM)
+        .eq("external_id", externalId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (existing.error) throwDb(existing.error, "Could not inspect Monday identity link.");
+      if (existing.data?.account_id && String(existing.data.account_id) !== String(accountId)) {
+        const err = new Error("Monday item is already linked to a different Account Directory account.");
+        err.code = "monday_link_conflict";
+        throw err;
+      }
+      if (existing.data?.account_id) return { accountId: existing.data.account_id, boardId, itemId };
+      const { error } = await db().from("account_directory_external_links").insert({
+        organization_id: organizationId,
+        account_id: accountId,
+        external_system: SALES_OPS_MONDAY_EXTERNAL_SYSTEM,
+        external_id: externalId,
+        linked_by: linkedBy,
+        is_active: true
+      });
+      if (error) {
+        if (String(error.code) === "23505") {
+          const err = new Error("Monday item is already linked to a different Account Directory account.");
+          err.code = "monday_link_conflict";
+          throw err;
+        }
+        throwDb(error, "Could not write Monday Account Directory link.");
+      }
+      return { accountId, boardId, itemId };
+    },
+
+    async setSalesOpsAccountDirectoryId(organizationId, accountId, directoryAccountId) {
+      const { data, error } = await db()
+        .from("sales_ops_accounts")
+        .update({ account_directory_account_id: directoryAccountId })
+        .eq("organization_id", organizationId)
+        .eq("id", accountId)
+        .select("id,account_directory_account_id")
+        .maybeSingle();
+      if (error) throwDb(error, "Could not update Sales Ops Account Directory projection.");
+      return data;
+    },
+
+    async listCompensationProposals(organizationId) {
+      const { data, error } = await db()
+        .from("sales_ops_compensation_proposals")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (error) throwDb(error, "Could not list compensation proposals.");
+      return (data || []).map((row) => ({
+        id: row.id,
+        organizationId: row.organization_id,
+        userId: row.user_id,
+        status: row.status,
+        baseSalary: row.base_salary == null ? null : Number(row.base_salary),
+        ratePerSf: row.rate_per_sf == null ? null : Number(row.rate_per_sf),
+        effectiveDate: row.effective_date,
+        basis: row.basis,
+        finallyApproved: Boolean(row.finally_approved),
+        notes: row.notes
+      }));
+    },
+
+    async listCommissionableAccounts(organizationId, userId = null) {
+      let q = db().from("sales_ops_commissionable_accounts").select("*").eq("organization_id", organizationId);
+      if (userId) q = q.eq("user_id", userId);
+      const { data, error } = await q;
+      if (error) throwDb(error, "Could not list commissionable accounts.");
+      return data || [];
+    },
+
+    async listCommissionReports(organizationId, userId = null) {
+      let q = db().from("sales_ops_commission_reports").select("*").eq("organization_id", organizationId);
+      if (userId) q = q.eq("user_id", userId);
+      const { data, error } = await q;
+      if (error) throwDb(error, "Could not list commission reports.");
+      return data || [];
     }
+  };
+}
+
+function mapIdentityReview(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    salesOpsAccountId: row.sales_ops_account_id,
+    mondayBoardId: row.monday_board_id,
+    mondayItemId: row.monday_item_id,
+    mondayAccountName: row.monday_account_name,
+    status: row.status,
+    autoLinkable: Boolean(row.auto_linkable),
+    candidates: row.candidates || [],
+    evidence: row.evidence || [],
+    conflictReason: row.conflict_reason,
+    exclusionHint: Boolean(row.exclusion_hint),
+    linkedAccountDirectoryAccountId: row.linked_account_directory_account_id,
+    rebuiltAt: row.rebuilt_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -2074,11 +2335,13 @@ function mapAttributionFact(row) {
     salesOpsAccountId: row.sales_ops_account_id ?? null,
     morawareAccountId: row.moraware_account_id ?? null,
     morawareJobId: row.moraware_job_id ?? null,
+    morawareFormId: row.moraware_form_id ?? null,
     qualifyingEvent: row.qualifying_event,
     qualifyingDate: row.qualifying_date,
     performanceMonth: row.performance_month,
     creditedSf: Number(row.credited_sf),
     attributionBasis: row.attribution_basis,
+    commissionEligible: row.commission_eligible == null ? null : Boolean(row.commission_eligible),
     sourceObservedAt: row.source_observed_at ?? null,
     reversalOfId: row.reversal_of_id ?? null,
     status: row.status || "credited",

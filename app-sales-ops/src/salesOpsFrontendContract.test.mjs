@@ -16,6 +16,7 @@ const files = [
   "src/ui/SalesOpsApp.tsx",
   "src/ui/Account360Workspace.tsx",
   "src/ui/PlanAdmin.tsx",
+  "src/ui/IdentityReview.tsx",
   "src/main.tsx",
   ".env.example"
 ];
@@ -61,12 +62,18 @@ assert.ok(app.includes("/api/sales-ops/team/${"));
 assert.ok(app.includes("accounts=1"));
 assert.ok(app.includes("Plan Builder"));
 assert.ok(app.includes("Team Performance"));
+assert.ok(app.includes("Identity Review"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews"));
 assert.ok(!app.includes("api.moraware.com"));
 assert.ok(!app.includes("quickbooks"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("/api/sales-ops/admin/plans/"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("generate-ramp"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("anchors"));
 assert.ok(!/Thera/.test(app));
 assert.ok(!/Thera/.test(read("src/ui/PlanAdmin.tsx")));
+assert.ok(!/Thera/.test(read("src/ui/IdentityReview.tsx")));
+assert.ok(!read("src/ui/IdentityReview.tsx").includes("ListID"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("quickbooksLinked"));
 
 const { accountListScopeCopy } = await import("./lib/accountListScopeCopy.mjs");
 assert.equal(

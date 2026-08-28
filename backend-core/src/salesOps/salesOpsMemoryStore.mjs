@@ -44,6 +44,14 @@ export function createSalesOpsMemoryStore() {
   const mondayAdLinks = new Map();
   const externalLinks = new Map();
   const attributionFacts = new Map();
+  const directoryAccounts = new Map();
+  const directoryAliases = new Map();
+  const identityReviews = new Map();
+  const identityReviewEvents = [];
+  const identityHints = new Map();
+  const compensationProposals = new Map();
+  const commissionableAccounts = new Map();
+  const commissionReports = new Map();
   const metrics = {
     eavSelectChunks: 0,
     accountUpsertChunks: 0,
@@ -662,6 +670,13 @@ export function createSalesOpsMemoryStore() {
 
     seedMondayAccountDirectoryLink(organizationId, boardId, itemId, accountId) {
       mondayAdLinks.set(`${organizationId}:${boardId}:${itemId}`, { accountId, organizationId, boardId, itemId });
+      externalLinks.set(`${organizationId}:monday:${boardId}:${itemId}`, {
+        organizationId,
+        externalSystem: "monday",
+        externalId: `${boardId}:${itemId}`,
+        accountId,
+        isActive: true
+      });
     },
     async getMondayAccountDirectoryLink(organizationId, boardId, itemId) {
       return clone(mondayAdLinks.get(`${organizationId}:${boardId}:${itemId}`) || null);
@@ -919,7 +934,11 @@ export function createSalesOpsMemoryStore() {
           mondayBoardId: a.mondayBoardId,
           mondayItemId: a.mondayItemId,
           accountDirectoryAccountId: a.accountDirectoryAccountId ?? null,
-          assignedUserId: a.assignedUserId ?? null
+          assignedUserId: a.assignedUserId ?? null,
+          accountName: a.accountName,
+          branch: a.branch ?? null,
+          market: a.market ?? null,
+          mondayUrl: a.mondayUrl ?? null
         }));
     },
 
@@ -959,6 +978,21 @@ export function createSalesOpsMemoryStore() {
     },
 
     async insertAttributionFact(row) {
+      if (String(row.status || "credited") === "credited" && row.morawareJobId && row.morawareFormId) {
+        const dup = [...attributionFacts.values()].find(
+          (r) =>
+            r.organizationId === row.organizationId &&
+            String(r.status || "credited") === "credited" &&
+            String(r.morawareJobId) === String(row.morawareJobId) &&
+            String(r.morawareFormId) === String(row.morawareFormId) &&
+            String(r.qualifyingEvent) === String(row.qualifyingEvent)
+        );
+        if (dup) {
+          const err = new Error("Duplicate worksheet production event.");
+          err.code = "duplicate_worksheet_event";
+          throw err;
+        }
+      }
       const rec = {
         id: row.id || randomUUID(),
         organizationId: row.organizationId,
@@ -967,11 +1001,13 @@ export function createSalesOpsMemoryStore() {
         salesOpsAccountId: row.salesOpsAccountId ?? null,
         morawareAccountId: row.morawareAccountId ?? null,
         morawareJobId: row.morawareJobId ?? null,
+        morawareFormId: row.morawareFormId ?? null,
         qualifyingEvent: row.qualifyingEvent,
         qualifyingDate: row.qualifyingDate,
         performanceMonth: row.performanceMonth,
         creditedSf: Number(row.creditedSf),
         attributionBasis: row.attributionBasis || "explicit_fact",
+        commissionEligible: row.commissionEligible == null ? null : Boolean(row.commissionEligible),
         sourceObservedAt: row.sourceObservedAt ?? nowIso(),
         reversalOfId: row.reversalOfId ?? null,
         status: row.status || "credited",
@@ -990,6 +1026,161 @@ export function createSalesOpsMemoryStore() {
           if (periodTo && r.performanceMonth > periodTo) return false;
           return true;
         })
+        .map(clone);
+    },
+
+    seedDirectoryAccount(row) {
+      const rec = {
+        id: row.id || randomUUID(),
+        organizationId: row.organizationId,
+        displayName: row.displayName,
+        archivedAt: row.archivedAt ?? null
+      };
+      directoryAccounts.set(rec.id, rec);
+      return clone(rec);
+    },
+    seedDirectoryAlias(row) {
+      const rec = {
+        id: row.id || randomUUID(),
+        organizationId: row.organizationId,
+        accountId: row.accountId,
+        aliasValue: row.aliasValue,
+        normalizedMatchValue: row.normalizedMatchValue || row.aliasValue,
+        isActive: row.isActive !== false
+      };
+      directoryAliases.set(rec.id, rec);
+      return clone(rec);
+    },
+    seedIdentityHint(row) {
+      const rec = {
+        id: row.id || randomUUID(),
+        organizationId: row.organizationId,
+        packKey: row.packKey || "starter_handoff_v1",
+        mondayName: row.mondayName,
+        suggestedDirectoryName: row.suggestedDirectoryName ?? null,
+        evidenceKind: row.evidenceKind,
+        strength: row.strength || "standard",
+        notes: row.notes ?? null
+      };
+      identityHints.set(rec.id, rec);
+      return clone(rec);
+    },
+    async listDirectoryIdentityAccounts(organizationId) {
+      return [...directoryAccounts.values()]
+        .filter((r) => r.organizationId === organizationId && !r.archivedAt)
+        .map((r) => ({ id: r.id, displayName: r.displayName }));
+    },
+    async listDirectoryAliases(organizationId) {
+      return [...directoryAliases.values()]
+        .filter((r) => r.organizationId === organizationId && r.isActive !== false)
+        .map((r) => ({ accountId: r.accountId, aliasValue: r.aliasValue, normalizedMatchValue: r.normalizedMatchValue }));
+    },
+    async listIdentityHints(organizationId) {
+      return [...identityHints.values()].filter((r) => r.organizationId === organizationId).map(clone);
+    },
+    async replaceIdentityReviews(organizationId, rows) {
+      for (const [id, rec] of identityReviews) {
+        if (rec.organizationId === organizationId) identityReviews.delete(id);
+      }
+      const out = [];
+      for (const row of rows || []) {
+        const rec = {
+          id: row.id || randomUUID(),
+          organizationId,
+          salesOpsAccountId: row.salesOpsAccountId,
+          mondayBoardId: row.mondayBoardId,
+          mondayItemId: row.mondayItemId,
+          mondayAccountName: row.mondayAccountName,
+          status: row.status,
+          autoLinkable: Boolean(row.autoLinkable),
+          candidates: row.candidates || [],
+          evidence: row.evidence || [],
+          conflictReason: row.conflictReason ?? null,
+          exclusionHint: Boolean(row.exclusionHint),
+          linkedAccountDirectoryAccountId: row.linkedAccountDirectoryAccountId ?? null,
+          rebuiltAt: nowIso(),
+          createdAt: nowIso(),
+          updatedAt: nowIso()
+        };
+        identityReviews.set(rec.id, rec);
+        out.push(clone(rec));
+      }
+      return out;
+    },
+    async listIdentityReviews(organizationId, { status = null } = {}) {
+      return [...identityReviews.values()]
+        .filter((r) => r.organizationId === organizationId && (!status || r.status === status))
+        .sort((a, b) => String(a.mondayAccountName).localeCompare(String(b.mondayAccountName)))
+        .map(clone);
+    },
+    async getIdentityReview(organizationId, reviewId) {
+      const rec = identityReviews.get(reviewId);
+      return rec && rec.organizationId === organizationId ? clone(rec) : null;
+    },
+    async updateIdentityReview(organizationId, reviewId, patch) {
+      const rec = identityReviews.get(reviewId);
+      if (!rec || rec.organizationId !== organizationId) return null;
+      const next = { ...rec, ...patch, updatedAt: nowIso() };
+      identityReviews.set(reviewId, next);
+      return clone(next);
+    },
+    async insertIdentityReviewEvent(row) {
+      const rec = {
+        id: randomUUID(),
+        createdAt: nowIso(),
+        ...row
+      };
+      identityReviewEvents.push(rec);
+      return clone(rec);
+    },
+    async insertMondayAccountDirectoryLink({ organizationId, boardId, itemId, accountId, linkedBy = null }) {
+      const existing = mondayAdLinks.get(`${organizationId}:${boardId}:${itemId}`);
+      if (existing && String(existing.accountId) !== String(accountId)) {
+        const err = new Error("Monday item is already linked to a different Account Directory account.");
+        err.code = "monday_link_conflict";
+        throw err;
+      }
+      mondayAdLinks.set(`${organizationId}:${boardId}:${itemId}`, { accountId, organizationId, boardId, itemId, linkedBy });
+      externalLinks.set(`${organizationId}:monday:${boardId}:${itemId}`, {
+        organizationId,
+        externalSystem: "monday",
+        externalId: `${boardId}:${itemId}`,
+        accountId,
+        isActive: true
+      });
+      return { accountId, boardId, itemId };
+    },
+    async setSalesOpsAccountDirectoryId(organizationId, accountId, directoryAccountId) {
+      const rec = accounts.get(accountId);
+      if (!rec || rec.organizationId !== organizationId) return null;
+      rec.accountDirectoryAccountId = directoryAccountId;
+      rec.updatedAt = nowIso();
+      accounts.set(accountId, rec);
+      return clone(rec);
+    },
+    async upsertCommissionableAccount(row) {
+      const id = row.id || `${row.organizationId}:${row.userId}:${row.accountDirectoryAccountId}`;
+      const rec = { id, ...row, updatedAt: nowIso() };
+      commissionableAccounts.set(id, rec);
+      return clone(rec);
+    },
+    async listCommissionableAccounts(organizationId, userId = null) {
+      return [...commissionableAccounts.values()]
+        .filter((r) => r.organizationId === organizationId && (!userId || r.userId === userId))
+        .map(clone);
+    },
+    async listCompensationProposals(organizationId) {
+      return [...compensationProposals.values()].filter((r) => r.organizationId === organizationId).map(clone);
+    },
+    async upsertCompensationProposal(row) {
+      const id = row.id || randomUUID();
+      const rec = { finallyApproved: false, status: "proposal", ...row, id, updatedAt: nowIso() };
+      compensationProposals.set(id, rec);
+      return clone(rec);
+    },
+    async listCommissionReports(organizationId, userId = null) {
+      return [...commissionReports.values()]
+        .filter((r) => r.organizationId === organizationId && (!userId || r.userId === userId))
         .map(clone);
     }
   };

@@ -5,6 +5,7 @@ import { apiGet, apiPatch, apiPost, apiPut, ApiError } from "../lib/api";
 import { accountListScopeCopy } from "../lib/accountListScopeCopy.mjs";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
+import IdentityReview from "./IdentityReview";
 import Account360Workspace, {
   type Account,
   type AccountWorkspaceState,
@@ -14,7 +15,7 @@ import Account360Workspace, {
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
-type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin";
+type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin" | "identity";
 
 type Insight = {
   eyebrow: string;
@@ -181,7 +182,12 @@ export default function SalesOpsApp() {
   const [scorecards, setScorecards] = useState<Scorecard[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsCursor, setAccountsCursor] = useState<string | null>(null);
-  const [commission, setCommission] = useState<{ enabled: boolean; snapshot?: Record<string, unknown> | null; reason?: string } | null>(null);
+  const [commission, setCommission] = useState<{
+    enabled: boolean;
+    snapshot?: Record<string, unknown> | null;
+    reason?: string;
+    compensation?: { finallyApproved?: boolean; workflow?: string[] };
+  } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [form, setForm] = useState<Scorecard>(blankScore("2026-09"));
@@ -605,7 +611,8 @@ export default function SalesOpsApp() {
     ["entry", "05", "Scorecards", true],
     ["commission", "06", "Commission", true],
     ["team", "07", "Team Performance", Boolean((me?.access as { isManager?: boolean; isOrgAdmin?: boolean } | undefined)?.isManager || (me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
-    ["admin", "08", "Plan Builder", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)]
+    ["admin", "08", "Plan Builder", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)],
+    ["identity", "09", "Identity Review", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)]
   ];
 
   return (
@@ -1094,6 +1101,19 @@ export default function SalesOpsApp() {
                   <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(commission.snapshot || {}, null, 2)}</pre>
                 </div>
               )}
+              {commission && "compensation" in commission && commission.compensation ? (
+                <div className="commission-config">
+                  <p className="kicker">Compensation configuration</p>
+                  <h2>{(commission.compensation as { finallyApproved?: boolean }).finallyApproved ? "Approved" : "Proposal — not finally approved"}</h2>
+                  <p className="workspace-muted">
+                    Performance targets, commission eligibility, rates, and payment approval stay separate. Locked or paid
+                    monthly reports never silently recalculate.
+                  </p>
+                  <small>
+                    Workflow: {String(((commission.compensation as { workflow?: string[] }).workflow || []).join(" → "))}
+                  </small>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -1101,7 +1121,7 @@ export default function SalesOpsApp() {
             <div className="tab-page">
               <p className="kicker">Team performance</p>
               <h2>Governed scope only.</h2>
-              <p className="workspace-muted">Sales sees self. Managers see assigned reports. Admin/executive sees the organization. Actual SF stays unavailable until the earned-sale definition is approved.</p>
+              <p className="workspace-muted">Sales sees self. Managers see assigned reports. Admin/executive sees the organization. Actual SF stays unavailable until worksheet completed-first-install fields exist on Moraware prepared facts.</p>
               <div className="month-goal-table" role="table" aria-label="Team performance">
                 <div className="month-goal-head team-perf-head" role="row">
                   <span>Rep</span>
@@ -1141,6 +1161,13 @@ export default function SalesOpsApp() {
               token={sessionToken}
               access={(me?.access as { isOrgAdmin?: boolean; canPublishPlans?: boolean }) || {}}
               onChanged={() => void reload()}
+            />
+          )}
+
+          {tab === "identity" && sessionToken && (
+            <IdentityReview
+              token={sessionToken}
+              access={(me?.access as { isOrgAdmin?: boolean }) || {}}
             />
           )}
         </section>

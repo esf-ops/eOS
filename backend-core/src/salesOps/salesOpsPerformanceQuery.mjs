@@ -8,25 +8,29 @@ import { contributeByAccount, factsForUserPeriod, netCreditedSf, selectPlanVersi
 import { currentPeriod, enumerateMonths } from "./salesOpsMonths.mjs";
 import { MORAWARE_EXTERNAL_SYSTEM, QUICKBOOKS_EXTERNAL_SYSTEM, summarizeExactIdentity } from "./salesOpsIdentityAudit.mjs";
 import { SALES_OPS_MONDAY_EXTERNAL_SYSTEM } from "./salesOpsConstants.js";
+import {
+  COMPLETED_INSTALLATION_SF,
+  PRODUCTION_COMPLETED_INSTALLATION_SUPPORT,
+  REJECTED_SF_PROXIES,
+  REQUIRED_COMPLETED_INSTALLATION_EVIDENCE
+} from "./salesOpsCompletedInstallationSf.mjs";
 
 export const ACTUAL_SF_DEFINITION = Object.freeze({
   status: ACTUAL_SF_DEFINITION_STATUS,
+  candidateMetric: COMPLETED_INSTALLATION_SF,
   source: "moraware",
-  qualifyingEvent: null,
-  qualifyingDate: null,
-  sfField: null,
+  qualifyingEvent: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.observedEventColumn,
+  qualifyingDate: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.observedDateColumn,
+  sfField: "sales_moraware_job_worksheet_facts.sqft",
+  jobIdentity: "sales_moraware_job_worksheet_facts.source_job_id",
+  formIdentity: "sales_moraware_job_worksheet_facts.source_form_id",
+  requiredEvidence: REQUIRED_COMPLETED_INSTALLATION_EVIDENCE,
+  missingEvidence: PRODUCTION_COMPLETED_INSTALLATION_SUPPORT.missing,
   exclusions: null,
   reversalSemantics: "explicit_reversal_row_on_sales_ops_sf_attribution_facts",
   confidence: "unproven",
-  rejectedProxies: Object.freeze([
-    "created_at_source",
-    "modified_at_source",
-    "install_at_source",
-    "completed_at_source",
-    "invoice_date",
-    "sales_dashboard_report_date"
-  ]),
-  note: "Sales dashboard date basis is a documented proxy, not an approved Sales Ops earned-sale event."
+  rejectedProxies: REJECTED_SF_PROXIES,
+  note: "Worksheet prepared facts have job, form, and sqft. They do not expose a completed first-install event or date on the worksheet row. Job-level install_at_source / completed_at_source remain rejected proxies."
 });
 
 function publishedPlans(plans) {

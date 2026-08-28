@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateLinearRamp, mergeExplicitMonthlyTargets, uniquePeriodTargets } from "./salesOpsMonths.mjs";
+import { generateLinearRamp, generateMilestoneRamp, mergeExplicitMonthlyTargets, uniquePeriodTargets } from "./salesOpsMonths.mjs";
 import { attainmentPct, monthRow, varianceSf } from "./salesOpsPerformanceMath.mjs";
 import { summarizeExactIdentity } from "./salesOpsIdentityAudit.mjs";
 import { contributeByAccount, selectPlanVersionForPeriod } from "./salesOpsAttribution.mjs";
@@ -57,14 +57,27 @@ async function publishedPlan(svc, userId, periodTargets) {
 }
 
 async function main() {
-  const ramp = generateLinearRamp({ startMonth: "2026-09", startSf: 1000, endMonth: "2028-12", endSf: 2500 });
-  assert.equal(ramp[0].period, "2026-09");
+  const ramp = generateLinearRamp({ startMonth: "2027-01", startSf: 1000, endMonth: "2027-12", endSf: 2500 });
+  assert.equal(ramp[0].period, "2027-01");
   assert.equal(ramp[0].installedTarget, 1000);
-  assert.equal(ramp.at(-1).period, "2028-12");
+  assert.equal(ramp.at(-1).period, "2027-12");
   assert.equal(ramp.at(-1).installedTarget, 2500);
-  assert.equal(ramp.length, 28);
-  assert.equal(new Set(ramp.map((r) => r.period)).size, 28);
-  assert.ok(ramp[1].installedTarget > 1000 && ramp[1].installedTarget < 2500);
+  assert.equal(ramp.length, 12);
+  assert.equal(new Set(ramp.map((r) => r.period)).size, 12);
+
+  const milestones = generateMilestoneRamp([
+    { period: "2027-01", sf: 1000 },
+    { period: "2027-03", sf: 1500 },
+    { period: "2027-09", sf: 2000 },
+    { period: "2027-12", sf: 2500 }
+  ]);
+  assert.equal(milestones[0].period, "2027-01");
+  assert.equal(milestones.at(-1).period, "2027-12");
+  assert.equal(milestones.find((r) => r.period === "2027-12").installedTarget, 2500);
+  assert.equal(milestones.find((r) => r.period === "2027-03").installedTarget, 1500);
+  assert.equal(milestones.find((r) => r.period === "2027-09").installedTarget, 2000);
+  assert.ok(!milestones.some((r) => r.period.startsWith("2028")));
+  assert.ok(!milestones.some((r) => r.period.startsWith("2026")));
 
   assert.throws(() => uniquePeriodTargets([{ period: "2026-09", installedTarget: 1 }, { period: "2026-09", installedTarget: 2 }]));
   const merged = mergeExplicitMonthlyTargets([{ period: "2026-09", installedTarget: 50 }], "2026-09-01", "2026-11-30");

@@ -9,10 +9,11 @@ export const ACTUAL_SF_STATUSES = Object.freeze([
   "IDENTITY_UNLINKED",
   "SOURCE_UNAVAILABLE",
   "NOT_APPLICABLE",
-  "ACTUAL_SF_DEFINITION_REQUIRED"
+  "ACTUAL_SF_DEFINITION_REQUIRED",
+  "ACTUAL_SF_FIELD_GAP"
 ]);
 
-export const ACTUAL_SF_DEFINITION_STATUS = "ACTUAL_SF_DEFINITION_REQUIRED";
+export const ACTUAL_SF_DEFINITION_STATUS = "ACTUAL_SF_FIELD_GAP";
 
 export function asNumberOrNull(value) {
   if (value == null || value === "") return null;

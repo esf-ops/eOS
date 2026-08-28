@@ -190,7 +190,7 @@ async function main() {
   const perfBody = await perfA.json();
   assert.equal(perfBody.ok, true);
   assert.equal(perfBody.currentMonth.actualSf, null);
-  assert.equal(perfBody.actualSfDefinition.status, "ACTUAL_SF_DEFINITION_REQUIRED");
+  assert.equal(perfBody.actualSfDefinition.status, "ACTUAL_SF_FIELD_GAP");
   assert.equal((await fetch(`${base}/api/sales-ops/me/performance/months`, authA)).status, 200);
   assert.equal((await fetch(`${base}/api/sales-ops/me/performance/accounts`, authA)).status, 200);
   assert.equal((await fetch(`${base}/api/sales-ops/team/${REP_A}/performance`, authB)).status, 404);
@@ -203,6 +203,31 @@ async function main() {
   const auditBody = await audit.json();
   assert.equal(Object.prototype.hasOwnProperty.call(auditBody, "account_name"), false);
   assert.ok(typeof auditBody.salesOpsAccountsTotal === "number");
+  assert.equal((await fetch(`${base}/api/sales-ops/admin/identity-reviews`, authA)).status, 404);
+  assert.equal((await fetch(`${base}/api/sales-ops/admin/compensation`, authA)).status, 404);
+  const reviewsDenied = await fetch(`${base}/api/sales-ops/admin/identity-reviews/rebuild`, {
+    method: "POST",
+    headers: { Authorization: "Bearer a", "content-type": "application/json" },
+    body: "{}"
+  });
+  assert.equal(reviewsDenied.status, 404);
+  const rebuilt = await fetch(`${base}/api/sales-ops/admin/identity-reviews/rebuild`, {
+    method: "POST",
+    headers: { Authorization: "Bearer admin", "content-type": "application/json" },
+    body: "{}"
+  });
+  assert.equal(rebuilt.status, 200);
+  const rebuiltBody = await rebuilt.json();
+  assert.equal(rebuiltBody.linkingMethod, "exact_external_id_only");
+  const listed = await fetch(`${base}/api/sales-ops/admin/identity-reviews`, authAdmin);
+  assert.equal(listed.status, 200);
+  const listedBody = await listed.json();
+  assert.ok(Array.isArray(listedBody.reviews));
+  assert.equal(JSON.stringify(listedBody).includes("QB-ROOT"), false);
+  const comp = await fetch(`${base}/api/sales-ops/admin/compensation`, authAdmin);
+  assert.equal(comp.status, 200);
+  const compBody = await comp.json();
+  assert.equal(compBody.finallyApproved, false);
 
   await new Promise((r) => server.close(r));
   console.log("salesOpsHttp.test.mjs: ok");

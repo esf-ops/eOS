@@ -27,7 +27,11 @@ Exact only:
 - `external_system = 'monday'`
 - `external_id = '{boardId}:{itemId}'`
 
-Do **not** collide with Excel `account_master_list`. Do **not** fuzzy-match. If no exact link exists, `account_directory_account_id` stays NULL and the Monday-owned Sales Ops projection can still be visible by salesperson ownership.
+Do **not** collide with Excel `account_master_list`. Do **not** fuzzy-match. Name, alias, ownership, address, and starter-pack hints are **review candidates only**. If no exact link exists, `account_directory_account_id` stays NULL and the Monday-owned Sales Ops projection can still be visible by salesperson ownership.
+
+Admin **Account Identity Review** (`GET/POST /api/sales-ops/admin/identity-reviews*`) rebuilds a queue with statuses `EXACT_AUTO_LINKABLE`, `REVIEW_REQUIRED`, `NO_CANDIDATE`, and `CONFLICT`. Only `EXACT_AUTO_LINKABLE` (existing unique Monday external link or another conclusive source ID) may auto-commit. Human approval logs actor, timestamp, Monday item, Account Directory UUID, shown evidence, prior link, and reason. Unmatched Monday items do not create Account Directory rows.
+
+QuickBooks ListIDs are never returned to the browser (linked yes/no only). Moraware Account IDs may be shown on identity review candidates.
 
 ## Configuration (org-scoped, not SaaS-global)
 
@@ -107,6 +111,8 @@ Rep: own Monday-assigned accounts. Manager: explicit assigned reports. Admin/exe
 
 - v1 `eliteos_sales_ops_v1.sql` is **already applied** in production.
 - Additive v2 `eliteos_sales_ops_monday_full_mirror_v2.sql` **is applied** on production project `wbxbzhxsdlkpqsviyzkt`, plus follow-up `eliteos_sales_ops_monday_column_value_null_v2_1.sql` (empty column JSON null). Writes remain disabled.
+- Additive v3 `eliteos_sales_ops_performance_attribution_v3.sql` is applied (attribution facts; no seeded actuals).
+- Additive v4 `eliteos_sales_ops_identity_review_v4.sql` — identity review queue, compensation proposal/config, commission-report lifecycle. Apply before Brain deploy of this slice.
 
 ## Environment
 

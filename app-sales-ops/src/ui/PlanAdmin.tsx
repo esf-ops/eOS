@@ -190,6 +190,7 @@ export default function PlanAdmin({
   const [rampEnd, setRampEnd] = useState("");
   const [rampStartSf, setRampStartSf] = useState("");
   const [rampEndSf, setRampEndSf] = useState("");
+  const [milestoneText, setMilestoneText] = useState("");
 
   const loadList = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -567,6 +568,43 @@ export default function PlanAdmin({
                     }
                   >
                     Generate ramp
+                  </button>
+                </div>
+              )}
+              {editable && (
+                <div className="milestone-draft">
+                  <label>
+                    Milestone anchors (draft interpolation)
+                    <textarea
+                      className="json-area"
+                      value={milestoneText}
+                      onChange={(e) => setMilestoneText(e.target.value)}
+                      placeholder={"YYYY-MM 1000\nYYYY-MM 1500"}
+                    />
+                  </label>
+                  <p className="workspace-muted">
+                    Writes one explicit stored target per month between the first and last anchor. Generated values are a
+                    draft. They are not an approved or published plan.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => {
+                        const anchors = milestoneText
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean)
+                          .map((line) => {
+                            const m = line.match(/^(\d{4}-\d{2})\s+([\d.]+)$/);
+                            return m ? { period: m[1], sf: Number(m[2]) } : null;
+                          })
+                          .filter((row): row is { period: string; sf: number } => Boolean(row));
+                        return apiPost(`/api/sales-ops/admin/plans/${selectedId}/generate-ramp`, token, { anchors });
+                      })
+                    }
+                  >
+                    Generate milestone draft
                   </button>
                 </div>
               )}

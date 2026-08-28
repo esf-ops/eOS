@@ -4625,4 +4625,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Publishing a production Thera plan, choosing fabricated/invoice/created dates as earned-sale credit, Monday/Moraware/QuickBooks writes, automatic fuzzy identity. |
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, `eliteos_sales_ops_performance_attribution_v3.sql`, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
 
+### 341. Sales Ops identity review + COMPLETED_INSTALLATION_SF field gap (2026-08-28)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-28 |
+| **Decision** | There is **no deterministic Monday Account Master → Account Directory source-ID bridge**. Monday columns do not carry Moraware IDs, AD UUIDs, or Excel import row IDs. `account_master_list` fingerprints are 32-character name/contact hashes, not Monday item IDs. Permanent Monday links remain exact `{boardId}:{itemId}` only. An admin **Account Identity Review** queue classifies `EXACT_AUTO_LINKABLE` / `REVIEW_REQUIRED` / `NO_CANDIDATE` / `CONFLICT`. Name, alias, and starter-pack hints (including known aliases and seven commission exclusions) are candidate evidence, never auto-links. The least-exact Epworth/Cabinet shop hint is `weak` and cannot auto-link. Unmatched Monday items do not create AD accounts. **Candidate actual metric** is `COMPLETED_INSTALLATION_SF` (worksheet `source_job_id` + `source_form_id` + `sqft` + completed first-install event/date on the worksheet row). Live `sales_moraware_job_worksheet_facts` writer columns have job/form/sqft and **do not** have a completed first-install event or date. Job-level `install_at_source` / `completed_at_source` remain rejected proxies. Actuals stay `null` with `ACTUAL_SF_FIELD_GAP`. Compensation proposals, commissionable-account effective dates, and monthly report workflow (`DRAFT`→`PAID`/`ADJUSTED`) are additive config; proposal rates/effective dates are not finally approved. Plan Builder may generate an unpublished milestone-anchor draft of explicit `YYYY-MM` rows; do not publish without month-by-month approval. Authoritative end-milestone shape for that draft helper is December 2027 (not 2028). Prototype Cedar Valley 2026–2028 remains reference/template only. Monday/Moraware/QuickBooks writes stay off. |
+| **APIs** | `POST /api/sales-ops/admin/identity-reviews/rebuild`; `GET /api/sales-ops/admin/identity-reviews`; `POST .../approve` and `.../reject`; `GET /api/sales-ops/admin/compensation`; `GET /api/sales-ops/me/commission` includes compensation config. `POST .../generate-ramp` accepts `anchors[]` for draft interpolation. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_identity_review_v4.sql`. Do not rewrite v1/v2/v2.1/v3. |
+| **Out of scope** | Publishing a real salesperson plan, auto-linking on name, crediting Moraware SF before worksheet first-install fields exist, Monday/Moraware/QuickBooks writes, treating compensation proposal values as approved. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v4 SQL, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
+
 

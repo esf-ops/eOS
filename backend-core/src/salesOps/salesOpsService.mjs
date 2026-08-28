@@ -49,6 +49,18 @@ import { reprojectAccountsFromMirror } from "./salesOpsMondayBatch.mjs";
 import { createReconcileProgress, reconcileStatusFromSyncState } from "./salesOpsMondayProgress.mjs";
 import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 import { assembleTeamPerformance, assembleUserPerformance, loadIdentityAudit } from "./salesOpsPerformanceQuery.mjs";
+import {
+  approveIdentityReview,
+  dtoIdentityReview,
+  rebuildIdentityReviews,
+  rejectIdentityReview
+} from "./salesOpsIdentityReviewService.mjs";
+import {
+  COMMISSION_REPORT_STATUSES,
+  COMPENSATION_BASES,
+  dtoCompensationProposal,
+  isCommissionReportLocked
+} from "./salesOpsCompensation.mjs";
 
 export { SalesOpsError };
 
@@ -339,6 +351,105 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       return loadIdentityAudit(store, actor.organizationId);
     },
 
+    async rebuildIdentityReviews(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      return rebuildIdentityReviews(store, {
+        organizationId: actor.organizationId,
+        actorUserId: actor.userId,
+        autoCommit: true
+      });
+    },
+
+    async listIdentityReviews(user, { status = null } = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const [rows, accounts] = await Promise.all([
+        store.listIdentityReviews(actor.organizationId, { status }),
+        store.listAccountIdentityRows(actor.organizationId)
+      ]);
+      const byId = new Map(accounts.map((a) => [a.id, a]));
+      return rows.map((row) => dtoIdentityReview(row, byId.get(row.salesOpsAccountId)));
+    },
+
+    async approveIdentityReview(user, reviewId, payload = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const review = await store.getIdentityReview(actor.organizationId, String(reviewId));
+      if (!review) throw NOT_FOUND();
+      let updated;
+      try {
+        updated = await approveIdentityReview(store, {
+          organizationId: actor.organizationId,
+          actorUserId: actor.userId,
+          review,
+          accountDirectoryAccountId: payload.accountDirectoryAccountId,
+          reason: payload.reason || "human_approved_shown_candidate"
+        });
+      } catch (e) {
+        if (e instanceof SalesOpsError) throw e;
+        if (e.code === "monday_link_conflict") {
+          throw new SalesOpsError(e.message || "Monday item is already linked.", 409, "monday_link_conflict");
+        }
+        throw e;
+      }
+      const account = (await store.listAccountIdentityRows(actor.organizationId)).find(
+        (a) => a.id === updated.salesOpsAccountId
+      );
+      return dtoIdentityReview(updated, account);
+    },
+
+    async rejectIdentityReview(user, reviewId, payload = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const review = await store.getIdentityReview(actor.organizationId, String(reviewId));
+      if (!review) throw NOT_FOUND();
+      const updated = await rejectIdentityReview(store, {
+        organizationId: actor.organizationId,
+        actorUserId: actor.userId,
+        review,
+        reason: payload.reason || "rejected"
+      });
+      return dtoIdentityReview(updated);
+    },
+
+    async getCompensationConfig(user, { admin = false } = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (admin && !isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const [proposals, reports, commissionable] = await Promise.all([
+        typeof store.listCompensationProposals === "function" ? store.listCompensationProposals(actor.organizationId) : [],
+        typeof store.listCommissionReports === "function" ? store.listCommissionReports(actor.organizationId, admin ? null : actor.userId) : [],
+        typeof store.listCommissionableAccounts === "function"
+          ? store.listCommissionableAccounts(actor.organizationId, admin ? null : actor.userId)
+          : []
+      ]);
+      const visibleProposals = (proposals || [])
+        .filter((row) => admin || !row.userId || String(row.userId) === String(actor.userId))
+        .map(dtoCompensationProposal);
+      return {
+        finallyApproved: visibleProposals.some((p) => p.finallyApproved),
+        bases: COMPENSATION_BASES,
+        workflow: COMMISSION_REPORT_STATUSES,
+        proposals: visibleProposals,
+        reports: (reports || []).map((row) => ({
+          id: row.id,
+          userId: row.userId,
+          period: row.period,
+          status: row.status,
+          eligibleSf: row.eligibleSf == null ? null : Number(row.eligibleSf),
+          amount: row.amount == null ? null : Number(row.amount),
+          locked: isCommissionReportLocked(row.status)
+        })),
+        commissionableAccountCount: (commissionable || []).filter((r) => r.eligible !== false).length,
+        note: "Proposal compensation values are not payable until finally approved. Locked or paid reports never silently recalculate."
+      };
+    },
+
     async listAdminPeople(user) {
       const actor = actorFromUser(user);
       assertActor(actor);
@@ -499,12 +610,13 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
     async getMyCommission(user) {
       const actor = actorFromUser(user);
       assertActor(actor);
+      const compensation = await this.getCompensationConfig(user, { admin: false });
       const plan = await store.getActivePlan(actor.organizationId, actor.userId);
       if (!plan?.commissionEnabled) {
-        return { enabled: false, reason: "commission_not_enabled" };
+        return { enabled: false, reason: "commission_not_enabled", compensation };
       }
       const snapshot = await store.getCommissionSnapshot(actor.organizationId, actor.userId, "default");
-      return { enabled: true, snapshot };
+      return { enabled: true, snapshot, compensation };
     },
 
     async getAccountWorkspace(user, accountId) {

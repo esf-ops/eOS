@@ -106,6 +106,57 @@ export function generateLinearRamp({ startMonth, startSf, endMonth, endSf } = {}
   });
 }
 
+/**
+ * Write-time helper: interpolate explicit monthly targets between milestone anchors.
+ * Generated rows are stored values, not a runtime formula. Does not invent months
+ * before the first anchor or after the last.
+ */
+export function generateMilestoneRamp(anchors = []) {
+  const cleaned = [];
+  const seen = new Set();
+  for (const raw of anchors) {
+    const period = periodFromDate(raw?.period || raw?.month);
+    const sf = Number(raw?.sf ?? raw?.installedTarget);
+    if (!period || !Number.isFinite(sf)) {
+      const err = new Error("Each milestone needs a YYYY-MM period and a numeric SF value.");
+      err.code = "milestone_invalid";
+      throw err;
+    }
+    if (seen.has(period)) {
+      const err = new Error("Milestone periods must be unique.");
+      err.code = "milestone_duplicate";
+      throw err;
+    }
+    seen.add(period);
+    cleaned.push({ period, sf });
+  }
+  cleaned.sort((a, b) => a.period.localeCompare(b.period));
+  if (cleaned.length < 2) {
+    const err = new Error("Milestone ramp needs at least two anchors.");
+    err.code = "milestone_required";
+    throw err;
+  }
+  const months = enumerateMonths(cleaned[0].period, cleaned.at(-1).period);
+  return months.map((period) => {
+    const exact = cleaned.find((a) => a.period === period);
+    if (exact) return toPeriodTarget(period, roundSf(exact.sf));
+    let prev = cleaned[0];
+    let next = cleaned.at(-1);
+    for (const anchor of cleaned) {
+      if (anchor.period < period) prev = anchor;
+      if (anchor.period > period) {
+        next = anchor;
+        break;
+      }
+    }
+    const span = enumerateMonths(prev.period, next.period);
+    const i = span.indexOf(period);
+    const last = span.length - 1;
+    const t = last <= 0 ? 1 : i / last;
+    return toPeriodTarget(period, roundSf(prev.sf + (next.sf - prev.sf) * t));
+  });
+}
+
 export function toPeriodTarget(period, installedTarget, extras = {}) {
   const p = String(period);
   const installed = Number(installedTarget ?? 0);
