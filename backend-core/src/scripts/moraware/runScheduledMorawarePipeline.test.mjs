@@ -18,7 +18,10 @@ import {
   acquireLockFile,
   releaseLockFile,
   detectAndApplyAutoResume,
-  fetchGroupHealth
+  fetchGroupHealth,
+  populationLockWaitConfig,
+  acquireScheduledPopulationLock,
+  DEFAULT_POPULATION_LOCK_WAIT_MS
 } from "./runScheduledMorawarePipeline.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -446,6 +449,68 @@ test("T9: returns parsed JSON on success", async () => {
   } finally {
     global.fetch = origFetch;
   }
+});
+
+console.log("\npopulation lock wait (hourly vs nightly):");
+
+test("default wait is 45 minutes so nightly does not skip on a live hourly lock", () => {
+  const cfg = populationLockWaitConfig({});
+  assert.equal(cfg.waitMs, DEFAULT_POPULATION_LOCK_WAIT_MS);
+  assert.ok(cfg.waitMs >= 45 * 60 * 1000);
+});
+
+test("wait 0 tries once and does not sleep", async () => {
+  let posts = 0;
+  let slept = 0;
+  const logger = makeSilentLogger(os.tmpdir());
+  const result = await acquireScheduledPopulationLock({
+    postLock: async () => {
+      posts += 1;
+      return { acquired: false, reason: "locked" };
+    },
+    logger,
+    ownerToken: "tok",
+    secret: "s",
+    lockUrl: "http://example.invalid/lock",
+    lockedBy: "test",
+    metadata: {},
+    waitMs: 0,
+    retryMs: 50,
+    sleep: async (ms) => {
+      slept += ms;
+    },
+    now: () => 1_000
+  });
+  assert.equal(result.acquired, false);
+  assert.equal(posts, 1);
+  assert.equal(slept, 0);
+});
+
+test("retries until lock is free instead of stealing it", async () => {
+  let posts = 0;
+  let clock = 0;
+  const logger = makeSilentLogger(os.tmpdir());
+  const result = await acquireScheduledPopulationLock({
+    postLock: async () => {
+      posts += 1;
+      return posts < 3 ? { acquired: false, reason: "locked" } : { acquired: true };
+    },
+    logger,
+    ownerToken: "tok",
+    secret: "s",
+    lockUrl: "http://example.invalid/lock",
+    lockedBy: "test",
+    metadata: {},
+    waitMs: 1_000,
+    retryMs: 10,
+    sleep: async () => {
+      clock += 10;
+    },
+    now: () => clock
+  });
+  assert.equal(result.acquired, true);
+  assert.equal(result.attempts, 3);
+  assert.equal(posts, 3);
 });
 
 // ── Summary ──────────────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@
 | **eliteOS Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
 | **Supabase** | Database, Auth (anon + user JWT for heads), Row Level Security where enabled; **organization-scoped** data for SaaS. |
 | **Monday.com** | Optional CRM sync for public (and other) quotes; **server-side only** token. |
-| **Moraware** | Read-oriented integration; credentials and mappings stay **server-side/worker-side**; synced data lands in Brain staging + normalized tables for many heads. **Moraware Admin v1** lives in **System Admin** (`GET /api/admin/moraware/*`) as the first **Operations Integration Switchboard** adapter; a dedicated head may follow for SaaS-wide mapping reuse. |
+| **Moraware** | Read-oriented integration; credentials and mappings stay **server-side/worker-side**; synced data lands in Brain staging + normalized tables for many heads. **Moraware Admin v1** lives in **System Admin** (`GET /api/admin/moraware/*`) as the first **Operations Integration Switchboard** adapter; a dedicated head may follow for SaaS-wide mapping reuse. Production Mac mini keeps hourly incremental (`com.eliteos.moraware-incremental`) and a separate nightly scheduled pipeline + View 219 (`com.eliteos.moraware-nightly`); both contend on `eos_sync_locks.moraware_population`. |
 | **Cloudflare** | DNS and domain routing (e.g. public quote hostname). |
 | **Vercel** | Hosting for heads and Brain/API deployments. |
 | **GitHub + Cursor** | Source control; AI-assisted development with project rules under `.cursor/rules/`. |

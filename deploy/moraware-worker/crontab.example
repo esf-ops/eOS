@@ -11,7 +11,10 @@
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# 1:30 AM US Central, nightly Moraware incremental → worksheet rebuild → view 219 completed-install facts
+# 1:30 AM US Central — cloud/VM example only (cron).
+# Mac mini production uses launchd: com.eliteos.moraware-nightly
+# (deploy/moraware-worker/run-moraware-nightly-macos.sh). Do not add a crontab
+# entry on the Mac mini; do not disturb com.eliteos.moraware-incremental.
 # (~60–90 min incremental typical; view 219 CSV fetch ~2 min additional)
 30 1 * * * TZ=America/Chicago /opt/eliteos/eOS/deploy/moraware-worker/run-moraware-worker.sh >> /var/log/eliteos/moraware-nightly.log 2>&1
 

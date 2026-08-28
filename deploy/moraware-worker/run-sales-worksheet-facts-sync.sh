@@ -7,7 +7,7 @@ set -euo pipefail
 
 ELITEOS_REPO="${ELITEOS_REPO:-/opt/eliteos/eOS}"
 ELITEOS_ENV="${ELITEOS_ENV:-/etc/eliteos/moraware-worker.env}"
-LOG_DIR="/var/log/eliteos"
+LOG_DIR="${LOG_DIR:-/var/log/eliteos}"
 
 if [[ ! -d "${ELITEOS_REPO}" ]]; then
   echo "Missing repo checkout: ${ELITEOS_REPO}" >&2

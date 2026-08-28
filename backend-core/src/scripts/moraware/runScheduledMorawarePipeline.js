@@ -68,6 +68,75 @@ function intEnv(name, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Default wait lets a running hourly incremental finish instead of skipping nightly View 219. */
+export const DEFAULT_POPULATION_LOCK_WAIT_MS = 45 * 60 * 1000;
+export const DEFAULT_POPULATION_LOCK_RETRY_MS = 15 * 1000;
+
+export function populationLockWaitConfig(env = process.env) {
+  const waitRaw = String(env.MORAWARE_POPULATION_LOCK_WAIT_MS ?? "").trim();
+  const retryRaw = String(env.MORAWARE_POPULATION_LOCK_RETRY_MS ?? "").trim();
+  const waitParsed = waitRaw ? Number.parseInt(waitRaw, 10) : DEFAULT_POPULATION_LOCK_WAIT_MS;
+  const retryParsed = retryRaw ? Number.parseInt(retryRaw, 10) : DEFAULT_POPULATION_LOCK_RETRY_MS;
+  return {
+    waitMs: Number.isFinite(waitParsed) ? Math.max(0, waitParsed) : DEFAULT_POPULATION_LOCK_WAIT_MS,
+    retryMs: Number.isFinite(retryParsed) ? Math.max(250, retryParsed) : DEFAULT_POPULATION_LOCK_RETRY_MS
+  };
+}
+
+/**
+ * Acquire moraware_population. If another owner (hourly incremental) holds it,
+ * wait and retry until waitMs elapses. Does not steal a healthy lock.
+ */
+export async function acquireScheduledPopulationLock({
+  postLock,
+  logger,
+  ownerToken,
+  secret,
+  lockUrl,
+  lockedBy,
+  metadata,
+  waitMs,
+  retryMs,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = () => Date.now()
+}) {
+  const deadline = now() + waitMs;
+  let attempts = 0;
+  while (true) {
+    attempts += 1;
+    try {
+      const acquired = await postLock({
+        url: lockUrl,
+        secret,
+        action: "acquire",
+        ownerToken,
+        lockedBy,
+        metadata
+      });
+      if (acquired?.acquired) {
+        return { acquired: true, response: acquired, attempts };
+      }
+      await logger.log("population_lock_busy", {
+        attempt: attempts,
+        will_retry: now() < deadline,
+        reason: acquired?.reason || "locked"
+      });
+    } catch (err) {
+      if (err?.status !== 409) throw err;
+      await logger.log("population_lock_busy", {
+        attempt: attempts,
+        will_retry: now() < deadline,
+        error: String(err.message || err)
+      });
+    }
+    if (now() >= deadline) {
+      return { acquired: false, attempts };
+    }
+    await logger.log("population_lock_wait", { attempt: attempts, retry_ms: retryMs });
+    await sleep(retryMs);
+  }
+}
+
 function baselineMaxFilesCap() {
   const baseline = intEnv("MORAWARE_BASELINE_MAX_FILES");
   if (baseline != null) return baseline;
@@ -518,19 +587,27 @@ async function main() {
       const ownerToken = createMorawarePopulationLockOwnerToken();
       const lockUrl = `${backendBase()}/api/internal/moraware-sync/population-lock`;
       try {
-        const acquired = await postMorawarePopulationLock({
-          url: lockUrl,
-          secret,
-          action: "acquire",
+        const { waitMs, retryMs } = populationLockWaitConfig();
+        const lockResult = await acquireScheduledPopulationLock({
+          postLock: postMorawarePopulationLock,
+          logger,
           ownerToken,
+          secret,
+          lockUrl,
           lockedBy: `runScheduledMorawarePipeline:${process.pid}`,
           metadata: {
             census_scope: pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE) || CENSUS_SCOPE_FULL,
             runner: "scheduled-pipeline"
-          }
+          },
+          waitMs,
+          retryMs
         });
-        if (!acquired?.acquired) {
-          await logger.log("population_lock_busy", { response: acquired || null });
+        if (!lockResult.acquired) {
+          await logger.log("population_lock_busy", {
+            attempts: lockResult.attempts,
+            waited_ms: waitMs,
+            note: "hourly incremental or another population writer still holds moraware_population"
+          });
           process.exitCode = 0;
           return;
         }
