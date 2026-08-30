@@ -136,6 +136,17 @@ async function main() {
   const blake = user(REP_B, "sales", ORG);
   const mgr = user(MGR, "sales", ORG);
   const outsider = user(OTHER, "sales", ORG_B);
+  store.seedUser(admin);
+  store.seedUser(alex);
+  store.seedUser(blake);
+  store.seedUser(mgr);
+  await store.upsertRepMapping({
+    organizationId: ORG,
+    userId: REP_A,
+    mondayUserId: "1001",
+    salespersonLabel: "Alex Sentinel",
+    active: true
+  });
 
   const draft = await svc.createPlanForUser(admin, {
     userId: REP_A,
@@ -267,7 +278,9 @@ async function main() {
 
   const team = await svc.getTeamPerformance(admin);
   assert.ok(team.rows.some((r) => r.userId === REP_A && r.actualSf === 160));
-  assert.ok(Object.prototype.hasOwnProperty.call(team.rows.find((r) => r.userId === REP_A), "displayName"));
+  assert.equal(team.rows.find((r) => r.userId === REP_A).displayName, "Alex Sentinel");
+  assert.notEqual(team.rows.find((r) => r.userId === REP_A).displayName, REP_A);
+  assert.ok(!String(team.rows.find((r) => r.userId === REP_A).displayName).includes(REP_A.slice(0, 8)));
   const mgrTeam = await svc.getTeamPerformance(mgr);
   assert.equal(mgrTeam.rows.some((r) => r.userId === REP_A), true);
   assert.equal(mgrTeam.rows.some((r) => r.userId === REP_B), false);

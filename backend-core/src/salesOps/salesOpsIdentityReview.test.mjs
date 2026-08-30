@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { classifyIdentityCase, COMPLETED_SF_BASELINE_ACCEPTANCE, baselineMonthTotals, canAutoCommit, isExactNameBulkEligible } from "./salesOpsIdentityReview.mjs";
+import { classifyIdentityCase, COMPLETED_SF_BASELINE_ACCEPTANCE, baselineMonthTotals, canAutoCommit, identityReviewBucket, isExactNameBulkEligible } from "./salesOpsIdentityReview.mjs";
+import {
+  identityOwnershipLabel,
+  identityOwnershipState,
+  resolveSalespersonDisplayName,
+  UNKNOWN_SALESPERSON_LABEL
+} from "./salesOpsSalespersonLabel.mjs";
 import { createSalesOpsMemoryStore } from "./salesOpsMemoryStore.mjs";
 import { createSalesOpsService, SalesOpsError } from "./salesOpsService.mjs";
 import {
@@ -28,12 +34,24 @@ const AD_A = "00000000-0000-4000-8000-0000000000a1";
 const AD_B = "00000000-0000-4000-8000-0000000000a2";
 const CASEY = "00000000-0000-4000-8000-0000000000cc";
 const AD_C = "00000000-0000-4000-8000-0000000000a3";
+const STAFF_ONLY = "00000000-0000-4000-8000-0000000000ff";
 
 function user(id, role) {
   return { id, email: `${id.slice(-4)}@example.test`, full_name: "Sentinel", role, organization_id: ORG, isActive: true };
 }
 
 async function main() {
+  assert.equal(resolveSalespersonDisplayName({ salespersonLabel: "Rep Sentinel" }), "Rep Sentinel");
+  assert.equal(resolveSalespersonDisplayName({ salespersonLabel: CASEY, staffFullName: "Staff Sentinel" }), "Staff Sentinel");
+  assert.equal(resolveSalespersonDisplayName({}), UNKNOWN_SALESPERSON_LABEL);
+  assert.equal(identityOwnershipState({}), "unassigned");
+  assert.equal(identityOwnershipState({ mondayAssignedUserId: "9901" }), "unmapped");
+  assert.equal(identityOwnershipState({ mondayAssignedUserId: "9901", assignedUserId: CASEY }), "mapped");
+  assert.equal(identityOwnershipState({ assignedUserId: CASEY }), "mapped");
+  assert.equal(identityOwnershipLabel({ ownershipState: "unassigned" }), "Unassigned in Monday");
+  assert.equal(identityOwnershipLabel({ ownershipState: "unmapped" }), "Monday owner not mapped to eliteOS");
+  assert.equal(identityOwnershipLabel({ ownershipState: "mapped", salespersonDisplayName: "Rep Sentinel" }), "Owner: Rep Sentinel");
+
   assert.deepEqual([...OBSERVED_WORKSHEET_FACT_COLUMNS], [...WORKSHEET_FACTS_WRITER_COLUMNS]);
   assert.equal(API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT.supported, false);
   assert.ok(API_WORKSHEET_COMPLETED_INSTALLATION_SUPPORT.missing.some((m) => /completed_install_date/i.test(m) || /first-install date/i.test(m)));
@@ -142,6 +160,10 @@ async function main() {
   const svc = createSalesOpsService({ store });
   const admin = user(ADMIN, "admin");
   const sales = user(REP, "sales");
+  store.seedUser(admin);
+  store.seedUser(sales);
+  store.seedUser({ ...user(CASEY, "sales"), full_name: "Casey Staff" });
+  store.seedUser({ ...user(STAFF_ONLY, "sales"), full_name: "Mapped Staff Sentinel" });
 
   store.seedDirectoryAccount({ id: AD_A, organizationId: ORG, displayName: "S&R Construction" });
   store.seedDirectoryAccount({ id: AD_B, organizationId: ORG, displayName: "Cabinet shop" });
@@ -229,6 +251,31 @@ async function main() {
     mondayItemId: "casey-1",
     accountName: "Westfield Homes",
     assignedUserId: CASEY,
+    mondayAssignedUserId: "99000002",
+    sourceState: "active"
+  });
+  await store.upsertRepMapping({
+    organizationId: ORG,
+    userId: STAFF_ONLY,
+    mondayUserId: "99000003",
+    salespersonLabel: null
+  });
+  await store.upsertAccount({
+    organizationId: ORG,
+    mondayBoardId: "18397092941",
+    mondayItemId: "unassigned-1",
+    accountName: "No Owner Builder",
+    assignedUserId: null,
+    mondayAssignedUserId: null,
+    sourceState: "active"
+  });
+  await store.upsertAccount({
+    organizationId: ORG,
+    mondayBoardId: "18397092941",
+    mondayItemId: "unmapped-1",
+    accountName: "Orphan Owner Builder",
+    assignedUserId: null,
+    mondayAssignedUserId: "88888888",
     sourceState: "active"
   });
 
@@ -269,6 +316,26 @@ async function main() {
   assert.equal(weakRow.bulkEligible, false);
   assert.equal(exclRow.exclusionHint, true);
   assert.equal(exclRow.status, "NO_CANDIDATE");
+  assert.equal(exactRow.ownershipLabel, "Owner: Rep Sentinel");
+  assert.equal(exactRow.reviewBucket, "LINKED");
+  assert.equal(nameRow.reviewBucket, "HIGH_CONFIDENCE");
+  assert.equal(aliasRow.reviewBucket, "MANUAL_REVIEW");
+  assert.equal(noneRow.reviewBucket, "NO_CANDIDATE");
+  assert.equal(identityReviewBucket(weakRow), "MANUAL_REVIEW");
+  const unassignedRow = rows.find((r) => r.mondayItemId === "unassigned-1");
+  const unmappedRow = rows.find((r) => r.mondayItemId === "unmapped-1");
+  assert.equal(unassignedRow.ownershipState, "unassigned");
+  assert.equal(unassignedRow.ownershipLabel, "Unassigned in Monday");
+  assert.equal(unmappedRow.ownershipState, "unmapped");
+  assert.equal(unmappedRow.ownershipLabel, "Monday owner not mapped to eliteOS");
+  assert.ok(!unassignedRow.ownershipLabel.includes("mapping"));
+  assert.ok(!JSON.stringify(unassignedRow.ownershipLabel).includes(ADMIN));
+  const unmappedFilter = await svc.listIdentityReviews(admin, { assignedUserId: "unmapped" });
+  assert.ok(unmappedFilter.some((r) => r.mondayItemId === "unmapped-1"));
+  assert.ok(!unmappedFilter.some((r) => r.mondayItemId === "unassigned-1"));
+  const unassignedFilter = await svc.listIdentityReviews(admin, { assignedUserId: "unassigned" });
+  assert.ok(unassignedFilter.some((r) => r.mondayItemId === "unassigned-1"));
+  assert.ok(!unassignedFilter.some((r) => r.mondayItemId === "unmapped-1"));
 
   const afterRebuild = await store.listAccountIdentityRows(ORG);
   assert.equal(afterRebuild.find((a) => a.id === mondayExact.id).accountDirectoryAccountId, AD_A);
@@ -304,7 +371,11 @@ async function main() {
   assert.equal(audit.quickbooksLinked, 2);
 
   const people = await svc.listAdminPeople(admin);
-  assert.ok(people.some((p) => p.userId === CASEY && p.salespersonLabel === "Other Sentinel"));
+  assert.ok(people.people.some((p) => p.userId === CASEY && p.salespersonLabel === "Other Sentinel"));
+  assert.ok(people.people.some((p) => p.userId === STAFF_ONLY && p.salespersonLabel === "Mapped Staff Sentinel"));
+  assert.ok(people.people.every((p) => p.salespersonLabel && p.salespersonLabel !== p.userId));
+  assert.ok(!people.people.some((p) => /[0-9a-f]{8}-[0-9a-f]{4}-/.test(p.salespersonLabel)));
+  assert.ok(people.staff.some((p) => p.userId === STAFF_ONLY && p.displayName === "Mapped Staff Sentinel"));
   const bySalesperson = await svc.listIdentityReviews(admin, { assignedUserId: CASEY });
   assert.ok(bySalesperson.length >= 1);
   assert.ok(bySalesperson.every((r) => r.assignedUserId === CASEY));
@@ -327,6 +398,11 @@ async function main() {
   assert.equal(preview.items[0].reviewId, caseyRow.id);
   assert.equal(preview.items[0].morawareIdCount, 0);
   assert.equal(preview.items[0].quickbooksLinked, false);
+  assert.equal(preview.summary.selectedCount, 4);
+  assert.equal(preview.summary.exactMatchQualifiedCount, 1);
+  assert.equal(preview.summary.skippedCount, 3);
+  assert.ok(String(preview.summary.salespersonScope).includes("Other Sentinel"));
+  assert.ok(!String(preview.summary.salespersonScope).includes(CASEY));
   assert.ok(preview.skipped.some((s) => s.reason === "weak_alias_not_bulk_eligible"));
   assert.ok(preview.skipped.some((s) => s.reason === "not_exact_display_name"));
   assert.ok(preview.skipped.some((s) => s.reason === "no_candidate"));

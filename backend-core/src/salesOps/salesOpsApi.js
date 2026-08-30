@@ -420,7 +420,7 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     try {
       const people = await svc.listAdminPeople(actorUser(req));
       jsonNoStore(res);
-      res.json({ ok: true, people });
+      res.json({ ok: true, people: people.people, staff: people.staff || [] });
     } catch (e) {
       sendError(res, e);
     }
@@ -452,7 +452,8 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
         status: req.query.status || null,
         assignedUserId: req.query.assignedUserId || req.query.salesperson || null,
         packKey: req.query.packKey || null,
-        bulkEligible: req.query.bulkEligible || null
+        bulkEligible: req.query.bulkEligible || null,
+        bucket: req.query.bucket || null
       });
       jsonNoStore(res);
       res.json({ ok: true, reviews: rows });

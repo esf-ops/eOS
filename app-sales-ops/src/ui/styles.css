@@ -342,11 +342,24 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 .ramp-controls { margin: 12px 0 18px; }
 .milestone-draft { display: grid; gap: 10px; margin: 0 0 18px; }
 .identity-review-filters { flex-wrap: wrap; }
-.identity-review-head, .identity-review-row { grid-template-columns: 52px minmax(160px, 1.3fr) minmax(180px, 1.4fr) minmax(120px, 1fr) minmax(110px, 0.8fr); align-items: start; }
-.identity-preview-head, .identity-preview-row { grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 1.2fr) minmax(120px, 1fr) minmax(120px, 0.9fr); align-items: start; }
+.identity-review-head, .identity-review-row { grid-template-columns: 52px minmax(180px, 1.3fr) minmax(180px, 1.3fr) minmax(150px, 1.1fr) minmax(130px, 0.9fr); align-items: start; }
+.identity-preview-head, .identity-preview-row { grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 1.2fr) minmax(140px, 1fr) minmax(120px, 0.9fr); align-items: start; }
 .identity-bulk-preview { margin: 16px 0 24px; padding: 14px; border: 1px solid var(--line); background: #fff; }
 .identity-candidate { display: grid; gap: 4px; margin-bottom: 10px; }
 .identity-review-row button { justify-self: start; }
+.identity-review-group { margin: 22px 0 28px; display: grid; gap: 10px; }
+.identity-review-group-head h3 { margin: 0 0 4px; font-size: 18px; }
+.identity-review-group-head p { margin: 0; color: #8a847e; font-size: 12px; }
+.identity-block { display: grid; gap: 4px; }
+.identity-block-label { color: #8a847e; text-transform: uppercase; letter-spacing: .08em; font: 700 8px var(--font-geist-mono), monospace; }
+.identity-unmapped-warning { color: var(--red); font-weight: 650; }
+.identity-tech-details { margin-top: 8px; }
+.identity-tech-details summary { cursor: pointer; color: #8a847e; font-size: 11px; }
+.identity-preview-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; list-style: none; padding: 0; margin: 0 0 14px; }
+.identity-preview-summary li { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line); }
+.identity-preview-summary span { color: #8a847e; font-size: 11px; }
+.plan-selected-identity { display: grid; gap: 4px; margin: 0 0 16px; }
+.plan-selected-identity small { color: #8a847e; }
 .commission-config { margin-top: 24px; display: grid; gap: 8px; }
 .text-link { border: 0; background: transparent; color: var(--red); padding: 0; font-weight: 650; text-align: left; }
 

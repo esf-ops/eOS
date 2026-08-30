@@ -849,13 +849,14 @@ export function createSalesOpsSupabaseStore(getSupabase) {
     async listActiveOrganizationUsers(organizationId) {
       const { data, error } = await db()
         .from("user_profiles")
-        .select("id,email,is_active,organization_id")
+        .select("id,email,full_name,is_active,organization_id")
         .eq("organization_id", organizationId)
         .eq("is_active", true);
       if (error) throwDb(error, "Could not list organization users.");
       return (data || []).map((u) => ({
         id: u.id,
         email: u.email || null,
+        fullName: u.full_name || null,
         isActive: u.is_active !== false,
         organizationId: u.organization_id
       }));
@@ -1971,7 +1972,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
           () =>
             db()
               .from("sales_ops_accounts")
-              .select("id,monday_board_id,monday_item_id,account_directory_account_id,assigned_user_id,account_name,branch,market,monday_url")
+              .select("id,monday_board_id,monday_item_id,account_directory_account_id,assigned_user_id,monday_assigned_user_id,account_name,branch,market,monday_url")
               .eq("organization_id", organizationId)
               .eq("archived", false)
               .eq("source_state", "active")
@@ -1982,6 +1983,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
             mondayItemId: row.monday_item_id,
             accountDirectoryAccountId: row.account_directory_account_id ?? null,
             assignedUserId: row.assigned_user_id ?? null,
+            mondayAssignedUserId: row.monday_assigned_user_id ?? null,
             accountName: row.account_name,
             branch: row.branch ?? null,
             market: row.market ?? null,

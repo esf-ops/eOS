@@ -328,6 +328,26 @@ export function isExactNameBulkEligible(row) {
   return bulkSkipReason(row) == null;
 }
 
+/**
+ * Admin presentation buckets. Classification/status and auto-approve rules are unchanged.
+ * HIGH_CONFIDENCE still requires human approval (unique 1:1 exact display name).
+ */
+export function identityReviewBucket(row) {
+  if (!row) return "NO_CANDIDATE";
+  if (row.status === "CONFLICT") return "CONFLICT";
+  if (row.status === "NO_CANDIDATE") return "NO_CANDIDATE";
+  if (isExactSourceIdStatus(row.status)) return "LINKED";
+  if (isExactNameBulkEligible(row)) return "HIGH_CONFIDENCE";
+  return "MANUAL_REVIEW";
+}
+
+export function identityMatchQualityLabel(bucket) {
+  if (bucket === "HIGH_CONFIDENCE" || bucket === "LINKED") return "Exact unique";
+  if (bucket === "NO_CANDIDATE") return "No candidate";
+  if (bucket === "CONFLICT") return "Conflict";
+  return "Alias/manual review";
+}
+
 export function matchMethodFromReview(row) {
   const evidence = candidateEvidence(row);
   if (evidence.includes("existing_monday_external_link") || evidence.includes("exact_source_id")) {

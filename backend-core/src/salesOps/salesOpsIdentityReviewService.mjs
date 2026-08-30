@@ -11,11 +11,19 @@ import {
   canAutoCommit,
   classifyIdentityCase,
   groupLinksByExternal,
+  identityMatchQualityLabel,
+  identityReviewBucket,
   isExactNameBulkEligible,
   matchMethodFromReview,
   mondayMatchesForAccount,
   summarizeReviewRows
 } from "./salesOpsIdentityReview.mjs";
+import {
+  identityOwnershipLabel,
+  identityOwnershipState,
+  resolveSalespersonDisplayName,
+  UNKNOWN_SALESPERSON_LABEL
+} from "./salesOpsSalespersonLabel.mjs";
 import { SalesOpsError } from "./salesOpsPlanLifecycle.mjs";
 
 const MASTER_LIST_SYSTEM = "account_master_list";
@@ -184,17 +192,48 @@ export async function rejectIdentityReview(store, { organizationId, actorUserId,
   return review;
 }
 
-export function previewBulkIdentityReviews(reviews, accountsById = new Map()) {
+function skippedPreviewRow(review, reason) {
+  return {
+    reviewId: review?.id || null,
+    reason,
+    mondayAccountName: review?.mondayAccountName || null
+  };
+}
+
+export function emptyBulkPreviewSummary(selectedCount = 0) {
+  return {
+    selectedCount,
+    salespersonScope: "None",
+    exactMatchQualifiedCount: 0,
+    morawareLinkedCount: 0,
+    quickbooksLinkedCount: 0,
+    unassignedAccountCount: 0,
+    exclusionCount: 0,
+    skippedCount: 0
+  };
+}
+
+export function previewBulkIdentityReviews(reviews, accountsById = new Map(), { labelByUser = new Map() } = {}) {
   const items = [];
   const skipped = [];
-  for (const review of reviews || []) {
+  const listed = reviews || [];
+  const salespersonNames = new Set();
+  for (const review of listed) {
     const reason = bulkSkipReason(review);
     if (reason) {
-      skipped.push({ reviewId: review.id, reason });
+      skipped.push(skippedPreviewRow(review, reason));
       continue;
     }
     const candidate = (review.candidates || [])[0];
     const account = accountsById.get(review.salesOpsAccountId) || null;
+    const ownershipState = identityOwnershipState({
+      mondayAssignedUserId: account?.mondayAssignedUserId,
+      assignedUserId: account?.assignedUserId
+    });
+    const salespersonDisplayName = account?.assignedUserId
+      ? labelByUser.get(String(account.assignedUserId)) || UNKNOWN_SALESPERSON_LABEL
+      : null;
+    if (salespersonDisplayName) salespersonNames.add(salespersonDisplayName);
     items.push({
       reviewId: review.id,
       mondayAccountName: review.mondayAccountName,
@@ -203,17 +242,37 @@ export function previewBulkIdentityReviews(reviews, accountsById = new Map()) {
       proposedAccountDirectoryAccountId: candidate.accountDirectoryAccountId,
       proposedDisplayName: candidate.displayName || null,
       morawareIdCount: (candidate.morawareIds || []).length,
-      morawareIds: candidate.morawareIds || [],
+      morawareLinked: (candidate.morawareIds || []).length > 0,
       quickbooksLinked: Boolean(candidate.quickbooksLinked),
+      masterListLinked: Boolean(candidate.masterListLinked),
       branch: account?.branch || null,
       market: account?.market || null,
       evidence: candidate.evidence || review.evidence || [],
       matchMethod: matchMethodFromReview(review),
+      ownershipState,
+      ownershipLabel: identityOwnershipLabel({ ownershipState, salespersonDisplayName }),
+      salespersonDisplayName,
       exclusionHint: Boolean(review.exclusionHint),
       conflictWarning: review.conflictReason || (review.exclusionHint ? "exclusion_hint_non_commissionable" : null)
     });
   }
-  return { items, skipped, eligibleCount: items.length };
+  const named = [...salespersonNames];
+  const summary = {
+    selectedCount: listed.length,
+    salespersonScope:
+      named.length === 0
+        ? "Unassigned or unmapped in this selection"
+        : named.length <= 3
+          ? named.join(", ")
+          : `${named.length} salespeople`,
+    exactMatchQualifiedCount: items.length,
+    morawareLinkedCount: items.filter((item) => item.morawareLinked).length,
+    quickbooksLinkedCount: items.filter((item) => item.quickbooksLinked).length,
+    unassignedAccountCount: items.filter((item) => item.ownershipState === "unassigned").length,
+    exclusionCount: items.filter((item) => item.exclusionHint).length + skipped.length,
+    skippedCount: skipped.length
+  };
+  return { items, skipped, eligibleCount: items.length, summary };
 }
 
 export async function bulkApproveIdentityReviews(store, { organizationId, actorUserId, reviews, reason }) {
@@ -284,6 +343,14 @@ export function dtoIdentityCandidate(candidate) {
 
 export function dtoIdentityReview(row, account = null, extras = {}) {
   if (!row) return null;
+  const ownershipState = identityOwnershipState({
+    mondayAssignedUserId: account?.mondayAssignedUserId,
+    assignedUserId: account?.assignedUserId
+  });
+  const salespersonDisplayName =
+    extras.salespersonDisplayName ||
+    resolveSalespersonDisplayName({ salespersonLabel: extras.salespersonLabel });
+  const reviewBucket = identityReviewBucket(row);
   return {
     id: row.id,
     salesOpsAccountId: row.salesOpsAccountId,
@@ -294,9 +361,15 @@ export function dtoIdentityReview(row, account = null, extras = {}) {
     branch: account?.branch || null,
     market: account?.market || null,
     assignedUserId: account?.assignedUserId || null,
-    salespersonLabel: extras.salespersonLabel || null,
+    mondayAssignedUserId: account?.mondayAssignedUserId || null,
+    ownershipState,
+    ownershipLabel: identityOwnershipLabel({ ownershipState, salespersonDisplayName }),
+    salespersonLabel: ownershipState === "mapped" ? salespersonDisplayName : null,
+    salespersonDisplayName: ownershipState === "mapped" ? salespersonDisplayName : UNKNOWN_SALESPERSON_LABEL,
     packKeys: extras.packKeys || [],
     bulkEligible: isExactNameBulkEligible(row),
+    reviewBucket,
+    matchQualityLabel: identityMatchQualityLabel(reviewBucket),
     status: row.status,
     autoLinkable: Boolean(row.autoLinkable),
     evidence: row.evidence || [],

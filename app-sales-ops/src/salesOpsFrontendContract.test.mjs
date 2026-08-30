@@ -13,6 +13,7 @@ const files = [
   "src/lib/api.ts",
   "src/lib/supabase.ts",
   "src/lib/accountListScopeCopy.mjs",
+  "src/lib/salespersonLabel.ts",
   "src/ui/SalesOpsApp.tsx",
   "src/ui/Account360Workspace.tsx",
   "src/ui/PlanAdmin.tsx",
@@ -70,6 +71,25 @@ assert.ok(read("src/ui/IdentityReview.tsx").includes("Approved starter book"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("Salesperson"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("assignedUserId"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("bulkEligible"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("accountDirectoryAccountId"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("Unassigned in Monday"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("Monday owner not mapped to eliteOS"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("UNKNOWN_SALESPERSON_LABEL"));
+assert.ok(read("src/lib/salespersonLabel.ts").includes("Unknown salesperson"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("High confidence"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("Technical details"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("Preview selected"));
+assert.equal(read("src/ui/IdentityReview.tsx").includes("No salesperson mapping"), false);
+assert.equal(read("src/ui/IdentityReview.tsx").includes("userId.slice"), false);
+assert.equal(read("src/ui/IdentityReview.tsx").includes("|| p.userId"), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("placeholder=\"User UUID\""), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("placeholder=\"Salesperson user UUID\""), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("|| p.userId"), false);
+assert.equal(read("src/ui/SalesOpsApp.tsx").includes("userId).slice"), false);
+assert.equal(read("src/ui/SalesOpsApp.tsx").includes("userId.slice"), false);
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("salespersonDisplayName"));
+assert.ok(read("src/ui/SalesOpsApp.tsx").includes("salespersonDisplayName"));
+assert.ok(read("src/lib/salespersonLabel.ts").includes("Unknown salesperson"));
 assert.ok(!app.includes("api.moraware.com"));
 assert.ok(!app.includes("quickbooks"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("/api/sales-ops/admin/plans/"));

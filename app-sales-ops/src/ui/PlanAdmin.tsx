@@ -1,5 +1,8 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
+import { salespersonDisplayName } from "../lib/salespersonLabel";
+
+type Person = { userId: string; salespersonLabel?: string | null; displayName?: string | null };
 
 type Access = {
   isOrgAdmin?: boolean;
@@ -102,6 +105,13 @@ function mergeMonths(existing: PeriodTarget[], start: string, end: string) {
   return enumerateMonths(start, end).map((period) => byPeriod.get(period) || toPeriodRow(period, 0));
 }
 
+function personName(people: Person[], staff: Person[], userId: string | null | undefined) {
+  const id = String(userId || "");
+  const mapped = people.find((p) => p.userId === id);
+  const member = staff.find((p) => p.userId === id);
+  return salespersonDisplayName(mapped?.salespersonLabel, mapped?.displayName, member?.displayName, member?.salespersonLabel);
+}
+
 function SalesPlanPreview({ bundle }: { bundle: PlanBundle }) {
   const plan = bundle.plan || {};
   const copy = bundle.planCopy || {};
@@ -157,7 +167,8 @@ export default function PlanAdmin({
   const [filterManager, setFilterManager] = useState("");
   const [createUserId, setCreateUserId] = useState("");
   const [createSource, setCreateSource] = useState<"blank" | "prototype" | string>("blank");
-  const [people, setPeople] = useState<Array<{ userId: string; salespersonLabel?: string | null }>>([]);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [staff, setStaff] = useState<Person[]>([]);
 
   const [form, setForm] = useState({
     planName: "",
@@ -204,9 +215,11 @@ export default function PlanAdmin({
     setTemplates(tpl.templates || []);
     try {
       const peopleRes = (await apiGet("/api/sales-ops/admin/people", token)) as {
-        people: Array<{ userId: string; salespersonLabel?: string | null }>;
+        people: Person[];
+        staff?: Person[];
       };
       setPeople(peopleRes.people || []);
+      setStaff(peopleRes.staff || []);
     } catch {
       setPeople([]);
     }
@@ -372,12 +385,12 @@ export default function PlanAdmin({
               <option value="">Select a mapped salesperson</option>
               {people.map((p) => (
                 <option key={p.userId} value={p.userId}>
-                  {p.salespersonLabel || p.userId}
+                  {salespersonDisplayName(p.salespersonLabel, p.displayName)}
                 </option>
               ))}
             </select>
           ) : (
-            <input value={createUserId} onChange={(e) => setCreateUserId(e.target.value)} placeholder="Salesperson user UUID" />
+            <p className="workspace-muted">No mapped salespeople are available to assign a plan.</p>
           )}
         </label>
         <label>
@@ -402,7 +415,14 @@ export default function PlanAdmin({
       <div className="plan-admin-filters">
         <label>
           Salesperson
-          <input value={filterUser} onChange={(e) => setFilterUser(e.target.value)} placeholder="User UUID" />
+          <select value={filterUser} onChange={(e) => setFilterUser(e.target.value)}>
+            <option value="">All salespeople</option>
+            {people.map((p) => (
+              <option key={p.userId} value={p.userId}>
+                {salespersonDisplayName(p.salespersonLabel, p.displayName)}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Status
@@ -428,7 +448,14 @@ export default function PlanAdmin({
         </label>
         <label>
           Manager
-          <input value={filterManager} onChange={(e) => setFilterManager(e.target.value)} placeholder="Manager UUID" />
+          <select value={filterManager} onChange={(e) => setFilterManager(e.target.value)}>
+            <option value="">All managers</option>
+            {[...new Map([...staff, ...people].map((p) => [p.userId, p])).values()].map((p) => (
+              <option key={p.userId} value={p.userId}>
+                {salespersonDisplayName(p.displayName, p.salespersonLabel)}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
 
@@ -447,7 +474,7 @@ export default function PlanAdmin({
                 {p.isPrototype ? " · Prototype" : ""}
               </span>
               <small>
-                {p.effectiveStartDate || "—"} → {p.effectiveEndDate || "open"} · {String(p.updatedAt || "").slice(0, 10)}
+                {personName(people, staff, p.userId)} · {p.effectiveStartDate || "—"} → {p.effectiveEndDate || "open"} · {String(p.updatedAt || "").slice(0, 10)}
               </small>
             </button>
           ))}
@@ -460,6 +487,18 @@ export default function PlanAdmin({
               <span className={`status-chip status-${status}`}>{status || "unknown"}</span>
               {prototype && <span className="status-chip prototype">Draft / Prototype</span>}
               <span>v{asText(bundle.plan.versionNumber)}</span>
+            </div>
+            <div className="plan-selected-identity">
+              <strong>{personName(people, staff, asText(bundle.plan.userId))}</strong>
+              <small>
+                {form.managerUserId
+                  ? `Manager: ${personName(people, staff, form.managerUserId)}`
+                  : "Manager: not set"}
+              </small>
+              <small>
+                {asText(bundle.plan.planName) || "Untitled plan"} · v{asText(bundle.plan.versionNumber) || "1"} ·{" "}
+                {status || "unknown"}
+              </small>
             </div>
 
             <section>
@@ -474,12 +513,27 @@ export default function PlanAdmin({
                   <input value={form.territoryName} disabled={!editable} onChange={(e) => setForm({ ...form, territoryName: e.target.value })} />
                 </label>
                 <label>
-                  Manager user id
-                  <input value={form.managerUserId} disabled={!editable} onChange={(e) => setForm({ ...form, managerUserId: e.target.value })} />
+                  Manager
+                  {staff.length || people.length ? (
+                    <select
+                      value={form.managerUserId}
+                      disabled={!editable}
+                      onChange={(e) => setForm({ ...form, managerUserId: e.target.value })}
+                    >
+                      <option value="">No manager</option>
+                      {[...new Map([...staff, ...people].map((p) => [p.userId, p])).values()].map((p) => (
+                        <option key={p.userId} value={p.userId}>
+                          {salespersonDisplayName(p.displayName, p.salespersonLabel)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input value={personName(people, staff, form.managerUserId)} disabled />
+                  )}
                 </label>
                 <label>
                   Salesperson
-                  <input value={asText(bundle.plan.userId)} disabled />
+                  <input value={personName(people, staff, asText(bundle.plan.userId))} disabled />
                 </label>
                 <label>
                   Start

@@ -3,6 +3,7 @@ import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import { apiGet, apiPatch, apiPost, apiPut, ApiError } from "../lib/api";
 import { accountListScopeCopy } from "../lib/accountListScopeCopy.mjs";
+import { salespersonDisplayName } from "../lib/salespersonLabel";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
 import IdentityReview from "./IdentityReview";
@@ -749,11 +750,33 @@ export default function SalesOpsApp() {
               <div className="section-heading split-heading progress-heading">
                 <div>
                   <p className="kicker">
-                    {scopedUserId ? "Team member performance" : `Current month ${performance?.period || ""}`}
+                    {scopedUserId
+                      ? `${salespersonDisplayName(
+                          String(
+                            (teamPerformance?.rows || []).find((row) => String(row.userId) === scopedUserId)?.displayName ||
+                              ""
+                          )
+                        )} · team member performance`
+                      : `Current month ${performance?.period || ""}`}
                   </p>
                   <h2>Goal versus actual square feet.</h2>
                 </div>
-                {scopedUserId ? (
+                {(teamPerformance?.rows || []).length > 0 ? (
+                  <label>
+                    Salesperson
+                    <select
+                      value={scopedUserId || ""}
+                      onChange={(e) => setScopedUserId(e.target.value || null)}
+                    >
+                      <option value="">My performance</option>
+                      {(teamPerformance?.rows || []).map((row) => (
+                        <option key={String(row.userId)} value={String(row.userId)}>
+                          {salespersonDisplayName(String(row.displayName || ""))}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : scopedUserId ? (
                   <button type="button" className="text-link" onClick={() => setScopedUserId(null)}>
                     My performance
                   </button>
@@ -1124,7 +1147,7 @@ export default function SalesOpsApp() {
               <p className="workspace-muted">Sales sees self. Managers see assigned reports. Admin/executive sees the organization. Actual SF stays unavailable until worksheet completed-first-install fields exist on Moraware prepared facts.</p>
               <div className="month-goal-table" role="table" aria-label="Team performance">
                 <div className="month-goal-head team-perf-head" role="row">
-                  <span>Rep</span>
+                  <span>Salesperson</span>
                   <span>Goal</span>
                   <span>Actual</span>
                   <span>Variance</span>
@@ -1142,7 +1165,16 @@ export default function SalesOpsApp() {
                       setTab("performance");
                     }}
                   >
-                    <span>{String(row.displayName || "").trim() || String(row.userId).slice(0, 8)}</span>
+                    <span>
+                      {salespersonDisplayName(String(row.displayName || ""))}
+                      {(row.territoryName || row.managerDisplayName) ? (
+                        <small>
+                          {[row.territoryName, row.managerDisplayName ? `Manager: ${salespersonDisplayName(String(row.managerDisplayName))}` : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </small>
+                      ) : null}
+                    </span>
                     <span>{fmtMaybe(row.goalSf as number | null)}</span>
                     <span>{fmtMaybe(row.actualSf as number | null)}</span>
                     <span>{fmtMaybe(row.varianceSf as number | null)}</span>

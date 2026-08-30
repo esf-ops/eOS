@@ -4678,4 +4678,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Monday writes, webhook creation, `MONDAY_APP_SIGNING_SECRET` provisioning, running another expensive full census solely to prove the scheduler. |
 | **Impacted** | `backend-core` Sales Ops Monday modules, `backend-core/vercel.json`, this doc, SYSTEM_BLUEPRINT, `monday-sales-ops.md`. |
 
+### 346. Sales Ops salesperson labels and Identity Review presentation (2026-08-30)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-30 |
+| **Decision** | Sales Ops never shows eliteOS user UUIDs as the primary human label. Display names resolve governed salesperson label → mapped staff `full_name` → `Unknown salesperson`. Identity Review ownership copy distinguishes **Unassigned in Monday**, **Monday owner not mapped to eliteOS**, and **Owner: &lt;name&gt;**. Admin review buckets are presentation-only: High confidence (unique 1:1 exact name, still human-approved), Manual review, No candidate, Conflict. Bulk exact-name approval still requires preview; weak aliases stay excluded. Technical IDs stay behind an optional details control. Identity approval rules, Account Directory authority, Monday `write_enabled=false`, historical attribution, Moraware gates, commission eligibility, and plan publication are unchanged. |
+| **Why** | Production UI was exposing internal UUIDs and collapsing unassigned vs unmapped ownership into one ambiguous phrase. |
+| **Out of scope** | Auto-approving exact names, Monday/Moraware/QuickBooks writes, changing match policy, rotating credentials. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT. |
+
 

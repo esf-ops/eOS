@@ -55,6 +55,7 @@ import {
   bulkApproveIdentityReviews,
   bulkRejectIdentityReviews,
   dtoIdentityReview,
+  emptyBulkPreviewSummary,
   previewBulkIdentityReviews,
   rebuildIdentityReviews,
   rejectIdentityReview
@@ -66,6 +67,7 @@ import {
   dtoCompensationProposal,
   isCommissionReportLocked
 } from "./salesOpsCompensation.mjs";
+import { resolveSalespersonDisplayName, UNKNOWN_SALESPERSON_LABEL } from "./salesOpsSalespersonLabel.mjs";
 
 export { SalesOpsError };
 
@@ -98,15 +100,35 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
   const recordAudit = typeof audit === "function" ? audit : async () => {};
   const planAdmin = createPlanAdmin({ store, audit: recordAudit, now });
 
-  async function salespersonLabelMap(organizationId) {
+  async function salespersonDisplayContext(organizationId) {
     const mappings = typeof store.listRepMappings === "function" ? await store.listRepMappings(organizationId) : [];
     const mondayPeople = typeof store.listMondayUsers === "function" ? await store.listMondayUsers(organizationId) : [];
+    const staff =
+      typeof store.listActiveOrganizationUsers === "function"
+        ? await store.listActiveOrganizationUsers(organizationId)
+        : [];
     const mondayName = new Map((mondayPeople || []).map((p) => [String(p.mondayUserId), p.displayName || null]));
+    const staffByUser = new Map(
+      (staff || []).map((u) => [String(u.id), String(u.fullName || u.full_name || "").trim() || null])
+    );
     const labelByUser = new Map();
     for (const m of mappings || []) {
-      labelByUser.set(String(m.userId), m.salespersonLabel || mondayName.get(String(m.mondayUserId)) || null);
+      const userId = String(m.userId);
+      labelByUser.set(
+        userId,
+        resolveSalespersonDisplayName({
+          salespersonLabel: m.salespersonLabel,
+          mondayDisplayName: mondayName.get(String(m.mondayUserId)),
+          staffFullName: staffByUser.get(userId)
+        })
+      );
     }
-    return { mappings, labelByUser };
+    for (const [userId, fullName] of staffByUser) {
+      if (!labelByUser.has(userId)) {
+        labelByUser.set(userId, resolveSalespersonDisplayName({ staffFullName: fullName }));
+      }
+    }
+    return { mappings, labelByUser, staffByUser };
   }
 
   async function canAccessUser(actor, targetUserId, { forCommission = false, forMutate = false } = {}) {
@@ -350,13 +372,20 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         plans,
         now: typeof now === "function" ? now() : now
       });
-      const labelByUser = new Map(mappings.map((m) => [String(m.userId), m.salespersonLabel || null]));
+      const { labelByUser } = await salespersonDisplayContext(actor.organizationId);
+      const planById = new Map((plans || []).map((p) => [String(p.id), p]));
       return {
         ...assembled,
-        rows: (assembled.rows || []).map((row) => ({
-          ...row,
-          displayName: labelByUser.get(String(row.userId)) || null
-        }))
+        rows: (assembled.rows || []).map((row) => {
+          const plan = row.planId ? planById.get(String(row.planId)) : null;
+          const managerId = plan?.managerUserId ? String(plan.managerUserId) : "";
+          return {
+            ...row,
+            displayName: labelByUser.get(String(row.userId)) || UNKNOWN_SALESPERSON_LABEL,
+            territoryName: plan?.territoryName || null,
+            managerDisplayName: managerId ? labelByUser.get(managerId) || null : null
+          };
+        })
       };
     },
 
@@ -385,12 +414,13 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const status = filters.status || null;
       const assignedUserId = filters.assignedUserId || null;
       const packKey = filters.packKey || null;
+      const bucket = filters.bucket || null;
       const bulkEligibleOnly = filters.bulkEligible === true || filters.bulkEligible === "1" || filters.bulkEligible === "true";
       const [rows, accounts, hints, labels] = await Promise.all([
         store.listIdentityReviews(actor.organizationId, { status }),
         store.listAccountIdentityRows(actor.organizationId),
         store.listIdentityHints(actor.organizationId),
-        salespersonLabelMap(actor.organizationId)
+        salespersonDisplayContext(actor.organizationId)
       ]);
       const byId = new Map(accounts.map((a) => [a.id, a]));
       const labelByUser = labels.labelByUser;
@@ -406,14 +436,18 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         const packKeys = [
           ...new Set((hintsByNorm.get(normalizeOrgMatchKey(row.mondayAccountName)) || []).map((h) => h.packKey).filter(Boolean))
         ];
+        const assigned = account?.assignedUserId ? String(account.assignedUserId) : null;
         return dtoIdentityReview(row, account, {
-          salespersonLabel: account?.assignedUserId ? labelByUser.get(String(account.assignedUserId)) || null : null,
+          salespersonLabel: assigned ? labelByUser.get(assigned) || null : null,
+          salespersonDisplayName: assigned ? labelByUser.get(assigned) || UNKNOWN_SALESPERSON_LABEL : UNKNOWN_SALESPERSON_LABEL,
           packKeys
         });
       });
-      if (assignedUserId === "unmapped") dtos = dtos.filter((row) => !row.assignedUserId);
+      if (assignedUserId === "unmapped") dtos = dtos.filter((row) => row.ownershipState === "unmapped");
+      else if (assignedUserId === "unassigned") dtos = dtos.filter((row) => row.ownershipState === "unassigned");
       else if (assignedUserId) dtos = dtos.filter((row) => String(row.assignedUserId) === String(assignedUserId));
       if (packKey) dtos = dtos.filter((row) => (row.packKeys || []).includes(packKey));
+      if (bucket) dtos = dtos.filter((row) => row.reviewBucket === bucket);
       if (bulkEligibleOnly) dtos = dtos.filter((row) => row.bulkEligible);
       return dtos;
     },
@@ -423,17 +457,24 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       assertActor(actor);
       if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
       const ids = [...new Set((reviewIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
-      if (!ids.length) return { items: [], skipped: [], eligibleCount: 0 };
+      if (!ids.length) return { items: [], skipped: [], eligibleCount: 0, summary: emptyBulkPreviewSummary(0) };
       const wanted = new Set(ids);
-      const [accounts, listed] = await Promise.all([
+      const [accounts, listed, labels] = await Promise.all([
         store.listAccountIdentityRows(actor.organizationId),
-        store.listIdentityReviews(actor.organizationId)
+        store.listIdentityReviews(actor.organizationId),
+        salespersonDisplayContext(actor.organizationId)
       ]);
       const reviews = listed.filter((row) => wanted.has(String(row.id)));
-      const preview = previewBulkIdentityReviews(reviews, new Map(accounts.map((a) => [a.id, a])));
+      const preview = previewBulkIdentityReviews(reviews, new Map(accounts.map((a) => [a.id, a])), {
+        labelByUser: labels.labelByUser
+      });
+      preview.summary.selectedCount = ids.length;
       for (const id of ids) {
-        if (!reviews.some((r) => String(r.id) === id)) preview.skipped.push({ reviewId: id, reason: "missing_review" });
+        if (!reviews.some((r) => String(r.id) === id)) preview.skipped.push({ reviewId: id, reason: "missing_review", mondayAccountName: null });
       }
+      preview.summary.skippedCount = preview.skipped.length;
+      preview.summary.exclusionCount =
+        preview.items.filter((item) => item.exclusionHint).length + preview.skipped.length;
       return preview;
     },
 
@@ -550,12 +591,17 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         const reports = await store.listReportsForManager(actor.organizationId, actor.userId);
         if (!reports.length) throw NOT_FOUND();
       }
-      const { mappings, labelByUser } = await salespersonLabelMap(actor.organizationId);
-      return mappings.map((m) => ({
+      const { mappings, labelByUser, staffByUser } = await salespersonDisplayContext(actor.organizationId);
+      const people = mappings.map((m) => ({
         userId: m.userId,
         mondayUserId: m.mondayUserId,
-        salespersonLabel: labelByUser.get(String(m.userId)) || null
+        salespersonLabel: labelByUser.get(String(m.userId)) || UNKNOWN_SALESPERSON_LABEL
       }));
+      const staff = [...staffByUser.keys()].map((userId) => ({
+        userId,
+        displayName: labelByUser.get(userId) || UNKNOWN_SALESPERSON_LABEL
+      }));
+      return { people, staff };
     },
 
     async generateAdminRamp(user, planId, payload) {

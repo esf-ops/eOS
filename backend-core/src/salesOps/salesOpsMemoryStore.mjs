@@ -370,6 +370,7 @@ export function createSalesOpsMemoryStore() {
         .map((u) => ({
           id: u.id,
           email: u.email || null,
+          fullName: u.fullName || u.full_name || null,
           isActive: true,
           organizationId
         }));
@@ -946,6 +947,7 @@ export function createSalesOpsMemoryStore() {
           mondayItemId: a.mondayItemId,
           accountDirectoryAccountId: a.accountDirectoryAccountId ?? null,
           assignedUserId: a.assignedUserId ?? null,
+          mondayAssignedUserId: a.mondayAssignedUserId ?? null,
           accountName: a.accountName,
           branch: a.branch ?? null,
           market: a.market ?? null,
