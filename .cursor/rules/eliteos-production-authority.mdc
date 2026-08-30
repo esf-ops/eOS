@@ -1,0 +1,215 @@
+---
+description: High-autonomy, conservative production operating policy for eliteOS Cursor work
+alwaysApply: true
+---
+
+# eliteOS production authority (Cursor)
+
+This rule governs **how Cursor operates**. It does **not** replace:
+
+- `.cursor/rules/eliteos-architecture.mdc` — product/architecture constraints (Brain, org scope, secrets, topbar, living docs)
+- `.cursor/rules/security-audit.mdc` — five-question merge checklist
+- `.cursor/rules/quote-platform.mdc` — public quote calculate/submit/Monday contracts
+
+If those rules and this one appear to conflict, **stop and report the conflict**. Do not silently pick one.
+
+## Default mode: do safe work yourself
+
+When the user asks to build, integrate, migrate, deploy, verify, connect, configure, or finish an eliteOS capability, **execute** the safe, conclusive portions yourself.
+
+Do **not** hand Chris terminal, SQL, Vercel, or Git instructions for work this environment can already perform.
+
+Manual instructions are appropriate only when:
+
+- authentication requires a human
+- permissions require a human
+- the production target is ambiguous
+- destructive / high-risk approval is required
+- identity cannot be resolved conclusively
+- an external UI action cannot be performed programmatically
+- the user explicitly asks for instructions instead of execution
+
+Once a tool is authenticated, future tasks must use it. Do not recreate a manual downstream workflow.
+
+## Concurrent working trees
+
+Another agent or human may be editing the same repo.
+
+- Inspect `git status` / diff before staging.
+- **Never** `checkout`, `reset`, `restore`, `stash`, or `clean` to “make room.”
+- **Never** rewrite, format, or revert files you did not change in **this** conversation unless the user explicitly asked to change those files.
+- Stage **only** this-task files. Never `git add .` in a dirty multi-workstream tree unless every path is verified as in-scope.
+- Do not commit or push another agent’s in-progress work.
+
+## Scope: complete the requested task, not the repo
+
+Autonomy is for finishing the **explicit** request correctly. It is not permission to refactor, migrate, clean, or enable unrelated systems.
+
+## Allowed after preflight (when required by the explicit task)
+
+- Inspect code, architecture docs, production config, deployed state, and logs
+- Read production data for verification
+- Run tests, builds, linters, typechecks, dry runs, and safe reconciliation **previews**
+- Create **additive** SQL migrations (typically `backend-core/supabase/*.sql`)
+- Apply clearly additive / non-destructive migrations only to a **conclusively verified** eliteOS production Supabase project
+- Verify schema/config after apply (tables, columns, indexes, constraints, policies — not merely “SQL succeeded”)
+- Insert/update scoped application or integration **configuration** rows
+- Deploy an **existing** eliteOS Brain/head to its verified Vercel project
+- Set required Vercel env vars when the correct value already exists securely and no secret must be exposed or newly generated
+- Verify deployments, health, and authenticated smokes
+- Configure inbound / read-only integrations and inbound / read-only webhooks **explicitly requested**
+- Run production **read-only** sync / reconciliation; inspect external schemas via read APIs
+- Fix ordinary deploy/config failures
+- Roll back a clearly broken Vercel deployment to the immediately previous known-good deployment when safe
+- Review diff, stage intended files, commit intended files, and push through the established GitHub workflow **after** required verification
+
+Allowed ≠ skip preflight, identity checks, or verification.
+
+eliteOS SQL is historically named files under `backend-core/supabase/`, often documented as “manual apply.” That runbook language does **not** require Chris to paste SQL when authenticated CLI/DB access can apply an additive migration safely. Do not invent a parallel migration system. Do not rewrite an already-applied production migration; follow with an additive file.
+
+## Stop and get explicit approval
+
+1. **Destructive database:** `DROP TABLE/SCHEMA`, `TRUNCATE`, dropping important columns, destructive type changes, reset, mass `DELETE`, irreversible rewrites, migrations without a recovery path
+2. **Destructive infrastructure:** deleting Vercel/Supabase projects, production databases, production domains, destructive storage cleanup, deleting production integration resources
+3. **First enablement of external WRITE authority:** Monday, QuickBooks, Moraware, CRM, accounting, or other operational writes. Read-only connectivity/sync may proceed when explicitly requested. Inbound external → eliteOS webhooks may be enabled separately from eliteOS → external writes
+4. **Financial/accounting mutations:** real invoices, payments, accounting entries, customer/vendor balances, financial source records
+5. **Identity ambiguity:** fuzzy-link or merge customers, guess employee UUIDs / Monday-person maps / production org / ownership, silently create duplicate canonical identities
+6. **Employee permission escalation:** granting real production roles/head access unless that exact access was requested
+7. **Credential/security changes:** rotate/replace production secrets, generate a new credential and switch production to it, weaken policy, expose/export secret values
+8. **DNS/provider moves:** transferring ownership, changing nameservers, moving DNS providers, broad restructuring, deleting important records. Routine addition of an already-planned subdomain on an existing verified Vercel project may proceed when it is part of the requested deploy
+9. **Billing/subscription changes:** purchase, upgrade, cancel, or alter paid plans
+10. **Unverified production target:** if the project/account/environment cannot be proven to be intended eliteOS production, **stop**. Do not guess.
+
+## No-rework production quality
+
+Do not optimize for fastest apparent completion. Optimize for architectural correctness, durable authority, security, maintainability, reversibility, observability, testability, production verification, and **minimum future rework**.
+
+A feature that “appears to work” but duplicates systems, hardcodes tenants, weakens security, fakes sync, skips history, or ships incomplete deploy is **not done**.
+
+## Audit before build
+
+Before materially changing an existing capability: inspect current implementation, durable architecture docs (`SYSTEM_BLUEPRINT.md`, `FEATURE_DECISIONS.md`, head map), tables/SQL, API/auth/head-access patterns, integrations, tests, and env/deploy conventions.
+
+Do not create a parallel system because the existing one takes longer to understand. If an authority already owns the concept, **extend it**.
+
+## Source of truth must be explicit
+
+Decide authority before building. Do not silently add a second source of truth or permanently fuzzy-match identities.
+
+Current architectural examples (not a Sales Ops spec):
+
+| System | Authority |
+|--------|-----------|
+| Account Directory | Canonical eliteOS account identity (UUID) |
+| Monday | CRM / relationship / account execution |
+| Moraware | Production / job execution source |
+| QuickBooks | Financial / accounting evidence |
+| Supabase / Brain | Governed eliteOS application state |
+| Vercel | Application deployment platform |
+
+Monday **read** sync may be autonomous when requested. **Initial Monday write enablement** requires explicit approval. Same for Moraware and QuickBooks writes.
+
+Do not bypass Brain with provider credentials or privileged integration logic in frontend heads.
+
+## No temporary production hacks
+
+Do not ship: localStorage as production authority; static JSON as live production data; hardcoded real-user UUIDs; hardcoded tenant IDs as global SaaS; fake sync or fake incremental feeds; frontend-only permission enforcement; browser-held provider secrets; manual production data patches with no durable migration/config record; timeout-based correctness when deterministic/idempotent state is possible; known architecture violations deferred as “TODO later”; mock/fallback data silently used in production; memory-store production persistence; direct frontend calls to privileged external APIs.
+
+Prototype/demo/reference data must be explicitly marked and isolated. Documented graceful **fallback** to localStorage is allowed only when the database remains the authority once present.
+
+## Migration quality
+
+Before applying production SQL:
+
+1. Conclusively identify the intended production Supabase project
+2. Inspect current production schema / prior-apply state
+3. Determine whether the migration is already applied
+4. Never rewrite history of an applied migration; use additive follow-ups
+5. Inspect SQL for destructive statements
+6. Preserve historical data; enforce `organization_id` (or document an exception in `FEATURE_DECISIONS.md`)
+7. Add appropriate constraints, indexes, and RLS / Brain-only access per architecture
+8. Run applicable tests/preflight; understand recovery
+
+After apply, verify actual tables, columns, indexes, constraints, policies, expected config, and representative governed operations.
+
+## Integration quality
+
+Inspect live external schema before assuming field IDs/types. Use stable external IDs, not display-name matching. Preserve source identity. Handle pagination, errors, rate limits, nulls, schema drift, duplicates, replay, and out-of-order events. Writes/events must be idempotent. Include reconciliation after missed events. Distinguish full reconcile from incremental sync. Avoid time-window loop suppression when deterministic event/state logic is possible. Retain unknown fields when full fidelity is required. Separate read enablement from write enablement. Keep provider secrets in Brain only. Make provider failure observable.
+
+A successful external HTTP response does **not** prove integration correctness. Verify eliteOS state against representative live source records.
+
+## Security is server-side
+
+Enforce every protected capability in Brain/backend (or RLS). Never rely on hidden nav, disabled buttons, frontend filters, frontend role checks alone, user-supplied `user_id` / `organization_id`, or obscurity.
+
+Where relevant, verify: own-user access, cross-user denial, manager direct-report scope, admin scope, cross-org denial, inactive-user denial, missing-head-access denial, commission/financial boundaries, no raw provider payload leak, no secrets in browser bundles, authenticated file/doc access.
+
+Prefer explicit DTOs over spreading database/provider objects. Still run `.cursor/rules/security-audit.mdc` before merging sensitive changes.
+
+## Performance before scale
+
+Do not knowingly ship: load-all-then-filter, load-all-then-paginate, fetching heavy relationship history on every list, live provider calls for ordinary browsing when a governed mirror is intended, or avoidable N+1 at meaningful scale.
+
+Prefer SQL-side filter/pagination, bounded pages, indexes, lazy heavy reads, prepared/cached projections, backend maintenance sync, and account/item-scoped detail. Opening one record must not require loading the entire organization.
+
+## Test failure modes
+
+Do not only test happy paths. Include, where relevant: authz failures, cross-user/org isolation, duplicate/out-of-order/replay events, nulls, unknown future fields, schema drift, provider failure/timeout, stale data, partial reconcile, retries, missing identity mapping, historical version preservation, pagination boundaries, secret/raw-payload leakage, frontend contract, migration compatibility, production vs local/memory mode, read-disabled/write-disabled gates.
+
+If a production bug would be expensive, add a regression test before calling the task complete.
+
+## Production verification
+
+After deploy, verify the **actual** production system as applicable: health, authenticated API, real DB state, intended domain/project/environment, representative live external records, permission boundaries, major user workflow, integration health, degraded behavior, and browser workflow where practical.
+
+Do **not** call a feature production-ready solely because unit tests pass, build passes, Vercel says Ready, SQL says Success, or an API returned 200. Those are necessary, not sufficient.
+
+If browser/E2E could not be performed, say so.
+
+## Deployment order
+
+DATABASE → BRAIN/BACKEND → FRONTEND/HEAD → DOMAIN/ROUTING → INTEGRATION/WEBHOOK → PRODUCTION SMOKE
+
+Do not deploy a frontend that requires schema/backend changes that are not available yet. Typical Vercel production deploys from `main` (`backend-core/vercel.json` git.deploymentEnabled). Confirm the live Brain host (`https://api.eliteosfab.com` and documented `backend-core-six.vercel.app` aliases) before treating a `*.vercel.app` fallback as production.
+
+Heads discover Brain via `VITE_BACKEND_URL` (and launcher `HEAD_URL_*` on Brain). Do not point production heads at localhost.
+
+## Rollback / recovery
+
+Before meaningful production changes, know how failure is contained. Prefer additive migrations, feature/config gates, read-only-first rollout, write enablement as a separate gate, reversible app deploys, previous known-good Vercel deployment, idempotent scripts, replay-safe sync, and historical preservation.
+
+If post-deploy verification fails: **STOP**. Do not stack unrelated fixes/deploys. Contain or roll back where safe. Identify root cause. Fix. Re-verify.
+
+## Durable documentation
+
+When a task establishes a real architecture, product, or authority rule, update `docs/eliteos/SYSTEM_BLUEPRINT.md` and/or `FEATURE_DECISIONS.md` (and the head map when adding a head) in the same change.
+
+Do not leave production architecture only in chat, prompts, or one file’s comments. Do not churn docs for trivial code changes.
+
+## Review diff before commit
+
+Inspect full status and intended diff. Identify every changed file. Distinguish this-task changes from pre-existing user/other-agent changes. Remove accidental/debug/generated files. Scan for secrets and real production data in fixtures. Confirm unrelated modules were not changed. Rerun required tests/builds (`SYSTEM_BLUEPRINT.md` §13).
+
+Only commit/push after verification, and only when the user asked for commit/push **or** the explicit task includes finishing via the established Git workflow.
+
+GitHub historically uses both PRs and direct commits to `main`. Follow the workflow already in use for the task; do not invent a new branching policy. Do not force-push `main`.
+
+## No false-green verdicts
+
+Never return READY / COMPLETE / LIVE / PASS / DONE / PRODUCTION_READY if a material known problem remains.
+
+If something important is unverified, state it (browser untested, credentials unavailable, target unconfirmed, provider fields assumed, sync not run, deploy not smoked, tests superficial, migration generated but not applied, schema ok but RLS unverified).
+
+## Definition of done
+
+A production task is done only when the relevant combination is true:
+
+architecture matches eliteOS authority; implementation complete; correct source of truth preserved; migrations/config complete; tests pass; security checks pass; performance risks addressed; build passes; deployment succeeds; production state verified; representative real workflow verified; integration health/observability exists; docs current where appropriate; no secrets leaked; diff contains only intended changes; commit/push completed when requested; no known material blocker hidden or deferred.
+
+If not satisfied, report what remains. Do not lower the bar.
+
+## Secrets
+
+Never print or write to tracked files: service-role keys, DB passwords, access tokens, Monday tokens, Vercel/GitHub tokens, OAuth secrets, webhook signing secrets, private keys, credentialed connection strings, session cookies, auth headers.
+
+Report configuration as PRESENT / MISSING / INVALID / NOT_AUTHENTICATED / INSUFFICIENT_PERMISSION / UNKNOWN. Env **names** are safe; **values** are not.
