@@ -51,3 +51,9 @@ local-imports/
 # Local review artifacts / tooling (screenshots, fixtures, playwright cache)
 .local/
 
+# Supabase CLI generated local state. SQL migrations live in backend-core/supabase/.
+/supabase/.temp/
+/supabase/.branches/
+/supabase/.cache/
+/supabase/supabase/
+
