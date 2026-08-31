@@ -26,8 +26,19 @@ import {
   generateLinearRamp,
   generateMilestoneRamp,
   mergeExplicitMonthlyTargets,
+  periodFromDate,
   uniquePeriodTargets
 } from "./salesOpsMonths.mjs";
+import {
+  DEFAULT_PLAN_RHYTHMS,
+  WORKING_NORTH_STAR_SF,
+  WORKING_TARGET_HORIZON_END,
+  assembleBookIntelligence,
+  defaultActivityMetricTargets,
+  generatePlanCopy,
+  readPlanBook
+} from "./salesOpsAccountIntelligence.mjs";
+import { isCompensationFinallyApproved } from "./salesOpsCompensation.mjs";
 
 const NOT_FOUND = () => new SalesOpsError("Not found", 404, "not_found");
 
@@ -51,6 +62,61 @@ function defaultInsights() {
 
 export function canPublishPlans(role) {
   return isOrgAdminRole(role);
+}
+
+function periodEndDate(period) {
+  const p = periodFromDate(period);
+  if (!p) return "";
+  const [y, m] = p.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${p}-${String(last).padStart(2, "0")}`;
+}
+
+async function assemblePlanBookIntelligence(store, actor, plan) {
+  const accounts = await store.listAccountsForUser(plan.organizationId, plan.userId);
+  const facts =
+    typeof store.listAttributionFacts === "function"
+      ? await store.listAttributionFacts(plan.organizationId, { userIds: [plan.userId] })
+      : [];
+  const book = assembleBookIntelligence(accounts, facts, {
+    planBook: readPlanBook(plan.accountExpectations),
+    salespersonUserId: plan.userId
+  });
+  const proposals =
+    typeof store.listCompensationProposals === "function"
+      ? await store.listCompensationProposals(plan.organizationId)
+      : [];
+  const mine = (proposals || []).filter((row) => !row.userId || String(row.userId) === String(plan.userId));
+  const eligible =
+    typeof store.listCommissionableAccounts === "function"
+      ? await store.listCommissionableAccounts(plan.organizationId, plan.userId)
+      : [];
+  const approved = mine.filter((row) => isCompensationFinallyApproved(row));
+  const selectedId = plan.features?.compensationProposalId || null;
+  const selected = mine.find((row) => String(row.id) === String(selectedId)) || approved[0] || null;
+  return {
+    ...book,
+    canOpenIdentityReview: isOrgAdminRole(actor.role),
+    compensation: {
+      configured: approved.length > 0,
+      finallyApproved: approved.length > 0,
+      basisLabel: "Completed installation SF",
+      selectedProposalId: selected ? selected.id : null,
+      proposals: mine.map((row) => {
+        const approvedRow = isCompensationFinallyApproved(row);
+        return {
+          id: row.id,
+          label: row.notes || (approvedRow ? "Approved compensation plan" : "Compensation proposal"),
+          basis: row.basis || "all_completed_sf",
+          ratePerSf: approvedRow ? row.ratePerSf ?? null : null,
+          effectiveDate: row.effectiveDate ?? null,
+          finallyApproved: approvedRow
+        };
+      }),
+      eligibleAccountCount: (eligible || []).filter((row) => row.eligible !== false).length,
+      showEstimatedCommission: Boolean(plan.commissionEnabled)
+    }
+  };
 }
 
 export function defaultPrototypeCopy() {
@@ -314,8 +380,18 @@ export function createPlanAdmin({ store, audit, now }) {
       return loadPlanBundle(store, actor.organizationId, plan.id);
     },
 
+    async getAdminBookIntelligence(actor, planId) {
+      const plan = await requirePlanForAuthor(actor, planId);
+      return assemblePlanBookIntelligence(store, actor, plan);
+    },
+
+    async getOwnedBookIntelligence(actor, plan) {
+      return assemblePlanBookIntelligence(store, actor, plan);
+    },
+
     async previewPlan(actor, planId) {
       const bundle = await this.getAdminPlan(actor, planId);
+      const bookIntelligence = await assemblePlanBookIntelligence(store, actor, bundle.plan);
       return {
         preview: true,
         banner: "Preview Mode — not the salesperson’s active plan",
@@ -323,7 +399,8 @@ export function createPlanAdmin({ store, audit, now }) {
         periodTargets: bundle.periodTargets,
         metricTargets: bundle.metricTargets,
         insights: bundle.insights,
-        planCopy: bundle.planCopy
+        planCopy: bundle.planCopy,
+        bookIntelligence
       };
     },
 
@@ -345,7 +422,17 @@ export function createPlanAdmin({ store, audit, now }) {
       const familyId = payload.planFamilyId || randomUUID();
       const startDate =
         payload.startDate || (template?.isPrototype ? "2026-09-01" : asOfDateString(clock()));
-      const endDate = payload.endDate || template?.northStarTargetDate || "2028-12-31";
+      const endDate =
+        payload.endDate || template?.northStarTargetDate || (!template ? WORKING_TARGET_HORIZON_END : "2028-12-31");
+      const northStarTarget = payload.northStarTarget ?? template?.northStarTarget ?? (!template ? WORKING_NORTH_STAR_SF : 0);
+      const northStarTargetDate =
+        payload.northStarTargetDate || template?.northStarTargetDate || (!template ? WORKING_TARGET_HORIZON_END : endDate);
+      const generatedCopy = generatePlanCopy({
+        salespersonName: first || payload.fullName,
+        territoryName: payload.territoryName || template?.territoryName,
+        northStarTarget,
+        northStarTargetDate
+      });
       const plan = await store.insertPlan({
         organizationId: actor.organizationId,
         userId: targetUserId,
@@ -360,18 +447,18 @@ export function createPlanAdmin({ store, audit, now }) {
         effectiveStartDate: payload.effectiveStartDate || startDate,
         effectiveEndDate: payload.effectiveEndDate || endDate,
         northStarMetric: payload.northStarMetric || template?.northStarMetric || "installed_sqft_per_month",
-        northStarTarget: payload.northStarTarget ?? template?.northStarTarget ?? 0,
-        northStarTargetDate: payload.northStarTargetDate || template?.northStarTargetDate || endDate,
+        northStarTarget,
+        northStarTargetDate,
         stretchTarget: payload.stretchTarget ?? template?.stretchTarget ?? null,
         blueprintKey: template?.templateKey || payload.blueprintKey || null,
         templateId: template?.id ?? null,
         isPrototype: Boolean(template?.isPrototype),
-        headline: payload.headline || `${first}'s path to ${Number(payload.northStarTarget ?? template?.northStarTarget ?? 0).toLocaleString("en-US")} sq ft`,
+        headline: payload.headline || `${first}'s path to ${Number(northStarTarget || 0).toLocaleString("en-US")} sq ft`,
         subtitle: payload.subtitle || template?.features?.subtitle || "A measurable operating system for the assigned territory.",
         commissionEnabled: Boolean(payload.commissionEnabled ?? template?.commissionEnabled),
         commissionRules: payload.commissionRules || template?.commissionRules || {},
-        accountExpectations: payload.accountExpectations || template?.accountExpectations || {},
-        rhythms: payload.rhythms || template?.rhythms || {},
+        accountExpectations: payload.accountExpectations || template?.accountExpectations || { planBook: { selectedAccountIds: [], categoryOverrides: {} } },
+        rhythms: payload.rhythms || template?.rhythms || (!template ? { ...DEFAULT_PLAN_RHYTHMS } : {}),
         features: payload.features || template?.features || {},
         createdBy: actor.userId
       });
@@ -392,6 +479,13 @@ export function createPlanAdmin({ store, audit, now }) {
       }
       if (Array.isArray(payload.metricTargets) && payload.metricTargets.length) {
         await store.replaceMetricTargets(actor.organizationId, plan.id, payload.metricTargets);
+      } else if (!template) {
+        await store.replaceMetricTargets(actor.organizationId, plan.id, defaultActivityMetricTargets());
+      }
+      if (payload.planCopy) {
+        await store.upsertPlanCopy(actor.organizationId, plan.id, "planCopy", payload.planCopy);
+      } else if (!template) {
+        await store.upsertPlanCopy(actor.organizationId, plan.id, "planCopy", generatedCopy);
       }
       await emit(plan, "created", actor, {
         templateId: template?.id ?? null,
@@ -608,15 +702,21 @@ export function createPlanAdmin({ store, audit, now }) {
       const existing = await store.listPeriodTargets(actor.organizationId, plan.id);
       const byPeriod = new Map(existing.map((r) => [r.period, r]));
       for (const row of generated) byPeriod.set(row.period, row);
-      const rangeStart = anchors?.length
-        ? generated[0].period
-        : payload.startMonth || plan.effectiveStartDate || plan.startDate;
-      const rangeEnd = anchors?.length
-        ? generated.at(-1).period
-        : payload.endMonth || plan.effectiveEndDate || plan.endDate;
+      const planStart = periodFromDate(plan.effectiveStartDate || plan.startDate);
+      const planEnd = periodFromDate(plan.effectiveEndDate || plan.endDate);
+      const genEnd = generated.at(-1)?.period || planEnd;
+      const rangeStart = planStart || generated[0]?.period;
+      const rangeEnd = [planEnd, genEnd].filter(Boolean).sort().at(-1);
       const merged = mergeExplicitMonthlyTargets([...byPeriod.values()], rangeStart, rangeEnd);
       await store.replacePeriodTargets(actor.organizationId, plan.id, merged);
-      const updated = await store.getPlanById(actor.organizationId, plan.id);
+      let updated = await store.getPlanById(actor.organizationId, plan.id);
+      if (rangeEnd && planEnd && rangeEnd > planEnd) {
+        const endDate = periodEndDate(rangeEnd);
+        updated = await store.updatePlan(actor.organizationId, plan.id, {
+          endDate,
+          effectiveEndDate: endDate
+        });
+      }
       await emit(updated, "ramp_generated", actor, {
         startMonth: generated[0]?.period || payload.startMonth,
         endMonth: generated.at(-1)?.period || payload.endMonth,

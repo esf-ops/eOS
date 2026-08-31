@@ -7,6 +7,7 @@ import { salespersonDisplayName } from "../lib/salespersonLabel";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
 import IdentityReview from "./IdentityReview";
+import PlanExperience, { type BookIntelligence, type PlanBundle as ExperienceBundle } from "./PlanExperience";
 import Account360Workspace, {
   type Account,
   type AccountWorkspaceState,
@@ -178,7 +179,8 @@ export default function SalesOpsApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [me, setMe] = useState<Record<string, unknown> | null>(null);
-  const [planBundle, setPlanBundle] = useState<{ plan: Record<string, unknown>; periodTargets: PeriodTarget[]; metricTargets: Array<Record<string, unknown>>; insights?: Record<string, Insight> } | null>(null);
+  const [planBundle, setPlanBundle] = useState<{ plan: Record<string, unknown>; periodTargets: PeriodTarget[]; metricTargets: Array<Record<string, unknown>>; insights?: Record<string, Insight>; planCopy?: Record<string, string> } | null>(null);
+  const [planBook, setPlanBook] = useState<BookIntelligence | null>(null);
   const [progress, setProgress] = useState<Record<string, unknown> | null>(null);
   const [scorecards, setScorecards] = useState<Scorecard[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -307,6 +309,13 @@ export default function SalesOpsApp() {
     }, 20000);
     return () => window.clearInterval(id);
   }, [sessionToken, reload]);
+
+  useEffect(() => {
+    if (!sessionToken || tab !== "plan") return;
+    void apiGet("/api/sales-ops/me/plan/book-intelligence", sessionToken)
+      .then((data) => setPlanBook(data as BookIntelligence))
+      .catch(() => setPlanBook(null));
+  }, [sessionToken, tab, planBundle?.plan]);
 
   const ramp: PeriodTarget[] = (planBundle?.periodTargets as PeriodTarget[]) || [];
   const user = (me?.user || {}) as { firstName?: string; fullName?: string; email?: string; role?: string };
@@ -1064,36 +1073,23 @@ export default function SalesOpsApp() {
           )}
 
           {tab === "plan" && (
-            <div className="tab-page rhythm-page">
-              <div className="section-heading">
-                <p className="kicker">Assigned plan</p>
-                <h2>{String(plan?.planName || "No published plan")}</h2>
-                <p>{String((planBundle as { planCopy?: { introduction?: string } } | null)?.planCopy?.introduction || plan?.subtitle || "")}</p>
-              </div>
-              <section className="rhythm-hero">
-                <div className="rhythm-month-control">
-                  <p className="kicker">Monthly north star</p>
-                  <p>{String((plan?.rhythms as { monthly?: string } | undefined)?.monthly || "KPI standards are loaded from your assigned plan.")}</p>
+            <div className="tab-page">
+              {planBundle ? (
+                <PlanExperience
+                  bundle={planBundle as ExperienceBundle}
+                  book={planBook}
+                  salespersonName={salespersonDisplayName(user.fullName, user.firstName)}
+                  performance={performance}
+                  compensation={planBook?.compensation || null}
+                  showCompensation={Boolean(plan?.commissionEnabled)}
+                />
+              ) : (
+                <div className="section-heading">
+                  <p className="kicker">Assigned plan</p>
+                  <h2>No published plan</h2>
+                  <p>Your assigned operating plan will appear here after it is published.</p>
                 </div>
-                <div className="rhythm-target-main">
-                  <span>This month's stored goal</span>
-                  <strong>{fmtMaybe(performance?.currentMonth?.goalSf)}</strong>
-                </div>
-              </section>
-              {Boolean((plan?.rhythms as { weekly?: string } | undefined)?.weekly) && (
-                <p>{String((plan?.rhythms as { weekly?: string }).weekly)}</p>
               )}
-              {Boolean((plan?.rhythms as { quarterly?: string } | undefined)?.quarterly) && (
-                <p>{String((plan?.rhythms as { quarterly?: string }).quarterly)}</p>
-              )}
-              <div className="mini-metrics" style={{ maxWidth: 720, marginTop: 32 }}>
-                {(planBundle?.metricTargets || []).map((m) => (
-                  <button type="button" key={String(m.metricKey)}>
-                    <strong>{String(m.targetValue)}</strong>
-                    <span>{String(m.label)} · {String(m.cadence)}</span>
-                  </button>
-                ))}
-              </div>
               {planHistory.length > 0 && (
                 <div className="plan-history">
                   <p className="kicker">Published plan history</p>
@@ -1193,6 +1189,7 @@ export default function SalesOpsApp() {
               token={sessionToken}
               access={(me?.access as { isOrgAdmin?: boolean; canPublishPlans?: boolean }) || {}}
               onChanged={() => void reload()}
+              onOpenIdentityReview={() => setTab("identity")}
             />
           )}
 

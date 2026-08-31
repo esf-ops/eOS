@@ -1,6 +1,18 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
 import { salespersonDisplayName } from "../lib/salespersonLabel";
+import PlanExperience, {
+  asText,
+  monthLongLabel,
+  periodFromDate,
+  productionDisplay,
+  type BookAccount,
+  type BookIntelligence,
+  type CompensationContext,
+  type MetricTarget,
+  type PeriodTarget,
+  type PlanBundle
+} from "./PlanExperience";
 
 type Person = { userId: string; salespersonLabel?: string | null; displayName?: string | null };
 
@@ -24,48 +36,45 @@ type PlanRow = {
   managerUserId?: string | null;
 };
 
-type PeriodTarget = {
-  period: string;
-  label: string;
-  year: string;
-  installedTarget: number;
-  rollingThreeMonthTarget: number;
-  qualifiedPipelineTarget: number;
+const BUILDER_STEPS = [
+  { id: 1, label: "Person & territory" },
+  { id: 2, label: "Production goal" },
+  { id: 3, label: "Account strategy" },
+  { id: 4, label: "Activity standards" },
+  { id: 5, label: "Management rhythms" },
+  { id: 6, label: "Commission & copy" }
+];
+
+const KPI_CATALOG = [
+  { metricKey: "meaningful_touches", label: "Meaningful customer touches", cadence: "weekly", unit: "count_per_week", defaultValue: 15 },
+  { metricKey: "meetings", label: "Meetings that move an account forward", cadence: "monthly", unit: "count_per_month", defaultValue: 6 },
+  { metricKey: "new_account_meetings", label: "New account meetings", cadence: "monthly", unit: "count_per_month", defaultValue: null as number | null },
+  { metricKey: "strategic_account_reviews", label: "Strategic account reviews", cadence: "monthly", unit: "count_per_month", defaultValue: null as number | null }
+];
+
+const WORKING_MILESTONES = [
+  { period: "2027-01", sf: 1000 },
+  { period: "2027-03", sf: 1500 },
+  { period: "2027-09", sf: 2000 },
+  { period: "2027-12", sf: 2500 }
+];
+
+const CATEGORY_OPTIONS = [
+  { value: "", label: "Use suggested" },
+  { value: "ANCHOR", label: "Anchor" },
+  { value: "GROWTH_OPPORTUNITY", label: "Growth opportunity" },
+  { value: "NEEDS_ATTENTION", label: "Needs attention" },
+  { value: "REACTIVATION", label: "Reactivation" },
+  { value: "NEW_UNPROVEN", label: "New / unproven" },
+  { value: "IDENTITY_DATA_GAP", label: "Identity / data gap" }
+];
+
+const DEFAULT_RHYTHMS = {
+  weekly: "Account and pipeline check-in. Confirm top priorities. Surface blocked opportunities.",
+  monthly:
+    "Review Goal vs Actual SF. Inspect account contribution. Act on accounts needing attention. Track new, growth, and reactivation progress.",
+  quarterly: "Revisit territory strategy and account segmentation. Discuss whether a plan revision is appropriate."
 };
-
-type MetricTarget = {
-  metricKey: string;
-  label: string;
-  unit: string;
-  cadence: string;
-  targetValue: number;
-  warningThreshold: number;
-  sourceAuthority: string;
-  displayOrder?: number;
-};
-
-type PlanBundle = {
-  plan: Record<string, unknown>;
-  periodTargets: PeriodTarget[];
-  metricTargets: MetricTarget[];
-  insights?: Record<string, unknown>;
-  planCopy?: Record<string, string>;
-  events?: Array<Record<string, unknown>>;
-  acknowledgement?: { acknowledgedAt?: string } | null;
-};
-
-const fmt = new Intl.NumberFormat("en-US");
-
-function asText(v: unknown) {
-  return v == null ? "" : String(v);
-}
-
-function periodFromDate(value: string) {
-  const s = String(value || "").trim();
-  if (/^\d{4}-\d{2}$/.test(s)) return s;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 7);
-  return "";
-}
 
 function addMonths(period: string, delta: number) {
   const y = Number(period.slice(0, 4));
@@ -112,55 +121,41 @@ function personName(people: Person[], staff: Person[], userId: string | null | u
   return salespersonDisplayName(mapped?.salespersonLabel, mapped?.displayName, member?.displayName, member?.salespersonLabel);
 }
 
-function SalesPlanPreview({ bundle }: { bundle: PlanBundle }) {
-  const plan = bundle.plan || {};
-  const copy = bundle.planCopy || {};
-  return (
-    <div className="plan-preview-body">
-      <p className="kicker">{asText(plan.territoryName) || "Sales territory"}</p>
-      <h2>{asText(plan.headline) || asText(plan.planName)}</h2>
-      <p>{asText(copy.introduction) || asText(plan.subtitle)}</p>
-      <div className="plan-preview-stats">
-        <div>
-          <span>North star</span>
-          <strong>{fmt.format(Number(plan.northStarTarget || 0))}</strong>
-          <small>{asText(plan.northStarMetric)}</small>
-        </div>
-        <div>
-          <span>Version</span>
-          <strong>v{asText(plan.versionNumber || 1)}</strong>
-          <small>{asText(plan.status)}</small>
-        </div>
-      </div>
-      {(bundle.metricTargets || []).slice(0, 6).map((m) => (
-        <div className="plan-preview-metric" key={m.metricKey}>
-          <strong>{m.targetValue}</strong>
-          <span>
-            {m.label} · {m.cadence}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+function catalogMetrics(existing: MetricTarget[]) {
+  const byKey = new Map(existing.map((m) => [m.metricKey, m]));
+  const catalog = KPI_CATALOG.map((row) => {
+    const found = byKey.get(row.metricKey);
+    return {
+      ...row,
+      targetValue: found?.targetValue ?? row.defaultValue,
+      warningThreshold: found?.warningThreshold ?? Math.max(0, Number(row.defaultValue || 0) - 3)
+    };
+  });
+  const extra = existing.filter((m) => !KPI_CATALOG.some((row) => row.metricKey === m.metricKey));
+  return { catalog, extra };
 }
 
 export default function PlanAdmin({
   token,
   access,
-  onChanged
+  onChanged,
+  onOpenIdentityReview
 }: {
   token: string;
   access: Access;
   onChanged?: () => void;
+  onOpenIdentityReview?: () => void;
 }) {
   const canPublish = Boolean(access.canPublishPlans);
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [templates, setTemplates] = useState<Array<Record<string, unknown>>>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [bundle, setBundle] = useState<PlanBundle | null>(null);
+  const [book, setBook] = useState<BookIntelligence | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState<PlanBundle & { banner?: string } | null>(null);
+  const [preview, setPreview] = useState<(PlanBundle & { banner?: string }) | null>(null);
+  const [step, setStep] = useState(1);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterUser, setFilterUser] = useState("");
   const [filterYear, setFilterYear] = useState("");
@@ -176,32 +171,27 @@ export default function PlanAdmin({
     managerUserId: "",
     startDate: "",
     endDate: "",
-    northStarMetric: "",
-    northStarTarget: "",
-    northStarTargetDate: "",
+    northStarTarget: "2500",
+    northStarTargetDate: "2027-12-31",
     stretchTarget: "",
     headline: "",
     subtitle: "",
     commissionEnabled: false,
-    commissionRules: "",
+    compensationProposalId: "",
     introduction: "",
     expectations: "",
     successDefinition: "",
     coaching: "",
-    strategicAccounts: "",
-    newAccounts: "",
-    growthReactivation: "",
-    weekly: "",
-    monthly: "",
-    quarterly: ""
+    weekly: DEFAULT_RHYTHMS.weekly,
+    monthly: DEFAULT_RHYTHMS.monthly,
+    quarterly: DEFAULT_RHYTHMS.quarterly
   });
   const [periodRows, setPeriodRows] = useState<PeriodTarget[]>([]);
-  const [metricText, setMetricText] = useState("");
-  const [rampStart, setRampStart] = useState("");
-  const [rampEnd, setRampEnd] = useState("");
-  const [rampStartSf, setRampStartSf] = useState("");
-  const [rampEndSf, setRampEndSf] = useState("");
-  const [milestoneText, setMilestoneText] = useState("");
+  const [milestones, setMilestones] = useState(WORKING_MILESTONES.map((row) => ({ ...row })));
+  const [kpiValues, setKpiValues] = useState<Record<string, string>>({});
+  const [extraMetrics, setExtraMetrics] = useState<MetricTarget[]>([]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, string>>({});
 
   const loadList = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -225,46 +215,65 @@ export default function PlanAdmin({
     }
   }, [token, filterStatus, filterUser, filterYear, filterManager]);
 
+  const loadBook = useCallback(
+    async (planId: string) => {
+      const data = (await apiGet(`/api/sales-ops/admin/plans/${planId}/book-intelligence`, token)) as BookIntelligence;
+      setBook(data);
+      setSelectedAccountIds((data.accounts || []).filter((a) => a.selected).map((a) => a.salesOpsAccountId));
+      const overrides: Record<string, string> = {};
+      for (const row of data.accounts || []) {
+        if (row.overrideCategory) overrides[row.salesOpsAccountId] = row.overrideCategory;
+      }
+      setCategoryOverrides(overrides);
+    },
+    [token]
+  );
+
   const loadPlan = useCallback(
     async (planId: string) => {
       const data = (await apiGet(`/api/sales-ops/admin/plans/${planId}`, token)) as PlanBundle;
       setBundle(data);
       const plan = data.plan || {};
       const copy = (data.planCopy || {}) as Record<string, string>;
-      const expectations = (plan.accountExpectations || {}) as Record<string, string>;
       const rhythms = (plan.rhythms || {}) as Record<string, string>;
+      const features = (plan.features || {}) as Record<string, string>;
       setForm({
         planName: asText(plan.planName),
         territoryName: asText(plan.territoryName),
         managerUserId: asText(plan.managerUserId),
         startDate: asText(plan.startDate).slice(0, 10),
         endDate: asText(plan.endDate).slice(0, 10),
-        northStarMetric: asText(plan.northStarMetric),
-        northStarTarget: asText(plan.northStarTarget),
-        northStarTargetDate: asText(plan.northStarTargetDate).slice(0, 10),
+        northStarTarget: asText(plan.northStarTarget || 2500),
+        northStarTargetDate: asText(plan.northStarTargetDate || "2027-12-31").slice(0, 10),
         stretchTarget: asText(plan.stretchTarget),
         headline: asText(plan.headline),
         subtitle: asText(plan.subtitle),
         commissionEnabled: Boolean(plan.commissionEnabled),
-        commissionRules: JSON.stringify(plan.commissionRules || {}, null, 2),
+        compensationProposalId: asText(features.compensationProposalId),
         introduction: copy.introduction || "",
         expectations: copy.expectations || "",
         successDefinition: copy.successDefinition || "",
         coaching: copy.coaching || "",
-        strategicAccounts: expectations.strategicAccounts || "",
-        newAccounts: expectations.newAccounts || "",
-        growthReactivation: expectations.growthReactivation || "",
-        weekly: rhythms.weekly || "",
-        monthly: rhythms.monthly || "",
-        quarterly: rhythms.quarterly || ""
+        weekly: rhythms.weekly || DEFAULT_RHYTHMS.weekly,
+        monthly: rhythms.monthly || DEFAULT_RHYTHMS.monthly,
+        quarterly: rhythms.quarterly || DEFAULT_RHYTHMS.quarterly
       });
-      setPeriodRows(mergeMonths(data.periodTargets || [], asText(plan.startDate), asText(plan.endDate)));
-      const periods = data.periodTargets || [];
-      setRampStart(periods[0]?.period || asText(plan.startDate).slice(0, 7));
-      setRampEnd(periods[periods.length - 1]?.period || asText(plan.endDate).slice(0, 7));
-      setMetricText(JSON.stringify(data.metricTargets || [], null, 2));
+      const merged = mergeMonths(data.periodTargets || [], asText(plan.startDate), asText(plan.endDate));
+      setPeriodRows(merged);
+      setMilestones(
+        WORKING_MILESTONES.map((row) => {
+          const found = merged.find((p) => p.period === row.period);
+          return { period: row.period, sf: found ? Number(found.installedTarget) || row.sf : row.sf };
+        })
+      );
+      const split = catalogMetrics(data.metricTargets || []);
+      const values: Record<string, string> = {};
+      for (const row of split.catalog) values[row.metricKey] = row.targetValue == null ? "" : String(row.targetValue);
+      setKpiValues(values);
+      setExtraMetrics(split.extra);
+      await loadBook(planId);
     },
-    [token]
+    [token, loadBook]
   );
 
   useEffect(() => {
@@ -279,6 +288,8 @@ export default function PlanAdmin({
   const status = asText(bundle?.plan?.status);
   const editable = status === "draft";
   const prototype = Boolean(bundle?.plan?.isPrototype);
+  const salesperson = personName(people, staff, asText(bundle?.plan?.userId));
+  const compensation = (book?.compensation || null) as CompensationContext | null;
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -304,27 +315,33 @@ export default function PlanAdmin({
       else if (createSource !== "blank") payload.templateId = createSource;
       const created = (await apiPost("/api/sales-ops/admin/plans", token, payload)) as PlanBundle;
       setSelectedId(asText(created.plan?.id));
+      setStep(1);
     });
+  }
+
+  function metricTargetsPayload(): MetricTarget[] {
+    const catalog = KPI_CATALOG.map((row, i) => {
+      const raw = kpiValues[row.metricKey];
+      if (raw === "" || raw == null) return null;
+      const targetValue = Number(raw);
+      if (!Number.isFinite(targetValue)) return null;
+      return {
+        metricKey: row.metricKey,
+        label: row.label,
+        unit: row.unit,
+        cadence: row.cadence,
+        targetValue,
+        warningThreshold: Math.max(0, targetValue - 3),
+        sourceAuthority: "plan",
+        displayOrder: (i + 1) * 10
+      };
+    }).filter(Boolean) as MetricTarget[];
+    return [...catalog, ...extraMetrics];
   }
 
   async function saveDraft(e: FormEvent) {
     e.preventDefault();
     if (!selectedId) return;
-    let periodTargets: PeriodTarget[] = periodRows;
-    let metricTargets: MetricTarget[] = [];
-    try {
-      metricTargets = JSON.parse(metricText || "[]");
-    } catch {
-      setError("KPI targets must be valid JSON.");
-      return;
-    }
-    let commissionRules = {};
-    try {
-      commissionRules = form.commissionRules ? JSON.parse(form.commissionRules) : {};
-    } catch {
-      setError("Commission rules must be valid JSON.");
-      return;
-    }
     await run(async () => {
       await apiPatch(`/api/sales-ops/admin/plans/${selectedId}`, token, {
         planName: form.planName,
@@ -334,22 +351,26 @@ export default function PlanAdmin({
         endDate: form.endDate,
         effectiveStartDate: form.startDate,
         effectiveEndDate: form.endDate,
-        northStarMetric: form.northStarMetric,
+        northStarMetric: "installed_sqft_per_month",
         northStarTarget: Number(form.northStarTarget || 0),
         northStarTargetDate: form.northStarTargetDate || null,
         stretchTarget: form.stretchTarget === "" ? null : Number(form.stretchTarget),
         headline: form.headline,
         subtitle: form.subtitle,
         commissionEnabled: form.commissionEnabled,
-        commissionRules,
+        features: {
+          ...((bundle?.plan?.features as Record<string, unknown>) || {}),
+          compensationProposalId: form.compensationProposalId || null
+        },
         accountExpectations: {
-          strategicAccounts: form.strategicAccounts,
-          newAccounts: form.newAccounts,
-          growthReactivation: form.growthReactivation
+          planBook: {
+            selectedAccountIds,
+            categoryOverrides
+          }
         },
         rhythms: { weekly: form.weekly, monthly: form.monthly, quarterly: form.quarterly },
-        periodTargets,
-        metricTargets,
+        periodTargets: periodRows,
+        metricTargets: metricTargetsPayload(),
         planCopy: {
           introduction: form.introduction,
           expectations: form.expectations,
@@ -360,17 +381,32 @@ export default function PlanAdmin({
     });
   }
 
+  function generateCopyFromFacts() {
+    const sf = Number(form.northStarTarget || 0);
+    const by = monthLongLabel(form.northStarTargetDate);
+    setForm({
+      ...form,
+      introduction: `${salesperson}'s operating plan for ${form.territoryName || "the assigned territory"}. North star: ${sf.toLocaleString("en-US")} installed SF / month by ${by}.`,
+      expectations: "Protect the producing base, grow credible upside, and act on accounts that need attention or reactivation.",
+      successDefinition:
+        "Success is credited Completed Installation SF from governed Moraware evidence after Account Directory identity is approved. Unavailable production is not treated as zero.",
+      coaching: "Use weekly check-ins for priorities and blockers, monthly Goal vs Actual, and quarterly territory strategy."
+    });
+  }
+
   const years = useMemo(() => {
     const set = new Set(plans.map((p) => String(p.effectiveStartDate || "").slice(0, 4)).filter(Boolean));
     return [...set].sort();
   }, [plans]);
 
+  const accounts = book?.accounts || [];
+
   return (
     <div className="plan-admin">
       <div className="section-heading">
         <div>
-          <p className="kicker">Plan Admin</p>
-          <h2>Draft, review, and publish sales plans.</h2>
+          <p className="kicker">Plan Builder</p>
+          <h2>Create a salesperson plan in six guided steps.</h2>
         </div>
         <p>Published versions are immutable. Material changes require Create Revision. Managers can author drafts for assigned reports; only admin/executive/super_admin can approve or publish.</p>
       </div>
@@ -396,8 +432,8 @@ export default function PlanAdmin({
         <label>
           Starting point
           <select value={createSource} onChange={(e) => setCreateSource(e.target.value)}>
-            <option value="blank">Blank draft</option>
-            <option value="prototype">Prototype Cedar Valley blueprint (reference)</option>
+            <option value="blank">Blank draft (working horizon through December 2027)</option>
+            <option value="prototype">Prototype Cedar Valley blueprint (reference only — not an approved production plan)</option>
             {templates
               .filter((t) => t.templateKey !== "prototype_cedar_valley_sales_plan_2026_2028")
               .map((t) => (
@@ -466,12 +502,15 @@ export default function PlanAdmin({
               type="button"
               key={p.id}
               className={selectedId === p.id ? "active" : ""}
-              onClick={() => setSelectedId(p.id)}
+              onClick={() => {
+                setSelectedId(p.id);
+                setStep(1);
+              }}
             >
               <strong>{p.planName || "Untitled"}</strong>
               <span>
                 v{p.versionNumber || 1} · {p.status}
-                {p.isPrototype ? " · Prototype" : ""}
+                {p.isPrototype ? " · Reference prototype" : ""}
               </span>
               <small>
                 {personName(people, staff, p.userId)} · {p.effectiveStartDate || "—"} → {p.effectiveEndDate || "open"} · {String(p.updatedAt || "").slice(0, 10)}
@@ -485,297 +524,426 @@ export default function PlanAdmin({
           <form className="plan-editor" onSubmit={(e) => void saveDraft(e)}>
             <div className="plan-editor-status">
               <span className={`status-chip status-${status}`}>{status || "unknown"}</span>
-              {prototype && <span className="status-chip prototype">Draft / Prototype</span>}
+              {prototype && <span className="status-chip prototype">Reference prototype — not an approved production plan</span>}
               <span>v{asText(bundle.plan.versionNumber)}</span>
             </div>
+            {prototype && (
+              <div className="prototype-banner">
+                Prototype Cedar Valley blueprint is a template/reference. Its 2026–2028 ramp is not this salesperson’s approved target horizon. The working live-plan horizon is December 2027.
+              </div>
+            )}
             <div className="plan-selected-identity">
-              <strong>{personName(people, staff, asText(bundle.plan.userId))}</strong>
+              <strong>{salesperson}</strong>
               <small>
                 {form.managerUserId
                   ? `Manager: ${personName(people, staff, form.managerUserId)}`
                   : "Manager: not set"}
               </small>
               <small>
-                {asText(bundle.plan.planName) || "Untitled plan"} · v{asText(bundle.plan.versionNumber) || "1"} ·{" "}
-                {status || "unknown"}
+                {asText(bundle.plan.planName) || "Untitled plan"} · v{asText(bundle.plan.versionNumber) || "1"} · {status || "unknown"}
               </small>
             </div>
 
-            <section>
-              <p className="kicker">1. Plan identity</p>
-              <div className="field-grid two">
-                <label>
-                  Plan name
-                  <input value={form.planName} disabled={!editable} onChange={(e) => setForm({ ...form, planName: e.target.value })} />
-                </label>
-                <label>
-                  Territory
-                  <input value={form.territoryName} disabled={!editable} onChange={(e) => setForm({ ...form, territoryName: e.target.value })} />
-                </label>
-                <label>
-                  Manager
-                  {staff.length || people.length ? (
-                    <select
-                      value={form.managerUserId}
+            <nav className="plan-builder-steps" aria-label="Plan builder steps">
+              {BUILDER_STEPS.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  className={step === row.id ? "active" : ""}
+                  onClick={() => setStep(row.id)}
+                >
+                  <span>{row.id}</span>
+                  {row.label}
+                </button>
+              ))}
+            </nav>
+
+            {step === 1 && (
+              <section>
+                <p className="kicker">1. Person & territory</p>
+                <div className="field-grid two">
+                  <label>
+                    Salesperson
+                    <input value={salesperson} disabled />
+                  </label>
+                  <label>
+                    Manager
+                    {staff.length || people.length ? (
+                      <select
+                        value={form.managerUserId}
+                        disabled={!editable}
+                        onChange={(e) => setForm({ ...form, managerUserId: e.target.value })}
+                      >
+                        <option value="">No manager</option>
+                        {[...new Map([...staff, ...people].map((p) => [p.userId, p])).values()].map((p) => (
+                          <option key={p.userId} value={p.userId}>
+                            {salespersonDisplayName(p.displayName, p.salespersonLabel)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input value={personName(people, staff, form.managerUserId)} disabled />
+                    )}
+                  </label>
+                  <label>
+                    Territory
+                    <input value={form.territoryName} disabled={!editable} onChange={(e) => setForm({ ...form, territoryName: e.target.value })} />
+                  </label>
+                  <label>
+                    Plan name
+                    <input value={form.planName} disabled={!editable} onChange={(e) => setForm({ ...form, planName: e.target.value })} />
+                  </label>
+                  <label>
+                    Plan start
+                    <input
+                      type="date"
+                      value={form.startDate}
                       disabled={!editable}
-                      onChange={(e) => setForm({ ...form, managerUserId: e.target.value })}
-                    >
-                      <option value="">No manager</option>
-                      {[...new Map([...staff, ...people].map((p) => [p.userId, p])).values()].map((p) => (
-                        <option key={p.userId} value={p.userId}>
-                          {salespersonDisplayName(p.displayName, p.salespersonLabel)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input value={personName(people, staff, form.managerUserId)} disabled />
-                  )}
-                </label>
-                <label>
-                  Salesperson
-                  <input value={personName(people, staff, asText(bundle.plan.userId))} disabled />
-                </label>
-                <label>
-                  Start
+                      onChange={(e) => {
+                        const startDate = e.target.value;
+                        setForm({ ...form, startDate });
+                        setPeriodRows((rows) => mergeMonths(rows, startDate, form.endDate));
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Plan end
+                    <input
+                      type="date"
+                      value={form.endDate}
+                      disabled={!editable}
+                      onChange={(e) => {
+                        const endDate = e.target.value;
+                        setForm({ ...form, endDate });
+                        setPeriodRows((rows) => mergeMonths(rows, form.startDate, endDate));
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="workspace-muted">Plan start is compensation/coverage timing. It is not a production milestone.</p>
+              </section>
+            )}
+
+            {step === 2 && (
+              <section>
+                <p className="kicker">2. Production goal</p>
+                <div className="north-star-editor">
+                  <span>North star</span>
+                  <input
+                    value={form.northStarTarget}
+                    disabled={!editable}
+                    inputMode="decimal"
+                    onChange={(e) => setForm({ ...form, northStarTarget: e.target.value })}
+                  />
+                  <span>installed SF / month by</span>
                   <input
                     type="date"
-                    value={form.startDate}
+                    value={form.northStarTargetDate}
                     disabled={!editable}
-                    onChange={(e) => {
-                      const startDate = e.target.value;
-                      setForm({ ...form, startDate });
-                      setPeriodRows((rows) => mergeMonths(rows, startDate, form.endDate));
-                    }}
+                    onChange={(e) => setForm({ ...form, northStarTargetDate: e.target.value })}
                   />
-                </label>
-                <label>
-                  End
-                  <input
-                    type="date"
-                    value={form.endDate}
-                    disabled={!editable}
-                    onChange={(e) => {
-                      const endDate = e.target.value;
-                      setForm({ ...form, endDate });
-                      setPeriodRows((rows) => mergeMonths(rows, form.startDate, endDate));
-                    }}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section>
-              <p className="kicker">2. North star</p>
-              <div className="field-grid two">
-                <label>
-                  Metric
-                  <input value={form.northStarMetric} disabled={!editable} onChange={(e) => setForm({ ...form, northStarMetric: e.target.value })} />
-                </label>
-                <label>
-                  Target
-                  <input value={form.northStarTarget} disabled={!editable} onChange={(e) => setForm({ ...form, northStarTarget: e.target.value })} />
-                </label>
-                <label>
-                  Target date
-                  <input type="date" value={form.northStarTargetDate} disabled={!editable} onChange={(e) => setForm({ ...form, northStarTargetDate: e.target.value })} />
-                </label>
-                <label>
-                  Stretch
-                  <input value={form.stretchTarget} disabled={!editable} onChange={(e) => setForm({ ...form, stretchTarget: e.target.value })} />
-                </label>
-              </div>
-            </section>
-
-            <section>
-              <p className="kicker">3. Monthly goals</p>
-              <p className="workspace-muted">Each calendar month is stored as its own target. Ramp generation writes those month values; it is not the runtime formula.</p>
-              {editable && (
-                <div className="field-grid four ramp-controls">
-                  <label>
-                    Ramp start month
-                    <input type="month" value={rampStart} onChange={(e) => setRampStart(e.target.value)} />
-                  </label>
-                  <label>
-                    Start SF
-                    <input value={rampStartSf} onChange={(e) => setRampStartSf(e.target.value)} />
-                  </label>
-                  <label>
-                    Ramp end month
-                    <input type="month" value={rampEnd} onChange={(e) => setRampEnd(e.target.value)} />
-                  </label>
-                  <label>
-                    End SF
-                    <input value={rampEndSf} onChange={(e) => setRampEndSf(e.target.value)} />
-                  </label>
+                </div>
+                <p className="workspace-muted">Working target horizon ends December 2027. Generating a path writes explicit monthly targets and does not publish the plan.</p>
+                <div className="milestone-table" role="table" aria-label="Milestone anchors">
+                  <div className="month-goal-head month-goal-head-two" role="row">
+                    <span>Month</span>
+                    <span>Goal SF</span>
+                  </div>
+                  {milestones.map((row, idx) => (
+                    <label key={row.period} className="month-goal-row month-goal-row-two" role="row">
+                      <span>{monthLongLabel(row.period)}</span>
+                      <input
+                        inputMode="decimal"
+                        disabled={!editable}
+                        value={String(row.sf)}
+                        onChange={(e) => {
+                          const next = [...milestones];
+                          next[idx] = { ...row, sf: Number(e.target.value || 0) };
+                          setMilestones(next);
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {editable && (
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() =>
                       void run(() =>
                         apiPost(`/api/sales-ops/admin/plans/${selectedId}/generate-ramp`, token, {
-                          startMonth: rampStart,
-                          startSf: Number(rampStartSf),
-                          endMonth: rampEnd,
-                          endSf: Number(rampEndSf)
+                          anchors: milestones.map((row) => ({ period: row.period, sf: Number(row.sf) }))
                         })
                       )
                     }
                   >
-                    Generate ramp
+                    Generate proposed monthly path
                   </button>
+                )}
+                <p className="kicker">Explicit monthly targets</p>
+                <div className="month-goal-table" role="table" aria-label="Monthly square-foot goals">
+                  <div className="month-goal-head month-goal-head-two" role="row">
+                    <span>Month</span>
+                    <span>Goal SF</span>
+                  </div>
+                  {periodRows.map((row, idx) => (
+                    <label key={row.period} className="month-goal-row month-goal-row-two" role="row">
+                      <span>{monthLongLabel(row.period)}</span>
+                      <input
+                        inputMode="decimal"
+                        disabled={!editable}
+                        value={String(row.installedTarget)}
+                        onChange={(e) => {
+                          const next = [...periodRows];
+                          next[idx] = { ...row, installedTarget: Number(e.target.value || 0) };
+                          setPeriodRows(next);
+                        }}
+                      />
+                    </label>
+                  ))}
+                  {periodRows.length === 0 && <p>Set start and end dates to create one target per month.</p>}
                 </div>
-              )}
-              {editable && (
-                <div className="milestone-draft">
-                  <label>
-                    Milestone anchors (draft interpolation)
-                    <textarea
-                      className="json-area"
-                      value={milestoneText}
-                      onChange={(e) => setMilestoneText(e.target.value)}
-                      placeholder={"YYYY-MM 1000\nYYYY-MM 1500"}
-                    />
-                  </label>
-                  <p className="workspace-muted">
-                    Writes one explicit stored target per month between the first and last anchor. Generated values are a
-                    draft. They are not an approved or published plan.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() => {
-                        const anchors = milestoneText
-                          .split("\n")
-                          .map((line) => line.trim())
-                          .filter(Boolean)
-                          .map((line) => {
-                            const m = line.match(/^(\d{4}-\d{2})\s+([\d.]+)$/);
-                            return m ? { period: m[1], sf: Number(m[2]) } : null;
-                          })
-                          .filter((row): row is { period: string; sf: number } => Boolean(row));
-                        return apiPost(`/api/sales-ops/admin/plans/${selectedId}/generate-ramp`, token, { anchors });
-                      })
-                    }
-                  >
-                    Generate milestone draft
+              </section>
+            )}
+
+            {step === 3 && (
+              <section>
+                <p className="kicker">3. Account strategy</p>
+                <p className="workspace-muted">
+                  Classifications use Monday ownership, Account Directory identity, and Moraware completed-install facts. QuickBooks is not required. Overrides apply to this plan only and do not rewrite source evidence.
+                  {book?.thresholds?.status === "proposed_default" ? " Thresholds are proposed defaults, not locked compensation policy." : ""}
+                </p>
+                <div className="account-intel-table">
+                  <div className="account-intel-head">
+                    <span>Priority</span>
+                    <span>Account</span>
+                    <span>Category</span>
+                    <span>Trailing SF</span>
+                    <span>Trend</span>
+                    <span>CRM / milestone</span>
+                    <span>Why</span>
+                  </div>
+                  {accounts.map((account: BookAccount) => (
+                    <div className="account-intel-row" key={account.salesOpsAccountId}>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          disabled={!editable}
+                          checked={selectedAccountIds.includes(account.salesOpsAccountId)}
+                          onChange={(e) => {
+                            setSelectedAccountIds((ids) =>
+                              e.target.checked ? [...ids, account.salesOpsAccountId] : ids.filter((id) => id !== account.salesOpsAccountId)
+                            );
+                          }}
+                        />
+                      </label>
+                      <strong>{account.accountName}</strong>
+                      <select
+                        disabled={!editable}
+                        value={categoryOverrides[account.salesOpsAccountId] || ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setCategoryOverrides((prev) => {
+                            const next = { ...prev };
+                            if (!value) delete next[account.salesOpsAccountId];
+                            else next[account.salesOpsAccountId] = value;
+                            return next;
+                          });
+                        }}
+                      >
+                        {CATEGORY_OPTIONS.map((opt) => (
+                          <option key={opt.value || "suggested"} value={opt.value}>
+                            {opt.value ? opt.label : `${account.categoryLabel} (suggested)`}
+                          </option>
+                        ))}
+                      </select>
+                      <span>{productionDisplay(account)}</span>
+                      <span>{account.trend}</span>
+                      <span>
+                        {account.lastContact || account.nextContact
+                          ? `${account.lastContact ? `Last ${String(account.lastContact).slice(0, 10)}` : ""} ${account.nextContact ? `Next ${String(account.nextContact).slice(0, 10)}` : ""}`.trim()
+                          : "—"}
+                        {account.nextStrategicMilestone ? ` · ${account.nextStrategicMilestone}` : ""}
+                      </span>
+                      <span>
+                        {account.reasonCopy}
+                        {account.suggestedCategory === "IDENTITY_DATA_GAP" && access.isOrgAdmin && onOpenIdentityReview ? (
+                          <>
+                            {" "}
+                            <button type="button" className="text-link" onClick={onOpenIdentityReview}>
+                              Open Identity Review
+                            </button>
+                          </>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                  {accounts.length === 0 && <p>No currently assigned accounts were found for this salesperson.</p>}
+                </div>
+              </section>
+            )}
+
+            {step === 4 && (
+              <section>
+                <p className="kicker">4. Activity standards</p>
+                <div className="field-grid two">
+                  {KPI_CATALOG.map((row) => (
+                    <label key={row.metricKey}>
+                      {row.label}
+                      <span className="field-suffix">
+                        <input
+                          inputMode="decimal"
+                          disabled={!editable}
+                          value={kpiValues[row.metricKey] ?? ""}
+                          onChange={(e) => setKpiValues({ ...kpiValues, [row.metricKey]: e.target.value })}
+                        />
+                        <small>per {row.cadence === "weekly" ? "week" : "month"}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {extraMetrics.length > 0 && (
+                  <details className="plan-diagnostics">
+                    <summary>Additional configured KPI types</summary>
+                    {extraMetrics.map((m, idx) => (
+                      <label key={m.metricKey}>
+                        {m.label}
+                        <input
+                          inputMode="decimal"
+                          disabled={!editable}
+                          value={String(m.targetValue)}
+                          onChange={(e) => {
+                            const next = [...extraMetrics];
+                            next[idx] = { ...m, targetValue: Number(e.target.value || 0) };
+                            setExtraMetrics(next);
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </details>
+                )}
+              </section>
+            )}
+
+            {step === 5 && (
+              <section>
+                <p className="kicker">5. Management rhythms</p>
+                <label>
+                  Weekly
+                  <textarea value={form.weekly} disabled={!editable} onChange={(e) => setForm({ ...form, weekly: e.target.value })} />
+                </label>
+                <label>
+                  Monthly
+                  <textarea value={form.monthly} disabled={!editable} onChange={(e) => setForm({ ...form, monthly: e.target.value })} />
+                </label>
+                <label>
+                  Quarterly
+                  <textarea value={form.quarterly} disabled={!editable} onChange={(e) => setForm({ ...form, quarterly: e.target.value })} />
+                </label>
+              </section>
+            )}
+
+            {step === 6 && (
+              <section>
+                <p className="kicker">6. Commission</p>
+                {!compensation?.configured ? (
+                  <p>Compensation not yet configured</p>
+                ) : (
+                  <div className="field-grid two">
+                    <label>
+                      Compensation plan
+                      <select
+                        disabled={!editable}
+                        value={form.compensationProposalId}
+                        onChange={(e) => setForm({ ...form, compensationProposalId: e.target.value })}
+                      >
+                        <option value="">Select a governed compensation plan</option>
+                        {(compensation.proposals || []).map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                            {row.finallyApproved ? " (approved)" : " (proposal)"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Basis
+                      <input value={compensation.basisLabel || "Completed installation SF"} disabled />
+                    </label>
+                    <label>
+                      Rate
+                      <input
+                        value={
+                          compensation.proposals?.find((p) => p.id === form.compensationProposalId && p.finallyApproved && p.ratePerSf != null)?.ratePerSf !=
+                          null
+                            ? String(compensation.proposals.find((p) => p.id === form.compensationProposalId)?.ratePerSf)
+                            : "Display only after the selected plan is approved"
+                        }
+                        disabled
+                      />
+                    </label>
+                    <label>
+                      Eligible accounts
+                      <input value={`${compensation.eligibleAccountCount ?? 0} approved commissionable accounts`} disabled />
+                    </label>
+                    <label>
+                      Effective date
+                      <input
+                        value={
+                          compensation.proposals?.find((p) => p.id === form.compensationProposalId)?.effectiveDate ||
+                          "Governed by the selected compensation plan"
+                        }
+                        disabled
+                      />
+                    </label>
+                  </div>
+                )}
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={form.commissionEnabled}
+                    disabled={!editable}
+                    onChange={(e) => setForm({ ...form, commissionEnabled: e.target.checked })}
+                  />
+                  Show estimated commission to salesperson
+                </label>
+
+                <p className="kicker">Plan copy</p>
+                <p className="workspace-muted">Narrative text does not override targets, commission, or account facts.</p>
+                {editable && (
+                  <button type="button" onClick={generateCopyFromFacts}>
+                    Generate from plan facts
                   </button>
-                </div>
-              )}
-              <div className="month-goal-table" role="table" aria-label="Monthly square-foot goals">
-                <div className="month-goal-head" role="row">
-                  <span>Month</span>
-                  <span>Goal SF</span>
-                </div>
-                {periodRows.map((row, idx) => (
-                  <label key={row.period} className="month-goal-row" role="row">
-                    <span>
-                      {row.label} {row.year}
-                      <small>{row.period}</small>
-                    </span>
-                    <input
-                      inputMode="decimal"
-                      disabled={!editable}
-                      value={String(row.installedTarget)}
-                      onChange={(e) => {
-                        const next = [...periodRows];
-                        next[idx] = { ...row, installedTarget: Number(e.target.value || 0) };
-                        setPeriodRows(next);
-                      }}
-                    />
-                  </label>
-                ))}
-                {periodRows.length === 0 && <p>Set start and end dates to create one target per month.</p>}
-              </div>
-            </section>
+                )}
+                <label>
+                  Introduction
+                  <textarea value={form.introduction} disabled={!editable} onChange={(e) => setForm({ ...form, introduction: e.target.value })} />
+                </label>
+                <label>
+                  Expectations
+                  <textarea value={form.expectations} disabled={!editable} onChange={(e) => setForm({ ...form, expectations: e.target.value })} />
+                </label>
+                <label>
+                  Success definition
+                  <textarea value={form.successDefinition} disabled={!editable} onChange={(e) => setForm({ ...form, successDefinition: e.target.value })} />
+                </label>
+                <label>
+                  Coaching context
+                  <textarea value={form.coaching} disabled={!editable} onChange={(e) => setForm({ ...form, coaching: e.target.value })} />
+                </label>
+              </section>
+            )}
 
             <section>
-              <p className="kicker">4. KPI standards</p>
-              <textarea className="json-area" value={metricText} disabled={!editable} onChange={(e) => setMetricText(e.target.value)} />
-            </section>
-
-            <section>
-              <p className="kicker">5. Account expectations</p>
-              <label>
-                Strategic accounts
-                <textarea value={form.strategicAccounts} disabled={!editable} onChange={(e) => setForm({ ...form, strategicAccounts: e.target.value })} />
-              </label>
-              <label>
-                New accounts
-                <textarea value={form.newAccounts} disabled={!editable} onChange={(e) => setForm({ ...form, newAccounts: e.target.value })} />
-              </label>
-              <label>
-                Growth / reactivation
-                <textarea value={form.growthReactivation} disabled={!editable} onChange={(e) => setForm({ ...form, growthReactivation: e.target.value })} />
-              </label>
-            </section>
-
-            <section>
-              <p className="kicker">6. Rhythms</p>
-              <label>
-                Weekly
-                <textarea value={form.weekly} disabled={!editable} onChange={(e) => setForm({ ...form, weekly: e.target.value })} />
-              </label>
-              <label>
-                Monthly review
-                <textarea value={form.monthly} disabled={!editable} onChange={(e) => setForm({ ...form, monthly: e.target.value })} />
-              </label>
-              <label>
-                Quarterly review
-                <textarea value={form.quarterly} disabled={!editable} onChange={(e) => setForm({ ...form, quarterly: e.target.value })} />
-              </label>
-            </section>
-
-            <section>
-              <p className="kicker">7. Commission</p>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={form.commissionEnabled}
-                  disabled={!editable}
-                  onChange={(e) => setForm({ ...form, commissionEnabled: e.target.checked })}
-                />
-                Enable commission visibility for this plan
-              </label>
-              <label>
-                Plan / rule reference (JSON)
-                <textarea className="json-area" value={form.commissionRules} disabled={!editable} onChange={(e) => setForm({ ...form, commissionRules: e.target.value })} />
-              </label>
-            </section>
-
-            <section>
-              <p className="kicker">8. Plan copy</p>
-              <label>
-                Introduction
-                <textarea value={form.introduction} disabled={!editable} onChange={(e) => setForm({ ...form, introduction: e.target.value })} />
-              </label>
-              <label>
-                Expectations
-                <textarea value={form.expectations} disabled={!editable} onChange={(e) => setForm({ ...form, expectations: e.target.value })} />
-              </label>
-              <label>
-                Success definition
-                <textarea value={form.successDefinition} disabled={!editable} onChange={(e) => setForm({ ...form, successDefinition: e.target.value })} />
-              </label>
-              <label>
-                Coaching / context
-                <textarea value={form.coaching} disabled={!editable} onChange={(e) => setForm({ ...form, coaching: e.target.value })} />
-              </label>
-            </section>
-
-            <section>
-              <p className="kicker">9. Review & history</p>
+              <p className="kicker">Review & history</p>
               <ul className="plan-timeline">
                 {(bundle.events || []).map((ev) => (
-                  <li key={asText(ev.id)}>
-                    <strong>{asText(ev.eventType)}</strong>
-                    <span>{String(ev.createdAt || "").slice(0, 16)}</span>
+                  <li key={asText((ev as { id?: string }).id)}>
+                    <strong>{asText((ev as { eventType?: string }).eventType)}</strong>
+                    <span>{String((ev as { createdAt?: string }).createdAt || "").slice(0, 16)}</span>
                   </li>
                 ))}
               </ul>
-              {bundle.acknowledgement?.acknowledgedAt && (
-                <p>Acknowledged {String(bundle.acknowledgement.acknowledgedAt).slice(0, 16)}</p>
-              )}
             </section>
 
             <div className="plan-admin-actions">
@@ -827,15 +995,20 @@ export default function PlanAdmin({
 
       {preview && (
         <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && setPreview(null)}>
-          <section className="insight-modal" role="dialog">
+          <section className="plan-preview-modal" role="dialog" aria-label="Salesperson plan preview">
             <button className="modal-close" type="button" onClick={() => setPreview(null)}>
               <span />
               Close
             </button>
-            <div className="modal-content">
-              <div className="preview-banner">Preview Mode — not the salesperson’s active plan</div>
-              <SalesPlanPreview bundle={preview} />
-            </div>
+            <PlanExperience
+              bundle={preview}
+              book={preview.bookIntelligence || book}
+              salespersonName={salesperson}
+              compensation={preview.bookIntelligence?.compensation || compensation}
+              showCompensation={Boolean(preview.plan?.commissionEnabled)}
+              banner={preview.banner || "Preview Mode — not the salesperson’s active plan"}
+              onIdentityReview={access.isOrgAdmin ? onOpenIdentityReview : null}
+            />
           </section>
         </div>
       )}

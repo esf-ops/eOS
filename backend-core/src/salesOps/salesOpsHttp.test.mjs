@@ -205,6 +205,12 @@ async function main() {
   assert.ok(typeof auditBody.salesOpsAccountsTotal === "number");
   assert.equal((await fetch(`${base}/api/sales-ops/admin/identity-reviews`, authA)).status, 404);
   assert.equal((await fetch(`${base}/api/sales-ops/admin/compensation`, authA)).status, 404);
+  assert.equal((await fetch(`${base}/api/sales-ops/admin/plans/${draft.id}/book-intelligence`, authA)).status, 404);
+  const mineBook = await fetch(`${base}/api/sales-ops/me/plan/book-intelligence`, authA);
+  assert.equal(mineBook.status, 200);
+  const mineBookBody = await mineBook.json();
+  assert.equal(JSON.stringify(mineBookBody.accounts || []).includes("accountDirectoryAccountId"), false);
+  assert.equal(JSON.stringify(mineBookBody.accounts || []).includes("mondayItemId"), false);
   const reviewsDenied = await fetch(`${base}/api/sales-ops/admin/identity-reviews/rebuild`, {
     method: "POST",
     headers: { Authorization: "Bearer a", "content-type": "application/json" },

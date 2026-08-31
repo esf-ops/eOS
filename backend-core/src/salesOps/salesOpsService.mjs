@@ -1079,6 +1079,18 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       assertActor(actor);
       return planAdmin.getAdminPlan(actor, planId);
     },
+    async getAdminBookIntelligence(user, planId) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      return planAdmin.getAdminBookIntelligence(actor, planId);
+    },
+    async getMyPlanBookIntelligence(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      const bundle = await loadEffectiveBundle(actor.organizationId, actor.userId);
+      if (!bundle?.plan) throw new SalesOpsError("No active sales plan is assigned.", 404, "no_plan");
+      return planAdmin.getOwnedBookIntelligence(actor, bundle.plan);
+    },
     async previewAdminPlan(user, planId) {
       const actor = actorFromUser(user);
       assertActor(actor);

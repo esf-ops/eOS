@@ -4688,4 +4688,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Auto-approving exact names, Monday/Moraware/QuickBooks writes, changing match policy, rotating credentials. |
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT. |
 
+### 347. Sales Ops Plan Builder productization (2026-08-31)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-31 |
+| **Decision** | Plan Admin is a **guided six-step Plan Builder** plus a salesperson-facing plan experience. It does **not** change Account Directory identity, Monday `write_enabled=false`, historical attribution, Moraware completed-install definition, commission eligibility, published-plan immutability/versioning, approval/publish lifecycle, or permissions. Blank drafts default to a **working target horizon of December 2027** (north star 2,500 installed SF / month) with explicit monthly rows. Milestone-anchor generation writes stored month values and does not publish. Prototype Cedar Valley 2026–2028 remains **reference/template only** and must not be mistaken for an approved live horizon. |
+| **Account intelligence** | Deterministic classifications for plan authoring: `ANCHOR`, `GROWTH_OPPORTUNITY`, `NEEDS_ATTENTION`, `REACTIVATION`, `NEW_UNPROVEN`, `IDENTITY_DATA_GAP`. Sources: current Monday ownership + CRM dates, Account Directory identity, Moraware completed-install attribution facts. QuickBooks is optional enrichment (`UNAVAILABLE` until trustworthy). Missing identity is **production unavailable**, never zero. Manager category overrides and plan-priority selections store on the plan (`accountExpectations.planBook`) and do **not** mutate source accounts or facts. Thresholds are exported as **`proposed_default`** (lookback 6 months / 5 producing for Anchor, 90-day trailing window, 25% decline, 15% growth, 120-day dormant) until operators lock policy. |
+| **UX** | Normal Plan Builder does not expose KPI JSON, compensation-rule JSON, interpolation syntax, or raw Monday/AD/Moraware/QuickBooks IDs. KPIs use the governed catalog (meaningful touches, meetings that move an account, new account meetings, strategic reviews). Commission is a governed proposal selector; if none is approved the UI says **Compensation not yet configured**. Preview as salesperson uses a wide responsive workspace (`plan-preview-modal`), not the 78px insight-modal rail. |
+| **APIs** | `GET /api/sales-ops/admin/plans/:planId/book-intelligence` (same author scope as plan admin). `GET /api/sales-ops/me/plan/book-intelligence` (own published/effective plan only; not on the 20s poll). Existing generate-ramp / lifecycle routes unchanged. |
+| **Out of scope** | Publishing a real salesperson plan, locking intelligence thresholds as compensation policy, QuickBooks financial classification, Monday/Moraware/QuickBooks writes, fabricating compensation rules. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT. |
+
 

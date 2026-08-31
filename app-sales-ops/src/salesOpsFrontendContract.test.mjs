@@ -17,6 +17,7 @@ const files = [
   "src/ui/SalesOpsApp.tsx",
   "src/ui/Account360Workspace.tsx",
   "src/ui/PlanAdmin.tsx",
+  "src/ui/PlanExperience.tsx",
   "src/ui/IdentityReview.tsx",
   "src/main.tsx",
   ".env.example"
@@ -95,8 +96,29 @@ assert.ok(!app.includes("quickbooks"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("/api/sales-ops/admin/plans/"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("generate-ramp"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("anchors"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("Generate proposed monthly path"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("Meaningful customer touches"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("Compensation not yet configured"));
+assert.ok(read("src/ui/PlanExperience.tsx").includes("Production unavailable — identity review required"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("plan-preview-modal"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("Show estimated commission to salesperson"));
+assert.ok(read("src/ui/PlanAdmin.tsx").includes("book-intelligence"));
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("json-area"), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("JSON.stringify"), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("JSON.parse"), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("Plan / rule reference"), false);
+assert.equal(read("src/ui/PlanAdmin.tsx").includes("insight-modal"), false);
+assert.ok(read("src/ui/PlanExperience.tsx").includes("Your north star"));
+assert.ok(read("src/ui/PlanExperience.tsx").includes("Completed Installation SF"));
+assert.ok(read("src/ui/styles.css").includes("plan-preview-modal"));
+assert.ok(read("src/ui/styles.css").includes("max-width: 1120px"));
+assert.ok(read("src/ui/styles.css").includes(".plan-experience { width: min(100%, 960px)"));
+assert.ok(!read("src/ui/styles.css").includes(".plan-preview-modal { position: relative; width: min(1040px, 100%);"));
+assert.ok(read("src/ui/SalesOpsApp.tsx").includes("/api/sales-ops/me/plan/book-intelligence"));
+assert.equal(read("src/ui/SalesOpsApp.tsx").includes("reload().then"), false);
 assert.ok(!/Thera/.test(app));
 assert.ok(!/Thera/.test(read("src/ui/PlanAdmin.tsx")));
+assert.ok(!/Thera/.test(read("src/ui/PlanExperience.tsx")));
 assert.ok(!/Thera/.test(read("src/ui/IdentityReview.tsx")));
 assert.ok(!read("src/ui/IdentityReview.tsx").includes("ListID"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("quickbooksLinked"));

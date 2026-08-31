@@ -26,6 +26,7 @@ const ACCOUNT_LIST_SELECT = [
   "status",
   "last_contact",
   "next_contact",
+  "next_strategic_milestone",
   "market",
   "branch",
   "source_state",

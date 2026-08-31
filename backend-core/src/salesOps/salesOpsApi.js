@@ -102,6 +102,16 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.get("/api/sales-ops/me/plan/book-intelligence", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getMyPlanBookIntelligence(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.get("/api/sales-ops/me/performance", ...guard, async (req, res) => {
     try {
       const data = await svc.getMyPerformance(actorUser(req), { period: req.query.period || null });
@@ -525,6 +535,16 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
   app.get("/api/sales-ops/admin/plans/:planId/preview", ...guard, async (req, res) => {
     try {
       const data = await svc.previewAdminPlan(actorUser(req), req.params.planId);
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/admin/plans/:planId/book-intelligence", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getAdminBookIntelligence(actorUser(req), req.params.planId);
       jsonNoStore(res);
       res.json({ ok: true, ...data });
     } catch (e) {
