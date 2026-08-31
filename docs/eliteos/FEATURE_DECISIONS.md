@@ -4712,4 +4712,26 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Publishing a real salesperson plan, using these thresholds as compensation policy, QuickBooks financial classification, Monday/Moraware/QuickBooks writes. |
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, this doc, SYSTEM_BLUEPRINT. |
 
+### 349. Sales Ops identity-gated completed-install attribution (2026-08-31)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-31 |
+| **Decision** | After a human-approved Monday → Account Directory link exists, Brain may plan `COMPLETED_INSTALLATION_SF` facts from `moraware_prepared_completed_install_form_facts` joined on Account Directory Moraware external IDs. Unresolved identities and unmatched form facts are skipped, never credited as zero. Moraware salesperson fields never establish ownership. Existing credited facts are not updated when Monday assignment changes. Live `sales_ops_sf_attribution_facts` writes and Performance Actual SF remain gated on baseline reconciliation for the validation salesperson book. Identity Review stays human-approved; exact 1:1 names are not auto-linked. |
+| **Review UX** | Identity Review defaults to High confidence / exact 1:1. Salesperson and Moraware-linked filters use human names. Bulk preview shows Monday account, current owner, Account Directory candidate, exact-name evidence, Moraware yes/no, QuickBooks yes/no, and conflict status. Weak aliases, conflicts, multiple candidates, and no-candidate rows stay excluded from bulk. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_attribution_lineage_v3_1.sql` (`source_lineage`, `ownership_evidence`, `attribution_effective_start`, `attribution_effective_end`). Do not rewrite v3/v4/v5. |
+| **Out of scope** | Auto-approving identity, publishing a salesperson plan, Monday/Moraware/QuickBooks writes, using current owner to rewrite historical facts, activating Actual SF before baseline reconciliation. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v3.1 SQL, this doc, SYSTEM_BLUEPRINT. |
+
+### 349. Sales Ops identity-gated completed-install attribution (2026-08-31)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-31 |
+| **Decision** | After a human-approved Monday → Account Directory link exists, Brain may plan `COMPLETED_INSTALLATION_SF` facts from `moraware_prepared_completed_install_form_facts` joined on Account Directory Moraware external IDs. Unresolved identities and unmatched form facts are skipped, never credited as zero. Moraware salesperson fields never establish ownership. Existing credited facts are not updated when Monday assignment changes. Live `sales_ops_sf_attribution_facts` writes and Performance Actual SF remain gated on baseline reconciliation for the validation salesperson book. Identity Review stays human-approved; exact 1:1 names are not auto-linked. |
+| **Review UX** | Identity Review defaults to High confidence / exact 1:1. Salesperson and Moraware-linked filters use human names. Bulk preview shows Monday account, current owner, Account Directory candidate, exact-name evidence, Moraware yes/no, QuickBooks yes/no, and conflict status. Weak aliases, conflicts, multiple candidates, and no-candidate rows stay excluded from bulk. |
+| **Schema** | Additive `backend-core/supabase/eliteos_sales_ops_attribution_lineage_v3_1.sql` (`source_lineage`, `ownership_evidence`, `attribution_effective_start`, `attribution_effective_end`). Do not rewrite v3/v4/v5. |
+| **Out of scope** | Auto-approving identity, publishing a salesperson plan, Monday/Moraware/QuickBooks writes, using current owner to rewrite historical facts, activating Actual SF before baseline reconciliation. |
+| **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v3.1 SQL, this doc, SYSTEM_BLUEPRINT. |
+
 

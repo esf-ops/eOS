@@ -4,7 +4,7 @@ import { salespersonDisplayName, UNKNOWN_SALESPERSON_LABEL } from "../lib/salesp
 
 type Access = { isOrgAdmin?: boolean };
 
-type Person = { userId: string; salespersonLabel?: string | null };
+type Person = { userId: string; salespersonLabel?: string | null; displayName?: string | null };
 
 type Candidate = {
   accountDirectoryAccountId: string;
@@ -55,8 +55,10 @@ type PreviewItem = {
   branch?: string | null;
   market?: string | null;
   ownershipLabel?: string | null;
+  currentOwner?: string | null;
   evidence?: string[];
   conflictWarning?: string | null;
+  conflictStatus?: string | null;
   exclusionHint?: boolean;
 };
 
@@ -76,7 +78,7 @@ const STARTER_PACK = "starter_handoff_v1";
 const REVIEW_BUCKETS = [
   {
     id: "HIGH_CONFIDENCE",
-    title: "High confidence",
+    title: "High confidence / exact 1:1",
     hint: "Unique 1:1 exact display-name match. Human approval is still required."
   },
   {
@@ -140,10 +142,11 @@ function bucketFor(row: ReviewRow) {
 export default function IdentityReview({ token, access }: { token: string; access: Access }) {
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
-  const [bucket, setBucket] = useState<string>("open");
+  const [bucket, setBucket] = useState<string>("HIGH_CONFIDENCE");
   const [assignedUserId, setAssignedUserId] = useState<string>("");
   const [packKey, setPackKey] = useState<string>("");
-  const [bulkEligibleOnly, setBulkEligibleOnly] = useState(false);
+  const [bulkEligibleOnly, setBulkEligibleOnly] = useState(true);
+  const [morawareLinkedOnly, setMorawareLinkedOnly] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +164,8 @@ export default function IdentityReview({ token, access }: { token: string; acces
         bucket: bucket === "open" ? "" : bucket,
         assignedUserId,
         packKey,
-        bulkEligible: bulkEligibleOnly ? "1" : ""
+        bulkEligible: bulkEligibleOnly ? "1" : "",
+        morawareLinked: morawareLinkedOnly ? "1" : ""
       })}`,
       token
     )) as { reviews?: ReviewRow[] };
@@ -169,7 +173,7 @@ export default function IdentityReview({ token, access }: { token: string; acces
     setReviews(bucket === "open" ? rows.filter((row) => bucketFor(row) !== "LINKED") : rows);
     setSelected({});
     setPreview(null);
-  }, [token, bucket, assignedUserId, packKey, bulkEligibleOnly]);
+  }, [token, bucket, assignedUserId, packKey, bulkEligibleOnly, morawareLinkedOnly]);
 
   useEffect(() => {
     if (!access.isOrgAdmin) return;
@@ -218,9 +222,10 @@ export default function IdentityReview({ token, access }: { token: string; acces
       <p className="kicker">Account identity review</p>
       <h2>Match Monday accounts to Account Directory names. Permanent links still need a person.</h2>
       <p className="workspace-muted">
-        High-confidence exact names are still a preview-and-approve step — they are not automatic. Weak aliases never
-        enter bulk approval. Unmatched Monday items do not create directory accounts. Commission exclusions stay
-        non-commissionable even after identity is linked.
+        Filter by salesperson and High confidence / exact 1:1 first. Names are shown, not internal IDs. High-confidence
+        exact names still need preview-and-approve — they are not automatic. Weak aliases, conflicts, multiple
+        candidates, and no-candidate rows never enter bulk approval. Unmatched Monday items do not create directory
+        accounts.
       </p>
       {error && <div className="field-error">{error}</div>}
       <div className="plan-admin-actions identity-review-filters">
@@ -241,10 +246,11 @@ export default function IdentityReview({ token, access }: { token: string; acces
           Rebuild review queue
         </button>
         <label>
-          Review bucket
+          Match quality
           <select value={bucket} onChange={(e) => setBucket(e.target.value)}>
+            <option value="HIGH_CONFIDENCE">High confidence / exact 1:1</option>
             <option value="open">Needs review (all open buckets)</option>
-            {REVIEW_BUCKETS.map((b) => (
+            {REVIEW_BUCKETS.filter((b) => b.id !== "HIGH_CONFIDENCE").map((b) => (
               <option key={b.id} value={b.id}>
                 {b.title}
               </option>
@@ -260,7 +266,7 @@ export default function IdentityReview({ token, access }: { token: string; acces
             <option value="unmapped">Monday owner not mapped to eliteOS</option>
             {people.map((p) => (
               <option key={p.userId} value={p.userId}>
-                {salespersonDisplayName(p.salespersonLabel)}
+                {salespersonDisplayName(p.salespersonLabel, p.displayName)}
               </option>
             ))}
           </select>
@@ -275,6 +281,10 @@ export default function IdentityReview({ token, access }: { token: string; acces
         <label className="checkbox-row">
           <input type="checkbox" checked={bulkEligibleOnly} onChange={(e) => setBulkEligibleOnly(e.target.checked)} />
           Exact-name 1:1 only
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={morawareLinkedOnly} onChange={(e) => setMorawareLinkedOnly(e.target.checked)} />
+          Moraware linked
         </label>
         <label>
           Approval note
@@ -366,28 +376,36 @@ export default function IdentityReview({ token, access }: { token: string; acces
           <div className="month-goal-table">
             <div className="month-goal-head identity-preview-head" role="row">
               <span>Monday account</span>
+              <span>Current owner</span>
               <span>Account Directory</span>
-              <span>Existing evidence</span>
-              <span>Warning</span>
+              <span>Exact-name evidence</span>
+              <span>Moraware</span>
+              <span>QuickBooks</span>
+              <span>Conflict status</span>
             </div>
             {preview.items.map((item) => (
               <div key={item.reviewId} className="month-goal-row identity-preview-row" role="row">
                 <div>
                   <strong>{item.mondayAccountName}</strong>
-                  <small>{item.ownershipLabel || "Owner not shown"}</small>
                   <small>{[item.branch, item.market].filter(Boolean).join(" · ") || "No market/location"}</small>
+                </div>
+                <div>
+                  <strong>{item.currentOwner || item.ownershipLabel || "Owner not shown"}</strong>
                 </div>
                 <div>
                   <strong>{proposedName(item.proposedDisplayName)}</strong>
                 </div>
                 <div>
                   <small>Exact unique name</small>
-                  <small>Moraware {linkedLabel(Boolean(item.morawareLinked || item.morawareIdCount))}</small>
-                  <small>QuickBooks {linkedLabel(item.quickbooksLinked)}</small>
-                  <small>Legacy account {linkedLabel(Boolean(item.masterListLinked))}</small>
                 </div>
                 <div>
-                  {item.conflictWarning && <small>{item.conflictWarning}</small>}
+                  <small>{linkedLabel(Boolean(item.morawareLinked || item.morawareIdCount))}</small>
+                </div>
+                <div>
+                  <small>{linkedLabel(item.quickbooksLinked)}</small>
+                </div>
+                <div>
+                  <small>{item.conflictStatus || (item.conflictWarning ? item.conflictWarning : "None")}</small>
                   {item.exclusionHint && <small>Non-commissionable flag — identity is still separate.</small>}
                 </div>
               </div>

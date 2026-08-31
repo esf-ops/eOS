@@ -359,6 +359,20 @@ export function matchMethodFromReview(row) {
   return (evidence[0] || "human_review");
 }
 
+export function compareCompletedSfBaseline(actual, expected = COMPLETED_SF_BASELINE_ACCEPTANCE) {
+  const keys = ["may", "june", "july", "total", "average"];
+  const difference = {};
+  let reconciled = true;
+  for (const key of keys) {
+    const got = Number(actual?.[key] ?? 0);
+    const want = Number(expected?.[key] ?? 0);
+    const delta = Math.round((got - want) * 10) / 10;
+    difference[key] = delta;
+    if (delta !== 0) reconciled = false;
+  }
+  return { expected: { ...expected }, actual: { ...actual }, difference, reconciled };
+}
+
 export function baselineMonthTotals(facts) {
   const byMonth = new Map();
   for (const fact of facts || []) {

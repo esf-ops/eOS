@@ -1024,6 +1024,10 @@ export function createSalesOpsMemoryStore() {
         sourceObservedAt: row.sourceObservedAt ?? nowIso(),
         reversalOfId: row.reversalOfId ?? null,
         status: row.status || "credited",
+        sourceLineage: row.sourceLineage || {},
+        ownershipEvidence: row.ownershipEvidence || {},
+        attributionEffectiveStart: row.attributionEffectiveStart || row.qualifyingDate || null,
+        attributionEffectiveEnd: row.attributionEffectiveEnd ?? null,
         createdAt: nowIso()
       };
       attributionFacts.set(rec.id, rec);

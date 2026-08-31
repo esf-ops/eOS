@@ -449,6 +449,11 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       if (packKey) dtos = dtos.filter((row) => (row.packKeys || []).includes(packKey));
       if (bucket) dtos = dtos.filter((row) => row.reviewBucket === bucket);
       if (bulkEligibleOnly) dtos = dtos.filter((row) => row.bulkEligible);
+      const morawareLinkedOnly =
+        filters.morawareLinked === true || filters.morawareLinked === "1" || filters.morawareLinked === "true";
+      if (morawareLinkedOnly) {
+        dtos = dtos.filter((row) => (row.candidates || []).some((c) => (c.morawareIds || []).length > 0));
+      }
       return dtos;
     },
 
@@ -595,7 +600,8 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const people = mappings.map((m) => ({
         userId: m.userId,
         mondayUserId: m.mondayUserId,
-        salespersonLabel: labelByUser.get(String(m.userId)) || UNKNOWN_SALESPERSON_LABEL
+        salespersonLabel: labelByUser.get(String(m.userId)) || UNKNOWN_SALESPERSON_LABEL,
+        displayName: staffByUser.get(String(m.userId)) || labelByUser.get(String(m.userId)) || UNKNOWN_SALESPERSON_LABEL
       }));
       const staff = [...staffByUser.keys()].map((userId) => ({
         userId,

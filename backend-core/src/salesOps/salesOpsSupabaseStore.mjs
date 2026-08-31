@@ -2054,7 +2054,11 @@ export function createSalesOpsSupabaseStore(getSupabase) {
           commission_eligible: row.commissionEligible == null ? null : Boolean(row.commissionEligible),
           source_observed_at: row.sourceObservedAt ?? null,
           reversal_of_id: row.reversalOfId ?? null,
-          status: row.status || "credited"
+          status: row.status || "credited",
+          source_lineage: row.sourceLineage || {},
+          ownership_evidence: row.ownershipEvidence || {},
+          attribution_effective_start: row.attributionEffectiveStart || row.qualifyingDate || null,
+          attribution_effective_end: row.attributionEffectiveEnd ?? null
         })
         .select("*")
         .single();
@@ -2366,6 +2370,10 @@ function mapAttributionFact(row) {
     sourceObservedAt: row.source_observed_at ?? null,
     reversalOfId: row.reversal_of_id ?? null,
     status: row.status || "credited",
+    sourceLineage: row.source_lineage || {},
+    ownershipEvidence: row.ownership_evidence || {},
+    attributionEffectiveStart: row.attribution_effective_start ?? row.qualifying_date ?? null,
+    attributionEffectiveEnd: row.attribution_effective_end ?? null,
     createdAt: row.created_at
   };
 }

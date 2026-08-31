@@ -375,7 +375,8 @@ async function main() {
   assert.ok(people.people.some((p) => p.userId === STAFF_ONLY && p.salespersonLabel === "Mapped Staff Sentinel"));
   assert.ok(people.people.every((p) => p.salespersonLabel && p.salespersonLabel !== p.userId));
   assert.ok(!people.people.some((p) => /[0-9a-f]{8}-[0-9a-f]{4}-/.test(p.salespersonLabel)));
-  assert.ok(people.staff.some((p) => p.userId === STAFF_ONLY && p.displayName === "Mapped Staff Sentinel"));
+  assert.ok(people.people.some((p) => p.userId === STAFF_ONLY && p.displayName === "Mapped Staff Sentinel"));
+  assert.ok(people.people.every((p) => p.displayName && p.displayName !== p.userId));
   const bySalesperson = await svc.listIdentityReviews(admin, { assignedUserId: CASEY });
   assert.ok(bySalesperson.length >= 1);
   assert.ok(bySalesperson.every((r) => r.assignedUserId === CASEY));
@@ -390,6 +391,9 @@ async function main() {
   assert.ok(bulkOnly.every((r) => r.bulkEligible));
   assert.ok(!bulkOnly.some((r) => r.mondayItemId === "epworth-1"));
   assert.ok(!bulkOnly.some((r) => r.mondayItemId === "alias-1"));
+  const mwLinked = await svc.listIdentityReviews(admin, { morawareLinked: "1" });
+  assert.ok(mwLinked.some((r) => r.mondayItemId === "exact-1"));
+  assert.ok(mwLinked.every((r) => (r.candidates || []).some((c) => (c.morawareIds || []).length > 0)));
 
   await assert.rejects(() => svc.previewBulkIdentityReviews(sales, [weakRow.id]), (e) => e.status === 404);
   const caseyRow = (await svc.listIdentityReviews(admin)).find((r) => r.mondayItemId === "casey-1");
@@ -406,6 +410,8 @@ async function main() {
   assert.ok(preview.skipped.some((s) => s.reason === "weak_alias_not_bulk_eligible"));
   assert.ok(preview.skipped.some((s) => s.reason === "not_exact_display_name"));
   assert.ok(preview.skipped.some((s) => s.reason === "no_candidate"));
+  assert.equal(preview.items[0].conflictStatus, "None");
+  assert.ok(String(preview.items[0].currentOwner).includes("Other Sentinel"));
   assert.equal(JSON.stringify(preview).includes("QB-ROOT"), false);
 
   const bulk = await svc.bulkIdentityReviews(admin, {

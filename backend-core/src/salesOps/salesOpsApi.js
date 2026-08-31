@@ -463,7 +463,8 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
         assignedUserId: req.query.assignedUserId || req.query.salesperson || null,
         packKey: req.query.packKey || null,
         bulkEligible: req.query.bulkEligible || null,
-        bucket: req.query.bucket || null
+        bucket: req.query.bucket || null,
+        morawareLinked: req.query.morawareLinked || null
       });
       jsonNoStore(res);
       res.json({ ok: true, reviews: rows });

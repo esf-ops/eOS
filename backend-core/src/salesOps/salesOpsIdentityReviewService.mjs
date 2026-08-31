@@ -251,9 +251,11 @@ export function previewBulkIdentityReviews(reviews, accountsById = new Map(), { 
       matchMethod: matchMethodFromReview(review),
       ownershipState,
       ownershipLabel: identityOwnershipLabel({ ownershipState, salespersonDisplayName }),
+      currentOwner: identityOwnershipLabel({ ownershipState, salespersonDisplayName }),
       salespersonDisplayName,
       exclusionHint: Boolean(review.exclusionHint),
-      conflictWarning: review.conflictReason || (review.exclusionHint ? "exclusion_hint_non_commissionable" : null)
+      conflictWarning: review.conflictReason || (review.exclusionHint ? "exclusion_hint_non_commissionable" : null),
+      conflictStatus: review.status === "CONFLICT" || review.conflictReason ? review.conflictReason || "Conflict" : "None"
     });
   }
   const named = [...salespersonNames];
