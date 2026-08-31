@@ -348,6 +348,20 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 .north-star-editor input { width: 140px; }
 .field-suffix { display: flex; align-items: center; gap: 8px; }
 .field-suffix small { color: #8a847e; }
+.account-intel-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.account-intel-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.account-intel-card { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line); background: #fff; }
+.account-intel-card h3 { margin: 4px 0 8px; font-size: 18px; }
+.account-intel-card p { margin: 0; font-size: 13px; color: #4e4a47; }
+.account-intel-card-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.account-intel-reasons { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: #625d57; }
+.account-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.badge { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid var(--line); font: 700 9px/1.2 var(--font-geist-mono), monospace; text-transform: uppercase; letter-spacing: .06em; }
+.badge-role { color: #1d4e3e; border-color: #c9ddd4; background: #f3f8f5; }
+.badge-health { color: #6b5344; border-color: #e2d3b3; background: #faf6ee; }
+.badge-NEEDS_ATTENTION, .badge-DATA_GAP { color: var(--red); border-color: #dab1ae; background: #fbf4f3; }
+.badge-WATCH { color: #8a5a12; border-color: #e2c48a; background: #fbf6ea; }
+.badge-HEALTHY { color: #1d4e3e; border-color: #c9ddd4; background: #f3f8f5; }
 .account-intel-table { display: grid; gap: 0; border: 1px solid var(--line); background: #fff; overflow-x: auto; }
 .account-intel-head, .account-intel-row { display: grid; grid-template-columns: 64px minmax(140px, 1.2fr) minmax(140px, 1fr) minmax(140px, 1fr) 80px minmax(140px, 1fr) minmax(180px, 1.4fr); gap: 8px; padding: 10px 12px; align-items: start; font-size: 12px; }
 .account-intel-head { font: 700 9px/1.2 var(--font-geist-mono), monospace; text-transform: uppercase; letter-spacing: .08em; color: #8a847e; border-bottom: 1px solid var(--line); }
@@ -397,7 +411,7 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 
 @media (max-width: 900px) {
   .plan-admin-layout, .plan-admin-filters { grid-template-columns: 1fr; }
-  .account-intel-head, .account-intel-row { grid-template-columns: 1fr; }
+  .account-intel-head, .account-intel-row, .account-intel-cards, .account-intel-filters { grid-template-columns: 1fr; }
   .plan-experience-split, .plan-kpi-cards, .plan-position-grid { grid-template-columns: 1fr; }
 }
 

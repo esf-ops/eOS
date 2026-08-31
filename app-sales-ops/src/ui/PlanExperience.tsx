@@ -34,15 +34,28 @@ export type BookAccount = {
   accountName: string;
   market?: string | null;
   branch?: string | null;
-  suggestedCategory: string;
-  appliedCategory: string;
+  suggestedRole?: string | null;
+  suggestedHealth?: string | null;
+  appliedRole?: string | null;
+  appliedHealth?: string | null;
+  overrideRole?: string | null;
+  overrideHealth?: string | null;
+  roleLabel?: string;
+  healthLabel?: string;
+  suggestedCategory?: string;
+  appliedCategory?: string;
   overrideCategory?: string | null;
-  categoryLabel: string;
-  reasonCode: string;
+  categoryLabel?: string;
+  reasonCodes?: string[];
+  reasons?: string[];
   reasonCopy: string;
   trailingCompletedSf: number | null;
   productionStatus: string;
   trend: string;
+  producingMonths?: number;
+  lookbackMonths?: number;
+  changePct?: number | null;
+  overdueDays?: number | null;
   lastContact?: string | null;
   nextContact?: string | null;
   nextStrategicMilestone?: string | null;
@@ -51,12 +64,15 @@ export type BookAccount = {
 
 export type BookIntelligence = {
   accounts: BookAccount[];
+  roleCounts?: Record<string, number>;
+  healthCounts?: Record<string, number>;
   counts?: Record<string, number>;
   identityGapCount?: number;
   canOpenIdentityReview?: boolean;
   compensation?: CompensationContext | null;
   financialEnrichmentStatus?: string;
-  thresholds?: { status?: string };
+  ruleset?: { version?: string; status?: string };
+  thresholds?: { status?: string; version?: string };
 };
 
 export type CompensationContext = {
@@ -94,11 +110,10 @@ const LONG_MONTHS = [
 
 const FOCUS_ORDER = [
   { key: "ANCHOR", title: "Anchor accounts", lead: "Accounts protecting the producing base." },
-  { key: "GROWTH_OPPORTUNITY", title: "Growth opportunities", lead: "Accounts with credible upside." },
-  { key: "NEEDS_ATTENTION", title: "Needs attention", lead: "Accounts requiring action." },
+  { key: "GROWTH_OPPORTUNITY", title: "Growth opportunities", lead: "Accounts with upside." },
   { key: "REACTIVATION", title: "Reactivation opportunities", lead: "Previously productive, currently dormant." },
   { key: "NEW_UNPROVEN", title: "New / unproven", lead: "Recently assigned relationships." },
-  { key: "IDENTITY_DATA_GAP", title: "Identity / data gap", lead: "Production cannot be shown until identity is approved." }
+  { key: "DATA_GAP", title: "Identity / data gap", lead: "Production cannot be shown until identity is approved." }
 ];
 
 export function asText(v: unknown) {
@@ -119,13 +134,18 @@ export function monthLongLabel(period: string) {
 }
 
 export function productionDisplay(account: BookAccount) {
-  if (account.productionStatus === "IDENTITY_APPROVAL_REQUIRED" || account.suggestedCategory === "IDENTITY_DATA_GAP") {
+  if (account.productionStatus === "IDENTITY_APPROVAL_REQUIRED" || account.suggestedHealth === "DATA_GAP" || account.appliedHealth === "DATA_GAP") {
     return "Production unavailable — identity review required";
   }
   if (account.trailingCompletedSf == null || account.productionStatus === "NO_PRODUCTION_EVIDENCE") {
     return "No production evidence";
   }
   return `${fmt.format(account.trailingCompletedSf)} SF trailing`;
+}
+
+export function accountFocusKey(account: BookAccount) {
+  if (account.appliedHealth === "DATA_GAP" || account.suggestedHealth === "DATA_GAP") return "DATA_GAP";
+  return account.appliedRole || "NEW_UNPROVEN";
 }
 
 function GoalPathChart({
@@ -299,7 +319,7 @@ export default function PlanExperience({
       <section>
         <p className="kicker">Focus accounts</p>
         {FOCUS_ORDER.map((group) => {
-          const items = focus.filter((a) => a.appliedCategory === group.key);
+          const items = focus.filter((a) => accountFocusKey(a) === group.key);
           if (!items.length) return null;
           return (
             <div className="plan-focus-group" key={group.key}>
@@ -309,9 +329,13 @@ export default function PlanExperience({
                 {items.map((account) => (
                   <li key={account.salesOpsAccountId}>
                     <strong>{account.accountName}</strong>
+                    <span className="account-badges">
+                      <span className={`badge badge-role badge-${account.appliedRole || "none"}`}>{account.roleLabel || "Role unavailable"}</span>
+                      <span className={`badge badge-health badge-${account.appliedHealth || "none"}`}>{account.healthLabel}</span>
+                    </span>
                     <span>{productionDisplay(account)}</span>
-                    <small>{account.reasonCopy}</small>
-                    {account.suggestedCategory === "IDENTITY_DATA_GAP" && onIdentityReview ? (
+                    <small>{(account.reasons || [account.reasonCopy]).filter(Boolean).join(" · ")}</small>
+                    {account.appliedHealth === "DATA_GAP" && onIdentityReview ? (
                       <button type="button" className="text-link" onClick={onIdentityReview}>
                         Open Identity Review
                       </button>

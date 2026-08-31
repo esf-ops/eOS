@@ -59,14 +59,20 @@ const WORKING_MILESTONES = [
   { period: "2027-12", sf: 2500 }
 ];
 
-const CATEGORY_OPTIONS = [
-  { value: "", label: "Use suggested" },
+const ROLE_OPTIONS = [
+  { value: "", label: "Use suggested role" },
   { value: "ANCHOR", label: "Anchor" },
   { value: "GROWTH_OPPORTUNITY", label: "Growth opportunity" },
-  { value: "NEEDS_ATTENTION", label: "Needs attention" },
   { value: "REACTIVATION", label: "Reactivation" },
-  { value: "NEW_UNPROVEN", label: "New / unproven" },
-  { value: "IDENTITY_DATA_GAP", label: "Identity / data gap" }
+  { value: "NEW_UNPROVEN", label: "New / unproven" }
+];
+
+const HEALTH_OPTIONS = [
+  { value: "", label: "Use suggested health" },
+  { value: "HEALTHY", label: "Healthy" },
+  { value: "WATCH", label: "Watch" },
+  { value: "NEEDS_ATTENTION", label: "Needs attention" },
+  { value: "DATA_GAP", label: "Data gap" }
 ];
 
 const DEFAULT_RHYTHMS = {
@@ -191,7 +197,10 @@ export default function PlanAdmin({
   const [kpiValues, setKpiValues] = useState<Record<string, string>>({});
   const [extraMetrics, setExtraMetrics] = useState<MetricTarget[]>([]);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
-  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, string>>({});
+  const [roleOverrides, setRoleOverrides] = useState<Record<string, string>>({});
+  const [healthOverrides, setHealthOverrides] = useState<Record<string, string>>({});
+  const [filterRole, setFilterRole] = useState("");
+  const [filterHealth, setFilterHealth] = useState("");
 
   const loadList = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -220,11 +229,14 @@ export default function PlanAdmin({
       const data = (await apiGet(`/api/sales-ops/admin/plans/${planId}/book-intelligence`, token)) as BookIntelligence;
       setBook(data);
       setSelectedAccountIds((data.accounts || []).filter((a) => a.selected).map((a) => a.salesOpsAccountId));
-      const overrides: Record<string, string> = {};
+      const nextRole: Record<string, string> = {};
+      const nextHealth: Record<string, string> = {};
       for (const row of data.accounts || []) {
-        if (row.overrideCategory) overrides[row.salesOpsAccountId] = row.overrideCategory;
+        if (row.overrideRole) nextRole[row.salesOpsAccountId] = row.overrideRole;
+        if (row.overrideHealth) nextHealth[row.salesOpsAccountId] = row.overrideHealth;
       }
-      setCategoryOverrides(overrides);
+      setRoleOverrides(nextRole);
+      setHealthOverrides(nextHealth);
     },
     [token]
   );
@@ -365,7 +377,8 @@ export default function PlanAdmin({
         accountExpectations: {
           planBook: {
             selectedAccountIds,
-            categoryOverrides
+            roleOverrides,
+            healthOverrides
           }
         },
         rhythms: { weekly: form.weekly, monthly: form.monthly, quarterly: form.quarterly },
@@ -399,7 +412,11 @@ export default function PlanAdmin({
     return [...set].sort();
   }, [plans]);
 
-  const accounts = book?.accounts || [];
+  const accounts = (book?.accounts || []).filter((account) => {
+    if (filterRole && account.appliedRole !== filterRole) return false;
+    if (filterHealth && account.appliedHealth !== filterHealth) return false;
+    return true;
+  });
 
   return (
     <div className="plan-admin">
@@ -710,75 +727,140 @@ export default function PlanAdmin({
               <section>
                 <p className="kicker">3. Account strategy</p>
                 <p className="workspace-muted">
-                  Classifications use Monday ownership, Account Directory identity, and Moraware completed-install facts. QuickBooks is not required. Overrides apply to this plan only and do not rewrite source evidence.
-                  {book?.thresholds?.status === "proposed_default" ? " Thresholds are proposed defaults, not locked compensation policy." : ""}
+                  Role is the strategic account type. Health is the current attention signal. They are independent. Plan priority is a plan-only selection and does not change source facts, commission eligibility, or classification evidence.
+                  {book?.ruleset?.version ? ` Ruleset ${book.ruleset.version}.` : ""}
                 </p>
-                <div className="account-intel-table">
-                  <div className="account-intel-head">
-                    <span>Priority</span>
-                    <span>Account</span>
-                    <span>Category</span>
-                    <span>Trailing SF</span>
-                    <span>Trend</span>
-                    <span>CRM / milestone</span>
-                    <span>Why</span>
-                  </div>
+                <div className="account-intel-filters">
+                  <label>
+                    Role
+                    <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
+                      <option value="">All roles</option>
+                      {ROLE_OPTIONS.filter((o) => o.value).map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                          {book?.roleCounts?.[opt.value] != null ? ` (${book.roleCounts[opt.value]})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Health
+                    <select value={filterHealth} onChange={(e) => setFilterHealth(e.target.value)}>
+                      <option value="">All health</option>
+                      {HEALTH_OPTIONS.filter((o) => o.value).map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                          {book?.healthCounts?.[opt.value] != null ? ` (${book.healthCounts[opt.value]})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="account-intel-cards">
                   {accounts.map((account: BookAccount) => (
-                    <div className="account-intel-row" key={account.salesOpsAccountId}>
-                      <label className="checkbox-row">
-                        <input
-                          type="checkbox"
-                          disabled={!editable}
-                          checked={selectedAccountIds.includes(account.salesOpsAccountId)}
-                          onChange={(e) => {
-                            setSelectedAccountIds((ids) =>
-                              e.target.checked ? [...ids, account.salesOpsAccountId] : ids.filter((id) => id !== account.salesOpsAccountId)
-                            );
-                          }}
-                        />
-                      </label>
-                      <strong>{account.accountName}</strong>
-                      <select
-                        disabled={!editable}
-                        value={categoryOverrides[account.salesOpsAccountId] || ""}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setCategoryOverrides((prev) => {
-                            const next = { ...prev };
-                            if (!value) delete next[account.salesOpsAccountId];
-                            else next[account.salesOpsAccountId] = value;
-                            return next;
-                          });
-                        }}
-                      >
-                        {CATEGORY_OPTIONS.map((opt) => (
-                          <option key={opt.value || "suggested"} value={opt.value}>
-                            {opt.value ? opt.label : `${account.categoryLabel} (suggested)`}
-                          </option>
+                    <article className="account-intel-card" key={account.salesOpsAccountId}>
+                      <div className="account-intel-card-top">
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            disabled={!editable}
+                            checked={selectedAccountIds.includes(account.salesOpsAccountId)}
+                            onChange={(e) => {
+                              setSelectedAccountIds((ids) =>
+                                e.target.checked ? [...ids, account.salesOpsAccountId] : ids.filter((id) => id !== account.salesOpsAccountId)
+                              );
+                            }}
+                          />
+                          Plan priority
+                        </label>
+                        <div className="account-badges">
+                          <span className={`badge badge-role badge-${account.appliedRole || "none"}`}>{account.roleLabel || "Role unavailable"}</span>
+                          <span className={`badge badge-health badge-${account.appliedHealth || "none"}`}>{account.healthLabel}</span>
+                        </div>
+                      </div>
+                      <h3>{account.accountName}</h3>
+                      <p>
+                        {account.lookbackMonths
+                          ? `${account.producingMonths || 0}/${account.lookbackMonths} producing months`
+                          : null}
+                      </p>
+                      <p>{productionDisplay(account)}</p>
+                      <p>
+                        {account.changePct == null
+                          ? "Trend unavailable"
+                          : `Trailing comparable SF: ${account.changePct > 0 ? "+" : ""}${account.changePct}%`}
+                      </p>
+                      <p>
+                        Last contact: {account.lastContact ? String(account.lastContact).slice(0, 10) : "—"}
+                      </p>
+                      <p>
+                        Next contact:{" "}
+                        {account.overdueDays != null
+                          ? `${account.overdueDays} days overdue`
+                          : account.nextContact
+                            ? String(account.nextContact).slice(0, 10)
+                            : "—"}
+                      </p>
+                      <p>Next strategic milestone: {account.nextStrategicMilestone || "—"}</p>
+                      <ul className="account-intel-reasons">
+                        {(account.reasons || [account.reasonCopy]).filter(Boolean).map((reason) => (
+                          <li key={reason}>{reason}</li>
                         ))}
-                      </select>
-                      <span>{productionDisplay(account)}</span>
-                      <span>{account.trend}</span>
-                      <span>
-                        {account.lastContact || account.nextContact
-                          ? `${account.lastContact ? `Last ${String(account.lastContact).slice(0, 10)}` : ""} ${account.nextContact ? `Next ${String(account.nextContact).slice(0, 10)}` : ""}`.trim()
-                          : "—"}
-                        {account.nextStrategicMilestone ? ` · ${account.nextStrategicMilestone}` : ""}
-                      </span>
-                      <span>
-                        {account.reasonCopy}
-                        {account.suggestedCategory === "IDENTITY_DATA_GAP" && access.isOrgAdmin && onOpenIdentityReview ? (
-                          <>
-                            {" "}
-                            <button type="button" className="text-link" onClick={onOpenIdentityReview}>
-                              Open Identity Review
-                            </button>
-                          </>
-                        ) : null}
-                      </span>
-                    </div>
+                      </ul>
+                      {editable && (
+                        <div className="field-grid two">
+                          <label>
+                            Plan role
+                            <select
+                              value={roleOverrides[account.salesOpsAccountId] || ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setRoleOverrides((prev) => {
+                                  const next = { ...prev };
+                                  if (!value) delete next[account.salesOpsAccountId];
+                                  else next[account.salesOpsAccountId] = value;
+                                  return next;
+                                });
+                              }}
+                            >
+                              {ROLE_OPTIONS.map((opt) => (
+                                <option key={opt.value || "suggested-role"} value={opt.value}>
+                                  {opt.value ? opt.label : `${account.roleLabel} (suggested)`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Plan health
+                            <select
+                              value={healthOverrides[account.salesOpsAccountId] || ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setHealthOverrides((prev) => {
+                                  const next = { ...prev };
+                                  if (!value) delete next[account.salesOpsAccountId];
+                                  else next[account.salesOpsAccountId] = value;
+                                  return next;
+                                });
+                              }}
+                            >
+                              {HEALTH_OPTIONS.map((opt) => (
+                                <option key={opt.value || "suggested-health"} value={opt.value}>
+                                  {opt.value ? opt.label : `${account.healthLabel} (suggested)`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      )}
+                      {account.appliedHealth === "DATA_GAP" && access.isOrgAdmin && onOpenIdentityReview ? (
+                        <button type="button" className="text-link" onClick={onOpenIdentityReview}>
+                          Open Identity Review
+                        </button>
+                      ) : null}
+                    </article>
                   ))}
-                  {accounts.length === 0 && <p>No currently assigned accounts were found for this salesperson.</p>}
+                  {accounts.length === 0 && <p>No currently assigned accounts match these filters.</p>}
                 </div>
               </section>
             )}

@@ -1,5 +1,6 @@
 /**
  * Deterministic Sales Ops account-book classification for plan authoring.
+ * Role (strategic) and health (attention) are independent dimensions.
  * Does not mutate source accounts, attribution facts, or identity.
  * QuickBooks is not required. Missing identity is a data gap, never zero.
  */
@@ -7,33 +8,34 @@
 import { addMonths, currentPeriod, enumerateMonths, periodFromDate } from "./salesOpsMonths.mjs";
 import { netCreditedSf } from "./salesOpsAttribution.mjs";
 
-export const ACCOUNT_INTELLIGENCE_CATEGORIES = Object.freeze([
-  "ANCHOR",
-  "GROWTH_OPPORTUNITY",
-  "NEEDS_ATTENTION",
-  "REACTIVATION",
-  "NEW_UNPROVEN",
-  "IDENTITY_DATA_GAP"
-]);
+export const ACCOUNT_INTELLIGENCE_VERSION = "sales_account_intelligence_v1";
+
+export const ACCOUNT_ROLES = Object.freeze(["ANCHOR", "GROWTH_OPPORTUNITY", "REACTIVATION", "NEW_UNPROVEN"]);
+export const ACCOUNT_HEALTHS = Object.freeze(["HEALTHY", "WATCH", "NEEDS_ATTENTION", "DATA_GAP"]);
 
 export const PRODUCTION_UNAVAILABLE_IDENTITY = "IDENTITY_APPROVAL_REQUIRED";
 export const PRODUCTION_NO_EVIDENCE = "NO_PRODUCTION_EVIDENCE";
 export const PRODUCTION_AVAILABLE = "AVAILABLE";
 
 /**
- * Proposed defaults for plan-authoring suggestions. Not compensation policy.
- * Not a locked business rule until an operator confirms them.
+ * Governed v1 account-intelligence ruleset.
+ * Not compensation policy. Thresholds live here — not in frontend code.
  */
-export const ACCOUNT_INTELLIGENCE_THRESHOLDS = Object.freeze({
-  status: "proposed_default",
+export const ACCOUNT_INTELLIGENCE_RULESET = Object.freeze({
+  version: ACCOUNT_INTELLIGENCE_VERSION,
+  status: "governed_v1",
   lookbackMonths: 6,
   anchorProducingMonths: 5,
-  trailingWindowDays: 90,
-  dormantDays: 120,
-  declinePct: 25,
+  comparisonWindowDays: 90,
   growthPct: 15,
-  note: "Suggested classification defaults for Plan Builder. Operators may change them; they do not rewrite source facts."
+  watchDeclinePct: 15,
+  attentionDeclinePct: 25,
+  reactivationDays: 120,
+  growthMinPriorSf: 100
 });
+
+/** @deprecated Use ACCOUNT_INTELLIGENCE_RULESET */
+export const ACCOUNT_INTELLIGENCE_THRESHOLDS = ACCOUNT_INTELLIGENCE_RULESET;
 
 export const WORKING_TARGET_HORIZON_END = "2027-12-31";
 export const WORKING_NORTH_STAR_SF = 2500;
@@ -98,6 +100,13 @@ function shiftDays(day, delta) {
   return d.toISOString().slice(0, 10);
 }
 
+function daysBetween(fromDay, toDay) {
+  const a = Date.parse(`${fromDay}T00:00:00.000Z`);
+  const b = Date.parse(`${toDay}T00:00:00.000Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.round((b - a) / 86400000);
+}
+
 function pctChange(current, prior) {
   if (current == null || prior == null) return null;
   if (prior === 0) return current > 0 ? 100 : current < 0 ? -100 : 0;
@@ -140,25 +149,61 @@ function producingMonthCount(byMonth, periods) {
   return periods.filter((p) => (byMonth.get(p) || 0) > 0).length;
 }
 
-export function categoryLabel(category) {
+function periodEndDate(period) {
+  const p = String(period || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(p)) return "";
+  const [y, m] = p.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${p}-${String(last).padStart(2, "0")}`;
+}
+
+function lastPositiveFactDay(facts) {
+  let last = "";
+  for (const fact of facts || []) {
+    const n = Number(fact.creditedSf);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (String(fact.status || "credited") === "reversed") continue;
+    const day = parseDay(fact.qualifyingDate) || periodEndDate(fact.performanceMonth);
+    if (day && day > last) last = day;
+  }
+  return last || null;
+}
+
+export function roleLabel(role) {
   const map = {
     ANCHOR: "Anchor",
     GROWTH_OPPORTUNITY: "Growth opportunity",
-    NEEDS_ATTENTION: "Needs attention",
     REACTIVATION: "Reactivation",
-    NEW_UNPROVEN: "New / unproven",
-    IDENTITY_DATA_GAP: "Identity / data gap"
+    NEW_UNPROVEN: "New / unproven"
   };
-  return map[category] || category;
+  return map[role] || null;
 }
 
-export function classifyAccountEvidence(account, facts, { asOf = new Date(), thresholds = ACCOUNT_INTELLIGENCE_THRESHOLDS } = {}) {
-  const cfg = { ...ACCOUNT_INTELLIGENCE_THRESHOLDS, ...(thresholds || {}) };
+export function healthLabel(health) {
+  const map = {
+    HEALTHY: "Healthy",
+    WATCH: "Watch",
+    NEEDS_ATTENTION: "Needs attention",
+    DATA_GAP: "Data gap"
+  };
+  return map[health] || health;
+}
+
+function resolveRuleset(thresholds) {
+  return { ...ACCOUNT_INTELLIGENCE_RULESET, ...(thresholds || {}) };
+}
+
+function dayWord(n) {
+  return Math.abs(n) === 1 ? "day" : "days";
+}
+
+export function classifyAccountEvidence(account, facts, { asOf = new Date(), thresholds = ACCOUNT_INTELLIGENCE_RULESET } = {}) {
+  const cfg = resolveRuleset(thresholds);
   const asOfDay = typeof asOf === "string" ? parseDay(asOf) || String(asOf).slice(0, 10) : asOf.toISOString().slice(0, 10);
   const asOfPeriod = currentPeriod(asOfDay);
   const lookback = monthsEndingAt(asOfPeriod, cfg.lookbackMonths);
-  const trailingStart = periodFromDate(shiftDays(asOfDay, -cfg.trailingWindowDays));
-  const priorStart = periodFromDate(shiftDays(asOfDay, -cfg.trailingWindowDays * 2));
+  const trailingStart = periodFromDate(shiftDays(asOfDay, -cfg.comparisonWindowDays));
+  const priorStart = periodFromDate(shiftDays(asOfDay, -(cfg.comparisonWindowDays * 2)));
   const trailingMonths = enumerateMonths(trailingStart, asOfPeriod);
   const priorMonths = enumerateMonths(priorStart, addMonths(trailingStart, -1));
   const byMonth = sfByMonth(facts);
@@ -166,20 +211,33 @@ export function classifyAccountEvidence(account, facts, { asOf = new Date(), thr
   const trailingSf = hasIdentity ? windowSf(byMonth, trailingMonths) : null;
   const priorSf = hasIdentity ? windowSf(byMonth, priorMonths) : null;
   const historicalSf = hasIdentity ? netCreditedSf(facts) : null;
-  const recentDormantMonths = monthsEndingAt(asOfPeriod, Math.max(1, Math.ceil(cfg.dormantDays / 30)));
-  const recentSf = hasIdentity ? windowSf(byMonth, recentDormantMonths) : null;
+  const lastProductionDay = hasIdentity ? lastPositiveFactDay(facts) : null;
+  const daysSinceProduction = lastProductionDay ? daysBetween(lastProductionDay, asOfDay) : null;
   const producing = producingMonthCount(byMonth, lookback);
   const change = pctChange(trailingSf, priorSf);
   const nextContact = parseDay(account?.nextContact);
   const lastContact = parseDay(account?.lastContact);
-  const overdue = Boolean(nextContact && nextContact < asOfDay);
-  const trend = change == null ? "unknown" : change <= -cfg.declinePct ? "down" : change >= cfg.growthPct ? "up" : "stable";
+  const milestone = String(account?.nextStrategicMilestone || "").trim();
+  const overdueDays = nextContact && nextContact < asOfDay ? daysBetween(nextContact, asOfDay) : null;
+  const staleDays = lastContact ? daysBetween(lastContact, asOfDay) : null;
+  const staleContact = staleDays != null && staleDays >= cfg.comparisonWindowDays;
+  const trend =
+    change == null ? "unknown" : change <= -cfg.watchDeclinePct ? "down" : change >= cfg.growthPct ? "up" : "stable";
+
+  const reasons = [];
+  const roleReasonCodes = [];
+  const healthReasonCodes = [];
 
   if (!hasIdentity) {
+    reasons.push("Production unavailable — identity review required");
     return {
-      suggestedCategory: "IDENTITY_DATA_GAP",
-      reasonCode: "identity_review_required",
-      reasonCopy: "Production unavailable — identity review required",
+      suggestedRole: null,
+      suggestedHealth: "DATA_GAP",
+      reasonCodes: ["identity_review_required"],
+      roleReasonCodes: [],
+      healthReasonCodes: ["identity_review_required"],
+      reasons,
+      reasonCopy: reasons.join(" · "),
       productionStatus: PRODUCTION_UNAVAILABLE_IDENTITY,
       trailingCompletedSf: null,
       historicalCompletedSf: null,
@@ -187,13 +245,80 @@ export function classifyAccountEvidence(account, facts, { asOf = new Date(), thr
       producingMonths: 0,
       lookbackMonths: lookback.length,
       changePct: null,
-      overdueContact: overdue,
+      overdueContact: Boolean(overdueDays),
+      overdueDays,
       lastContact: lastContact || account?.lastContact || null,
       nextContact: nextContact || account?.nextContact || null
     };
   }
 
-  const base = {
+  const dormant =
+    historicalSf != null && historicalSf > 0 && daysSinceProduction != null && daysSinceProduction >= cfg.reactivationDays;
+  let suggestedRole = "NEW_UNPROVEN";
+  if (dormant) {
+    suggestedRole = "REACTIVATION";
+    roleReasonCodes.push("dormant_historical_producer");
+    reasons.push(`No completed-install production in ${cfg.reactivationDays} days`);
+  } else if (producing >= cfg.anchorProducingMonths) {
+    suggestedRole = "ANCHOR";
+    roleReasonCodes.push("anchor_producing_base");
+    reasons.push(`Produced in ${producing} of last ${lookback.length} months`);
+  } else if (
+    trailingSf != null &&
+    priorSf != null &&
+    priorSf >= cfg.growthMinPriorSf &&
+    change != null &&
+    change >= cfg.growthPct
+  ) {
+    suggestedRole = "GROWTH_OPPORTUNITY";
+    roleReasonCodes.push("trailing_upside");
+    reasons.push(`Trailing ${cfg.comparisonWindowDays}-day SF up ${change}%`);
+  } else {
+    roleReasonCodes.push(historicalSf == null ? "insufficient_production_history" : "limited_recent_production");
+    reasons.push(
+      historicalSf == null
+        ? "Not enough completed-install history to determine a strategic role"
+        : "Some production history, but not yet an Anchor, Growth, or Reactivation pattern"
+    );
+  }
+
+  if (change != null && change <= -cfg.attentionDeclinePct) {
+    reasons.push(`Trailing ${cfg.comparisonWindowDays}-day SF down ${Math.abs(change)}%`);
+  } else if (change != null && change <= -cfg.watchDeclinePct) {
+    reasons.push(`Trailing ${cfg.comparisonWindowDays}-day SF down ${Math.abs(change)}%`);
+  }
+  if (overdueDays != null) reasons.push(`Next contact overdue ${overdueDays} ${dayWord(overdueDays)}`);
+  if (staleContact) reasons.push(`Last contact ${staleDays} ${dayWord(staleDays)} ago`);
+  if (!milestone) reasons.push("No next strategic milestone");
+
+  let suggestedHealth = "HEALTHY";
+  if (change != null && change <= -cfg.attentionDeclinePct) {
+    suggestedHealth = "NEEDS_ATTENTION";
+    healthReasonCodes.push("trailing_decline");
+  } else if (dormant) {
+    suggestedHealth = "NEEDS_ATTENTION";
+    healthReasonCodes.push("dormant_historical_producer");
+  } else {
+    const watch = [];
+    if (change != null && change <= -cfg.watchDeclinePct) watch.push("watch_decline");
+    if (overdueDays != null) watch.push("contact_overdue");
+    if (staleContact) watch.push("stale_contact");
+    if (watch.length) {
+      suggestedHealth = "WATCH";
+      healthReasonCodes.push(...watch);
+    } else {
+      healthReasonCodes.push("no_attention_signal");
+    }
+  }
+
+  return {
+    suggestedRole,
+    suggestedHealth,
+    reasonCodes: [...roleReasonCodes, ...healthReasonCodes],
+    roleReasonCodes,
+    healthReasonCodes,
+    reasons,
+    reasonCopy: reasons.join(" · "),
     productionStatus: historicalSf == null && trailingSf == null ? PRODUCTION_NO_EVIDENCE : PRODUCTION_AVAILABLE,
     trailingCompletedSf: trailingSf,
     historicalCompletedSf: historicalSf,
@@ -201,79 +326,82 @@ export function classifyAccountEvidence(account, facts, { asOf = new Date(), thr
     producingMonths: producing,
     lookbackMonths: lookback.length,
     changePct: change,
-    overdueContact: overdue,
+    overdueContact: overdueDays != null,
+    overdueDays,
     lastContact: lastContact || account?.lastContact || null,
     nextContact: nextContact || account?.nextContact || null
   };
-
-  if (historicalSf != null && historicalSf > 0 && (recentSf == null || recentSf <= 0)) {
-    return {
-      ...base,
-      suggestedCategory: "REACTIVATION",
-      reasonCode: "dormant_historical_producer",
-      reasonCopy: `No completed-install SF in ${cfg.dormantDays} days · historical producing account`
-    };
-  }
-
-  if (overdue || (change != null && change <= -cfg.declinePct)) {
-    const parts = [];
-    if (change != null && change <= -cfg.declinePct) parts.push(`Trailing ${cfg.trailingWindowDays}-day SF down ${Math.abs(change)}%`);
-    if (overdue) parts.push("next contact overdue");
-    return {
-      ...base,
-      suggestedCategory: "NEEDS_ATTENTION",
-      reasonCode: overdue && change != null && change <= -cfg.declinePct ? "decline_and_overdue" : overdue ? "contact_overdue" : "trailing_decline",
-      reasonCopy: parts.join(" · ")
-    };
-  }
-
-  if (producing >= cfg.anchorProducingMonths && (change == null || change > -cfg.declinePct)) {
-    return {
-      ...base,
-      suggestedCategory: "ANCHOR",
-      reasonCode: "stable_producing_base",
-      reasonCopy: `Produced in ${producing} of last ${lookback.length} months · stable trailing SF`
-    };
-  }
-
-  if (trailingSf != null && trailingSf > 0 && change != null && change >= cfg.growthPct) {
-    return {
-      ...base,
-      suggestedCategory: "GROWTH_OPPORTUNITY",
-      reasonCode: "trailing_upside",
-      reasonCopy: `Trailing ${cfg.trailingWindowDays}-day SF up ${change}% · producing account with upside`
-    };
-  }
-
-  return {
-    ...base,
-    suggestedCategory: "NEW_UNPROVEN",
-    reasonCode: historicalSf == null ? "insufficient_production_history" : "limited_recent_production",
-    reasonCopy:
-      historicalSf == null
-        ? "Recently assigned or not enough completed-install history"
-        : "Some production history, but not yet a stable or declining pattern"
-  };
 }
 
-export function dtoBookAccount(account, classified, { overrideCategory = null, selected = false } = {}) {
-  const applied = ACCOUNT_INTELLIGENCE_CATEGORIES.includes(overrideCategory)
-    ? overrideCategory
-    : classified.suggestedCategory;
+export function migrateLegacyCategory(category) {
+  const value = String(category || "").trim();
+  if (ACCOUNT_ROLES.includes(value)) return { role: value, health: null };
+  if (value === "NEEDS_ATTENTION" || value === "WATCH" || value === "HEALTHY" || value === "DATA_GAP") {
+    return { role: null, health: value };
+  }
+  if (value === "IDENTITY_DATA_GAP") return { role: null, health: "DATA_GAP" };
+  return { role: null, health: null };
+}
+
+export function accountPriorityRank(row) {
+  const role = row?.appliedRole || null;
+  const health = row?.appliedHealth || null;
+  if (health === "DATA_GAP" || !role) return 70;
+  if (role === "ANCHOR" && health === "NEEDS_ATTENTION") return 10;
+  if (role === "ANCHOR" && health === "WATCH") return 15;
+  if (role === "GROWTH_OPPORTUNITY" && health === "NEEDS_ATTENTION") return 20;
+  if (role === "REACTIVATION") return 30;
+  if (role === "GROWTH_OPPORTUNITY") return 40;
+  if (role === "ANCHOR") return 50;
+  if (role === "NEW_UNPROVEN") return 60;
+  return 80;
+}
+
+export function sortBookAccounts(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const rank = accountPriorityRank(a) - accountPriorityRank(b);
+    if (rank !== 0) return rank;
+    return String(a.accountName || "").localeCompare(String(b.accountName || ""));
+  });
+}
+
+export function filterBookAccounts(rows, { role = "", health = "" } = {}) {
+  return (rows || []).filter((row) => {
+    if (role && row.appliedRole !== role) return false;
+    if (health && row.appliedHealth !== health) return false;
+    return true;
+  });
+}
+
+export function dtoBookAccount(account, classified, { overrideRole = null, overrideHealth = null, selected = false } = {}) {
+  const roleOk = ACCOUNT_ROLES.includes(overrideRole);
+  const healthOk = ACCOUNT_HEALTHS.includes(overrideHealth);
+  const appliedRole = roleOk ? overrideRole : classified.suggestedRole;
+  const appliedHealth = healthOk ? overrideHealth : classified.suggestedHealth;
   return {
     salesOpsAccountId: account.id,
     accountName: account.accountName,
     market: account.market || null,
     branch: account.branch || null,
-    suggestedCategory: classified.suggestedCategory,
-    appliedCategory: applied,
-    overrideCategory: ACCOUNT_INTELLIGENCE_CATEGORIES.includes(overrideCategory) ? overrideCategory : null,
-    categoryLabel: categoryLabel(applied),
-    reasonCode: classified.reasonCode,
+    suggestedRole: classified.suggestedRole,
+    suggestedHealth: classified.suggestedHealth,
+    appliedRole,
+    appliedHealth,
+    overrideRole: roleOk ? overrideRole : null,
+    overrideHealth: healthOk ? overrideHealth : null,
+    roleLabel: roleLabel(appliedRole) || "Role unavailable",
+    healthLabel: healthLabel(appliedHealth),
+    priorityRank: 0,
+    reasonCodes: classified.reasonCodes || [],
+    reasons: classified.reasons || [],
     reasonCopy: classified.reasonCopy,
     trailingCompletedSf: classified.trailingCompletedSf,
     productionStatus: classified.productionStatus,
     trend: classified.trend,
+    producingMonths: classified.producingMonths,
+    lookbackMonths: classified.lookbackMonths,
+    changePct: classified.changePct,
+    overdueDays: classified.overdueDays ?? null,
     lastContact: classified.lastContact,
     nextContact: classified.nextContact,
     nextStrategicMilestone: account.nextStrategicMilestone || null,
@@ -286,8 +414,8 @@ export function dtoBookAccount(account, classified, { overrideCategory = null, s
 }
 
 export function assembleBookIntelligence(accounts, facts, { asOf, thresholds, planBook = {}, salespersonUserId = null } = {}) {
-  const overrides = planBook.categoryOverrides && typeof planBook.categoryOverrides === "object" ? planBook.categoryOverrides : {};
-  const selectedIds = new Set((planBook.selectedAccountIds || []).map(String));
+  const parsed = readPlanBook({ planBook });
+  const selectedIds = new Set(parsed.selectedAccountIds);
   const rows = [];
   for (const account of accounts || []) {
     const ad = String(account.accountDirectoryAccountId || "").trim();
@@ -297,21 +425,32 @@ export function assembleBookIntelligence(accounts, facts, { asOf, thresholds, pl
       return String(f.accountDirectoryAccountId) === ad;
     });
     const classified = classifyAccountEvidence(account, scopedFacts, { asOf, thresholds });
-    rows.push(
-      dtoBookAccount(account, classified, {
-        overrideCategory: overrides[String(account.id)] || null,
-        selected: selectedIds.has(String(account.id))
-      })
-    );
+    const dto = dtoBookAccount(account, classified, {
+      overrideRole: parsed.roleOverrides[String(account.id)] || null,
+      overrideHealth: parsed.healthOverrides[String(account.id)] || null,
+      selected: selectedIds.has(String(account.id))
+    });
+    dto.priorityRank = accountPriorityRank(dto);
+    rows.push(dto);
   }
-  rows.sort((a, b) => String(a.accountName).localeCompare(String(b.accountName)));
-  const counts = Object.fromEntries(ACCOUNT_INTELLIGENCE_CATEGORIES.map((c) => [c, 0]));
-  for (const row of rows) counts[row.appliedCategory] = (counts[row.appliedCategory] || 0) + 1;
+  const sorted = sortBookAccounts(rows);
+  const roleCounts = Object.fromEntries(ACCOUNT_ROLES.map((c) => [c, 0]));
+  roleCounts.UNCLASSIFIED = 0;
+  const healthCounts = Object.fromEntries(ACCOUNT_HEALTHS.map((c) => [c, 0]));
+  for (const row of sorted) {
+    if (row.appliedRole) roleCounts[row.appliedRole] = (roleCounts[row.appliedRole] || 0) + 1;
+    else roleCounts.UNCLASSIFIED += 1;
+    healthCounts[row.appliedHealth] = (healthCounts[row.appliedHealth] || 0) + 1;
+  }
+  const ruleset = resolveRuleset(thresholds);
   return {
-    thresholds: { ...ACCOUNT_INTELLIGENCE_THRESHOLDS, ...(thresholds || {}) },
-    accounts: rows,
-    counts,
-    identityGapCount: rows.filter((r) => r.suggestedCategory === "IDENTITY_DATA_GAP").length,
+    ruleset,
+    thresholds: ruleset,
+    accounts: sorted,
+    roleCounts,
+    healthCounts,
+    counts: { ...roleCounts, ...healthCounts },
+    identityGapCount: sorted.filter((r) => r.suggestedHealth === "DATA_GAP").length,
     financialEnrichmentStatus: "UNAVAILABLE"
   };
 }
@@ -348,8 +487,18 @@ export function generatePlanCopy({ salespersonName, territoryName, northStarTarg
 export function readPlanBook(accountExpectations) {
   const raw = accountExpectations && typeof accountExpectations === "object" ? accountExpectations : {};
   const planBook = raw.planBook && typeof raw.planBook === "object" ? raw.planBook : raw;
+  const roleOverrides = planBook.roleOverrides && typeof planBook.roleOverrides === "object" ? { ...planBook.roleOverrides } : {};
+  const healthOverrides = planBook.healthOverrides && typeof planBook.healthOverrides === "object" ? { ...planBook.healthOverrides } : {};
+  const legacy = planBook.categoryOverrides && typeof planBook.categoryOverrides === "object" ? planBook.categoryOverrides : {};
+  for (const [id, category] of Object.entries(legacy)) {
+    const mapped = migrateLegacyCategory(category);
+    if (mapped.role && roleOverrides[id] == null) roleOverrides[id] = mapped.role;
+    if (mapped.health && healthOverrides[id] == null) healthOverrides[id] = mapped.health;
+  }
   return {
     selectedAccountIds: Array.isArray(planBook.selectedAccountIds) ? planBook.selectedAccountIds.map(String) : [],
-    categoryOverrides: planBook.categoryOverrides && typeof planBook.categoryOverrides === "object" ? planBook.categoryOverrides : {}
+    roleOverrides,
+    healthOverrides,
+    categoryOverrides: legacy
   };
 }
