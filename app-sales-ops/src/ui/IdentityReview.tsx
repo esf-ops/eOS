@@ -600,6 +600,9 @@ function IdentityReviewRow({
         {row.exclusionHint && (
           <small>Flagged non-commissionable in an evidence pack — identity is still separate.</small>
         )}
+        {(row.evidence || []).includes("possible_duplicate_of") && (
+          <small className="identity-unmapped-warning">{row.conflictReason || "Possible duplicate of an exact-named Monday account. Do not auto-link this Lead."}</small>
+        )}
       </div>
       <div className="identity-block">
         <span className="identity-block-label">Proposed Account Directory account</span>

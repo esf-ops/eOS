@@ -2132,7 +2132,7 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       try {
         const { data, error } = await db()
           .from("sales_ops_identity_review_hints")
-          .select("monday_name,suggested_directory_name,evidence_kind,strength,notes,pack_key")
+          .select("monday_name,suggested_directory_name,evidence_kind,strength,notes,pack_key,account_directory_account_id,historical_identity_status")
           .eq("organization_id", organizationId);
         if (error) throw error;
         return (data || []).map((row) => ({
@@ -2141,7 +2141,9 @@ export function createSalesOpsSupabaseStore(getSupabase) {
           evidenceKind: row.evidence_kind,
           strength: row.strength || "standard",
           notes: row.notes,
-          packKey: row.pack_key
+          packKey: row.pack_key,
+          accountDirectoryAccountId: row.account_directory_account_id || null,
+          historicalIdentityStatus: row.historical_identity_status || null
         }));
       } catch (error) {
         throwDb(error, "Could not list identity review hints.");

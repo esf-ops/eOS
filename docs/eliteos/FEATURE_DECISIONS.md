@@ -4745,3 +4745,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | A current-book exact-1:1 + Moraware preview mixed extra current accounts into the total and omitted starter-book `NO_CANDIDATE` production, which is why a 257 SF “gap” appeared against 1,577.5. |
 | **Out of scope** | Attribution writes, Monday/Moraware/QuickBooks writes, auto-approve, publishing a salesperson plan, changing commission policy or Moraware metric definition. |
 | **Impacted** | `backend-core/src/salesOps/salesOpsBaselineGap.mjs`, Sales Ops admin Baseline gap UI, this doc, SYSTEM_BLUEPRINT. |
+
+---
+
+### 351. Historical starter-alias → AD mapping is attribution identity, not Monday CRM merge (2026-09-01)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-01 |
+| **Decision** | A human-approved `starter_handoff_v1` alias may store `account_directory_account_id` on `sales_ops_identity_review_hints` (`historical_identity_status=approved`) so May–July stable-ID reconstruction can use that Account Directory UUID and its Moraware links **without** creating or approving a Monday CRM link. Thera's generic Monday Lead **Cabinet shop** is **POSSIBLE_DUPLICATE_OF** the exact-named Active Monday **Epworth Cabinet Shop** (Casey) and must not be auto-linked or merged. Identity Review still cannot approve an empty candidate list. Display-name typos on an existing AD row are corrected in place (former spelling kept as `former_display_name` alias); a second AD account is not created. Actual SF stays off until the stable-ID gate equals 574.5 / 669.0 / 334.0 / 1,577.5. |
+| **Why** | Historical commissionable identity for Epworth is the starter alias + Moraware 538 + canonical AD, which is not the same decision as which Monday CRM row currently owns the account. |
+| **Out of scope** | Creating AD accounts from Monday names, auto-approving Monday links, Builders Select identity change until Chris confirms the QuickBooks root finding, attribution fact writes, plan publish. |
+| **Impacted** | `eliteos_sales_ops_historical_identity_v6.sql`, identity review rebuild, Baseline gap, Account Directory rename/Moraware link for Ries Design, this doc. |

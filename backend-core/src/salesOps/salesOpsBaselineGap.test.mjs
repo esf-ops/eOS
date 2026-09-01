@@ -36,7 +36,8 @@ function review(salesOpsAccountId, status, extras = {}) {
     status,
     linkedAccountDirectoryAccountId: extras.ad || null,
     candidates: extras.candidates || [],
-    evidence: extras.evidence || []
+    evidence: extras.evidence || [],
+    conflictReason: extras.conflictReason || null
   };
 }
 
@@ -166,6 +167,39 @@ function fact({ mw, date, sqft, name = null, status = "MATCHED", creditable = tr
   assert.ok(report.reviewQueue.find((r) => r.accountName === "Cabinet shop")?.requiredAction.includes("Weak"));
   assert.equal(report.historicalAccounts.some((r) => r.accountName === "TW Homes"), false);
   assert.equal(JSON.stringify(report).includes(AD), false);
+}
+
+{
+  const mapped = reconcileCompletedSfBaselineGap({
+    assignedUserId: REP,
+    hints: [
+      {
+        packKey: STARTER_PACK_KEY,
+        mondayName: "Dyersville- Epworth Cabinet Shop",
+        suggestedDirectoryName: "Cabinet shop",
+        evidenceKind: "alias",
+        strength: "weak",
+        accountDirectoryAccountId: "ad-epworth"
+      }
+    ],
+    accounts: [account("a-cab", "Cabinet shop", REP)],
+    reviews: [
+      review("a-cab", "NO_CANDIDATE", {
+        evidence: ["possible_duplicate_of"],
+        conflictReason: "POSSIBLE_DUPLICATE_OF Epworth Cabinet Shop (Monday item exact-item)"
+      })
+    ],
+    morawareLinks: [{ accountId: "ad-epworth", externalId: "mw-cab" }],
+    formFacts: [fact({ mw: "mw-cab", date: "2026-06-10", sqft: 89, name: "Dyersville- Epworth Cabinet Shop" })],
+    morawareAccountNames: [{ externalId: "mw-cab", accountName: "Dyersville- Epworth Cabinet Shop" }],
+    labelByUser: new Map([[REP, "Rep Sentinel"]])
+  });
+  assert.equal(mapped.stableIdReconstruction.actual.total, 89);
+  assert.equal(mapped.stableIdReconstruction.actual.june, 89);
+  assert.equal(mapped.gapByCause.find((r) => r.letter === "A").totalSf, 89);
+  assert.equal(mapped.historicalAccounts[0].accountDirectoryCandidateStatus, "historical_alias_approved");
+  assert.ok(mapped.historicalAccounts[0].requiredAction.includes("POSSIBLE_DUPLICATE_OF"));
+  assert.equal(mapped.historicalAccounts[0].identityStatus, "NO_CANDIDATE");
 }
 
 {

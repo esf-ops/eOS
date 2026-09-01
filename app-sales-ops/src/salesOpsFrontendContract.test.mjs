@@ -74,7 +74,7 @@ assert.equal(read("src/ui/BaselineGap.tsx").includes("|| p.userId"), false);
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews/bulk-preview"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews/bulk"));
-assert.ok(read("src/ui/IdentityReview.tsx").includes("Approved starter book"));
+assert.ok(read("src/ui/IdentityReview.tsx").includes("possible_duplicate_of"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("Salesperson"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("assignedUserId"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("bulkEligible"));

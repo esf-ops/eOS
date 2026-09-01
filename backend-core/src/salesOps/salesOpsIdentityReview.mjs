@@ -17,6 +17,7 @@ export const IDENTITY_REVIEW_STATUSES = Object.freeze([
 export const AUTO_LINKABLE_EVIDENCE = Object.freeze(["existing_monday_external_link", "exact_source_id"]);
 export const BULK_EXACT_NAME_EVIDENCE = "exact_display_name";
 export const WEAK_ALIAS_EVIDENCE = "starter_package_weak_alias";
+export const POSSIBLE_DUPLICATE_EVIDENCE = "possible_duplicate_of";
 export const STARTER_PACK_KEY = "starter_handoff_v1";
 
 export function isExactSourceIdStatus(status) {
@@ -255,6 +256,46 @@ export function buildIdentityIndexes({ directoryAccounts = [], aliases = [], mor
 export function mondayMatchesForAccount(account, mondayByExternal) {
   const key = mondayExternalId(account.mondayBoardId, account.mondayItemId);
   return [...(mondayByExternal.get(key) || [])];
+}
+
+/**
+ * Flag a weak starter-alias Monday row when an exact-named Monday account
+ * already exists for the same canonical AD. Does not add an approvable candidate
+ * and does not change status to CONFLICT.
+ */
+export function stampPossibleDuplicateReviews({ accounts = [], persist = [], hints = [], directoryNameById = new Map() } = {}) {
+  const persistByAccount = new Map((persist || []).map((row) => [String(row.salesOpsAccountId), row]));
+  for (const hint of hints || []) {
+    if (hint.strength !== "weak" || hint.evidenceKind !== "alias") continue;
+    const adId = String(hint.accountDirectoryAccountId || "").trim();
+    if (!adId) continue;
+    const canonicalName = directoryNameById.get(adId) || hint.suggestedDirectoryName;
+    const canonicalKey = norm(canonicalName);
+    if (!canonicalKey) continue;
+    const exactMonday = (accounts || []).filter((a) => norm(a.accountName) === canonicalKey);
+    if (!exactMonday.length) continue;
+    const aliasKeys = new Set([norm(hint.mondayName), norm(hint.suggestedDirectoryName)].filter(Boolean));
+    for (const account of accounts || []) {
+      if (!aliasKeys.has(norm(account.accountName))) continue;
+      if (exactMonday.some((row) => row.id === account.id)) continue;
+      const row = persistByAccount.get(String(account.id));
+      if (!row) continue;
+      if (row.status === "CONFLICT") continue;
+      const other = exactMonday[0];
+      if (!row.evidence) row.evidence = [];
+      if (!row.evidence.includes(POSSIBLE_DUPLICATE_EVIDENCE)) row.evidence.push(POSSIBLE_DUPLICATE_EVIDENCE);
+      row.conflictReason =
+        row.conflictReason ||
+        `POSSIBLE_DUPLICATE_OF ${canonicalName} (Monday item ${other.mondayItemId}). Do not auto-link this Lead.`;
+      row.possibleDuplicateOf = {
+        accountDirectoryAccountId: adId,
+        mondayAccountName: other.accountName,
+        mondayItemId: other.mondayItemId,
+        assignedUserId: other.assignedUserId || null
+      };
+    }
+  }
+  return persist;
 }
 
 export function groupLinksByExternal(links) {

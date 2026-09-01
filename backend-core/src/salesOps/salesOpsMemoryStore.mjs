@@ -1079,7 +1079,9 @@ export function createSalesOpsMemoryStore() {
         suggestedDirectoryName: row.suggestedDirectoryName ?? null,
         evidenceKind: row.evidenceKind,
         strength: row.strength || "standard",
-        notes: row.notes ?? null
+        notes: row.notes ?? null,
+        accountDirectoryAccountId: row.accountDirectoryAccountId || null,
+        historicalIdentityStatus: row.historicalIdentityStatus || null
       };
       identityHints.set(rec.id, rec);
       return clone(rec);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { classifyIdentityCase, COMPLETED_SF_BASELINE_ACCEPTANCE, baselineMonthTotals, canAutoCommit, identityReviewBucket, isExactNameBulkEligible } from "./salesOpsIdentityReview.mjs";
+import { classifyIdentityCase, COMPLETED_SF_BASELINE_ACCEPTANCE, baselineMonthTotals, canAutoCommit, identityReviewBucket, isExactNameBulkEligible, stampPossibleDuplicateReviews } from "./salesOpsIdentityReview.mjs";
 import {
   identityOwnershipLabel,
   identityOwnershipState,
@@ -155,6 +155,48 @@ async function main() {
   assert.equal(canAutoCommit(weak), false);
   assert.equal(isExactNameBulkEligible(weak), false);
   assert.ok(weak.candidates[0].evidence.includes("starter_package_weak_alias"));
+
+  {
+    const persist = [
+      {
+        salesOpsAccountId: "lead",
+        status: "NO_CANDIDATE",
+        evidence: [],
+        conflictReason: null,
+        candidates: []
+      },
+      {
+        salesOpsAccountId: "exact",
+        status: "REVIEW_REQUIRED",
+        evidence: ["exact_display_name"],
+        conflictReason: null,
+        candidates: [{ accountDirectoryAccountId: AD_B }]
+      }
+    ];
+    stampPossibleDuplicateReviews({
+      accounts: [
+        { id: "lead", accountName: "Cabinet shop", mondayItemId: "lead-item", assignedUserId: REP },
+        { id: "exact", accountName: "Epworth Cabinet Shop", mondayItemId: "exact-item", assignedUserId: CASEY }
+      ],
+      persist,
+      hints: [
+        {
+          mondayName: "Dyersville- Epworth Cabinet Shop",
+          suggestedDirectoryName: "Cabinet shop",
+          evidenceKind: "alias",
+          strength: "weak",
+          accountDirectoryAccountId: AD_B
+        }
+      ],
+      directoryNameById: new Map([[AD_B, "Epworth Cabinet Shop"]])
+    });
+    assert.equal(persist[0].status, "NO_CANDIDATE");
+    assert.equal(persist[0].candidates.length, 0);
+    assert.ok(persist[0].evidence.includes("possible_duplicate_of"));
+    assert.ok(String(persist[0].conflictReason).startsWith("POSSIBLE_DUPLICATE_OF"));
+    assert.equal(persist[0].possibleDuplicateOf.mondayItemId, "exact-item");
+    assert.equal(persist[1].evidence.includes("possible_duplicate_of"), false);
+  }
 
   const store = createSalesOpsMemoryStore();
   const svc = createSalesOpsService({ store });

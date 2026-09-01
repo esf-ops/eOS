@@ -11,6 +11,7 @@ import {
   canAutoCommit,
   classifyIdentityCase,
   groupLinksByExternal,
+  stampPossibleDuplicateReviews,
   identityMatchQualityLabel,
   identityReviewBucket,
   isExactNameBulkEligible,
@@ -34,7 +35,9 @@ function mapHint(row) {
     suggestedDirectoryName: row.suggestedDirectoryName,
     evidenceKind: row.evidenceKind,
     strength: row.strength || "standard",
-    notes: row.notes || null
+    notes: row.notes || null,
+    accountDirectoryAccountId: row.accountDirectoryAccountId || null,
+    historicalIdentityStatus: row.historicalIdentityStatus || null
   };
 }
 
@@ -81,12 +84,18 @@ export async function rebuildIdentityReviews(store, { organizationId, actorUserI
       status: classified.status,
       autoLinkable: classified.autoLinkable,
       candidates: classified.candidates,
-      evidence: classified.evidence,
+      evidence: [...(classified.evidence || [])],
       conflictReason: classified.conflictReason,
       exclusionHint: classified.exclusionHint,
       linkedAccountDirectoryAccountId: classified.canonicalAccountDirectoryAccountId
     });
   }
+  stampPossibleDuplicateReviews({
+    accounts: salesOps,
+    persist,
+    hints: hints.map(mapHint),
+    directoryNameById: indexes.directoryNameById
+  });
   const saved = await store.replaceIdentityReviews(organizationId, persist);
   let autoLinked = 0;
   if (autoCommit) {

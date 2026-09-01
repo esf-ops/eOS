@@ -131,6 +131,10 @@ function candidateAd(review, account) {
   return null;
 }
 
+function attributionAd(review, account, hint) {
+  return candidateAd(review, account) || String(hint?.accountDirectoryAccountId || "").trim() || null;
+}
+
 function exactPending(review) {
   if (!review || isExactSourceIdStatus(review.status)) return false;
   if (review.status !== "REVIEW_REQUIRED") return false;
@@ -141,11 +145,19 @@ function exactPending(review) {
   return evidence.includes(BULK_EXACT_NAME_EVIDENCE);
 }
 
-function requiredAction(bucket, { weak = false, exclusion = false } = {}) {
+function requiredAction(bucket, { weak = false, exclusion = false, possibleDuplicate = false, historicalAliasApproved = false } = {}) {
   if (exclusion || bucket === "G") {
     return "Leave excluded. Starter-pack exclusions are not commissionable and are not part of the May–July baseline.";
   }
-  if (bucket === "A") return "No identity action. Do not write attribution until the acceptance gate passes for the full historical book.";
+  if (possibleDuplicate) {
+    return "POSSIBLE_DUPLICATE_OF the exact-named Monday account for this canonical AD. Historical alias→AD mapping is approved for attribution. Do not auto-link or merge this generic Monday Lead.";
+  }
+  if (bucket === "A") {
+    if (historicalAliasApproved) {
+      return "Historical alias→AD mapping is approved. Do not write attribution until the full-book stable-ID gate passes. Monday CRM link remains a separate human decision.";
+    }
+    return "No identity action. Do not write attribution until the acceptance gate passes for the full historical book.";
+  }
   if (bucket === "B") return "Human-approve the exact 1:1 Account Directory candidate in Identity Review. Do not auto-approve.";
   if (bucket === "C") {
     return "Human-approve the Account Directory candidate, then confirm an exact Moraware link exists before crediting.";
@@ -184,13 +196,15 @@ function classifyAccountBucket({
   hasUnresolvedFacts,
   weak,
   exclusion,
-  ambiguousMondayMatches
+  ambiguousMondayMatches,
+  historicalAliasApproved = false
 }) {
   if (exclusion) return "G";
   if (ambiguousMondayMatches) return "H";
   if (!currentlyOwned) return "E";
   if (hasUnresolvedFacts && !morawareIds.length) return "F";
   if (approvedAd && morawareIds.length) return "A";
+  if (historicalAliasApproved && morawareIds.length) return "A";
   if (exactPending(review) && morawareIds.length) return "B";
   if ((approvedAd || (review?.candidates || []).length === 1) && !morawareIds.length) return "C";
   if (!review || review.status === "NO_CANDIDATE" || (review.candidates || []).length === 0) return "D";
@@ -279,7 +293,7 @@ export function reconcileCompletedSfBaselineGap({
   const nameToHistorical = new Map();
   for (const row of historicalAccounts) {
     const review = reviewForAccount(reviewsByAccountId, row.account.id);
-    const ad = candidateAd(review, row.account);
+    const ad = attributionAd(review, row.account, row.hint);
     for (const ext of morawareIdsForAd(morawareByAccount, ad)) {
       if (!mwToHistorical.has(ext)) mwToHistorical.set(ext, []);
       mwToHistorical.get(ext).push(row);
@@ -342,18 +356,22 @@ export function reconcileCompletedSfBaselineGap({
     const account = rec.account;
     const review = reviewForAccount(reviewsByAccountId, account.id);
     const currentlyOwned = salespersonUserId ? String(account.assignedUserId || "") === salespersonUserId : false;
-    const approvedAd = String(account.accountDirectoryAccountId || review?.linkedAccountDirectoryAccountId || "").trim();
-    const candidate = candidateAd(review, account);
-    const morawareIds = morawareIdsForAd(morawareByAccount, candidate || approvedAd);
+    const mondayApprovedAd = String(account.accountDirectoryAccountId || review?.linkedAccountDirectoryAccountId || "").trim();
+    const attribution = attributionAd(review, account, rec.hint);
+    const morawareIds = morawareIdsForAd(morawareByAccount, attribution);
+    const historicalAliasApproved = Boolean(rec.hint.accountDirectoryAccountId) && !mondayApprovedAd;
+    const possibleDuplicate = (review?.evidence || []).includes("possible_duplicate_of")
+      || String(review?.conflictReason || "").startsWith("POSSIBLE_DUPLICATE");
     const bucket = classifyAccountBucket({
       currentlyOwned,
       review,
-      approvedAd,
+      approvedAd: mondayApprovedAd,
       morawareIds,
       hasUnresolvedFacts: rec.unresolvedFactSf > 0 && rec.stableMonths.total === 0,
       weak: isWeakHint(rec.hint),
       exclusion: false,
-      ambiguousMondayMatches: false
+      ambiguousMondayMatches: false,
+      historicalAliasApproved
     });
     addMonths(bucketGrid[bucket], "may", rec.months.may);
     addMonths(bucketGrid[bucket], "june", rec.months.june);
@@ -367,13 +385,15 @@ export function reconcileCompletedSfBaselineGap({
       assignedUserId: account.assignedUserId
     });
     const candidateStatus =
-      approvedAd || isExactSourceIdStatus(review?.status)
+      mondayApprovedAd || isExactSourceIdStatus(review?.status)
         ? "approved"
-        : exactPending(review)
-          ? "pending_exact"
-          : (review?.candidates || []).length
-            ? "candidate"
-            : "no_candidate";
+        : historicalAliasApproved
+          ? "historical_alias_approved"
+          : exactPending(review)
+            ? "pending_exact"
+            : (review?.candidates || []).length
+              ? "candidate"
+              : "no_candidate";
     const morawareStatus = morawareIds.length
       ? "linked"
       : rec.months.total > 0
@@ -400,12 +420,16 @@ export function reconcileCompletedSfBaselineGap({
       identityStatus: review?.status || "NO_CANDIDATE",
       bucket: BASELINE_BUCKETS[bucket],
       bucketLetter: bucket,
-      requiredAction: requiredAction(bucket, { weak: isWeakHint(rec.hint) }),
+      requiredAction: requiredAction(bucket, {
+        weak: isWeakHint(rec.hint),
+        possibleDuplicate,
+        historicalAliasApproved
+      }),
       starterHintStrength: rec.hint.strength || "standard"
     };
     if (showIds) {
       row.salesOpsAccountId = account.id;
-      row.accountDirectoryAccountId = approvedAd || candidate || null;
+      row.accountDirectoryAccountId = attribution || mondayApprovedAd || null;
       row.morawareIds = morawareIds;
     }
     historicalRows.push(row);
