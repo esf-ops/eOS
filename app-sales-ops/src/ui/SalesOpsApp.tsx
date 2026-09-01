@@ -7,6 +7,7 @@ import { salespersonDisplayName } from "../lib/salespersonLabel";
 import { getSupabase } from "../lib/supabase";
 import PlanAdmin from "./PlanAdmin";
 import IdentityReview from "./IdentityReview";
+import BaselineGap from "./BaselineGap";
 import PlanExperience, { type BookIntelligence, type PlanBundle as ExperienceBundle } from "./PlanExperience";
 import Account360Workspace, {
   type Account,
@@ -17,7 +18,7 @@ import Account360Workspace, {
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
-type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin" | "identity";
+type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin" | "identity" | "baseline";
 
 type Insight = {
   eyebrow: string;
@@ -622,7 +623,8 @@ export default function SalesOpsApp() {
     ["commission", "06", "Commission", true],
     ["team", "07", "Team Performance", Boolean((me?.access as { isManager?: boolean; isOrgAdmin?: boolean } | undefined)?.isManager || (me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
     ["admin", "08", "Plan Builder", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)],
-    ["identity", "09", "Identity Review", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)]
+    ["identity", "09", "Identity Review", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
+    ["baseline", "10", "Baseline gap", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)]
   ];
 
   return (
@@ -1195,6 +1197,13 @@ export default function SalesOpsApp() {
 
           {tab === "identity" && sessionToken && (
             <IdentityReview
+              token={sessionToken}
+              access={(me?.access as { isOrgAdmin?: boolean }) || {}}
+            />
+          )}
+
+          {tab === "baseline" && sessionToken && (
+            <BaselineGap
               token={sessionToken}
               access={(me?.access as { isOrgAdmin?: boolean }) || {}}
             />

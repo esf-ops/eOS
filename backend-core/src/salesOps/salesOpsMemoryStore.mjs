@@ -57,6 +57,8 @@ export function createSalesOpsMemoryStore() {
   const compensationProposals = new Map();
   const commissionableAccounts = new Map();
   const commissionReports = new Map();
+  const completedInstallFormFacts = [];
+  const morawareAccountNames = [];
   const metrics = {
     eavSelectChunks: 0,
     accountUpsertChunks: 0,
@@ -1094,6 +1096,35 @@ export function createSalesOpsMemoryStore() {
     },
     async listIdentityHints(organizationId) {
       return [...identityHints.values()].filter((r) => r.organizationId === organizationId).map(clone);
+    },
+    seedCompletedInstallFormFact(row) {
+      completedInstallFormFacts.push({ isActive: true, creditable: true, formIdentityStatus: "MATCHED", ...row });
+    },
+    seedMorawareAccountName(row) {
+      morawareAccountNames.push(row);
+    },
+    async listCompletedInstallFormFacts(organizationId, { from = null, toExclusive = null } = {}) {
+      return completedInstallFormFacts
+        .filter((r) => {
+          if (r.organizationId !== organizationId) return false;
+          if (r.isActive === false || r.supersededBy) return false;
+          const d = String(r.completedInstallDate || "").slice(0, 10);
+          if (from && d < from) return false;
+          if (toExclusive && d >= toExclusive) return false;
+          return true;
+        })
+        .map(clone);
+    },
+    async listMorawareAccountNames(organizationId, { reportRunId = null, accountNames = [] } = {}) {
+      const wanted = new Set((accountNames || []).map(String));
+      return morawareAccountNames
+        .filter((r) => {
+          if (r.organizationId !== organizationId) return false;
+          if (reportRunId && String(r.reportRunId) !== String(reportRunId)) return false;
+          if (wanted.size && !wanted.has(String(r.accountName))) return false;
+          return true;
+        })
+        .map((r) => ({ externalId: r.externalId, accountName: r.accountName }));
     },
     async replaceIdentityReviews(organizationId, rows) {
       for (const [id, rec] of identityReviews) {

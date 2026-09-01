@@ -19,6 +19,7 @@ const files = [
   "src/ui/PlanAdmin.tsx",
   "src/ui/PlanExperience.tsx",
   "src/ui/IdentityReview.tsx",
+  "src/ui/BaselineGap.tsx",
   "src/main.tsx",
   ".env.example"
 ];
@@ -65,6 +66,11 @@ assert.ok(app.includes("accounts=1"));
 assert.ok(app.includes("Plan Builder"));
 assert.ok(app.includes("Team Performance"));
 assert.ok(app.includes("Identity Review"));
+assert.ok(app.includes("Baseline gap"));
+assert.ok(read("src/ui/BaselineGap.tsx").includes("/api/sales-ops/admin/baseline-gap"));
+assert.ok(read("src/ui/BaselineGap.tsx").includes("salespersonDisplayName"));
+assert.ok(!/Thera/.test(read("src/ui/BaselineGap.tsx")));
+assert.equal(read("src/ui/BaselineGap.tsx").includes("|| p.userId"), false);
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews/bulk-preview"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews/bulk"));
@@ -136,6 +142,7 @@ assert.ok(!/Thera/.test(app));
 assert.ok(!/Thera/.test(read("src/ui/PlanAdmin.tsx")));
 assert.ok(!/Thera/.test(read("src/ui/PlanExperience.tsx")));
 assert.ok(!/Thera/.test(read("src/ui/IdentityReview.tsx")));
+assert.ok(!/Thera/.test(read("src/ui/BaselineGap.tsx")));
 assert.ok(!read("src/ui/IdentityReview.tsx").includes("ListID"));
 assert.ok(read("src/ui/IdentityReview.tsx").includes("quickbooksLinked"));
 

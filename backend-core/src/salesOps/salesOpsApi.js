@@ -473,6 +473,20 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.get("/api/sales-ops/admin/baseline-gap", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getBaselineGap(actorUser(req), {
+        assignedUserId: req.query.assignedUserId || req.query.salesperson || null,
+        packKey: req.query.packKey || null,
+        showIds: req.query.showIds || null
+      });
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.post("/api/sales-ops/admin/identity-reviews/bulk-preview", ...guard, jsonParser, async (req, res) => {
     try {
       const data = await svc.previewBulkIdentityReviews(actorUser(req), (req.body || {}).reviewIds || []);

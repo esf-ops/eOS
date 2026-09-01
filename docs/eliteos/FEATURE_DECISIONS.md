@@ -4735,3 +4735,13 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `backend-core/src/salesOps/`, `app-sales-ops/`, v3.1 SQL, this doc, SYSTEM_BLUEPRINT. |
 
 
+
+### 350. Sales Ops May–July baseline gap is starter-book identity, not current Monday owner (2026-09-01)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-01 |
+| **Decision** | The locked May–July 2026 completed-install acceptance totals (574.5 / 669.0 / 334.0 = 1,577.5) are the `starter_handoff_v1` **alias** account set name-matched to view 219 First Install form facts. They are **not** the currently assigned Monday book and **not** Moraware Job/Account Salesperson. Current Monday owner is CRM visibility only. Org-admin **Baseline gap** (`GET /api/sales-ops/admin/baseline-gap`) classifies each historical-book fact into buckets A–H, compares historical vs current books (counts and SF), and lists unresolved accounts by missing stable-ID SF. Identity is not auto-approved. `sales_ops_sf_attribution_facts` stays unwritten until the **stable-ID** reconstruction (approved Account Directory + Moraware external ID + MATCHED creditable facts) equals those totals (trivial rounding only). Name-matched reconstruction may already equal 1,577.5 while stable-ID remains short. |
+| **Why** | A current-book exact-1:1 + Moraware preview mixed extra current accounts into the total and omitted starter-book `NO_CANDIDATE` production, which is why a 257 SF “gap” appeared against 1,577.5. |
+| **Out of scope** | Attribution writes, Monday/Moraware/QuickBooks writes, auto-approve, publishing a salesperson plan, changing commission policy or Moraware metric definition. |
+| **Impacted** | `backend-core/src/salesOps/salesOpsBaselineGap.mjs`, Sales Ops admin Baseline gap UI, this doc, SYSTEM_BLUEPRINT. |

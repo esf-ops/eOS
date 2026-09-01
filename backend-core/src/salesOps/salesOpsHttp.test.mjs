@@ -230,6 +230,14 @@ async function main() {
   const listedBody = await listed.json();
   assert.ok(Array.isArray(listedBody.reviews));
   assert.equal(JSON.stringify(listedBody).includes("QB-ROOT"), false);
+  assert.equal((await fetch(`${base}/api/sales-ops/admin/baseline-gap`, authA)).status, 404);
+  const gap = await fetch(`${base}/api/sales-ops/admin/baseline-gap`, authAdmin);
+  assert.equal(gap.status, 200);
+  const gapBody = await gap.json();
+  assert.equal(gapBody.ok, true);
+  assert.equal(gapBody.attributionWrites, false);
+  assert.ok(["BASELINE_RECONCILIATION_READY", "BASELINE_RECONCILED", "HISTORICAL_OWNERSHIP_GAP_FOUND", "IDENTITY_APPROVAL_REQUIRED", "BASELINE_MISMATCH"].includes(gapBody.verdict));
+  assert.equal(gapBody.activationGate === "BASELINE_RECONCILED" || gapBody.activationGate === "BASELINE_MISMATCH", true);
   const bulkDenied = await fetch(`${base}/api/sales-ops/admin/identity-reviews/bulk-preview`, {
     method: "POST",
     headers: { Authorization: "Bearer a", "content-type": "application/json" },

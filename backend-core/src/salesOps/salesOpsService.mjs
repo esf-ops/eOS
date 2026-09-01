@@ -68,6 +68,14 @@ import {
   isCommissionReportLocked
 } from "./salesOpsCompensation.mjs";
 import { resolveSalespersonDisplayName, UNKNOWN_SALESPERSON_LABEL } from "./salesOpsSalespersonLabel.mjs";
+import { MORAWARE_EXTERNAL_SYSTEM } from "./salesOpsIdentityAudit.mjs";
+import {
+  BASELINE_GAP_PACK_KEY,
+  BASELINE_WINDOW,
+  hintAccountNames,
+  reconcileCompletedSfBaselineGap,
+  suggestAssignedUserId
+} from "./salesOpsBaselineGap.mjs";
 
 export { SalesOpsError };
 
@@ -455,6 +463,64 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         dtos = dtos.filter((row) => (row.candidates || []).some((c) => (c.morawareIds || []).length > 0));
       }
       return dtos;
+    },
+
+    async getBaselineGap(user, filters = {}) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      if (!isOrgAdminRole(actor.role)) throw NOT_FOUND();
+      const packKey = String(filters.packKey || BASELINE_GAP_PACK_KEY);
+      const showIds = filters.showIds === true || filters.showIds === "1" || filters.showIds === "true";
+      const [accounts, hints, reviews, morawareLinks, labels] = await Promise.all([
+        store.listAccountIdentityRows(actor.organizationId),
+        store.listIdentityHints(actor.organizationId),
+        store.listIdentityReviews(actor.organizationId),
+        store.listActiveExternalLinks(actor.organizationId, MORAWARE_EXTERNAL_SYSTEM),
+        salespersonDisplayContext(actor.organizationId)
+      ]);
+      let assignedUserId = String(filters.assignedUserId || "").trim();
+      if (!assignedUserId) assignedUserId = suggestAssignedUserId(accounts, hints, packKey) || "";
+      const formFacts =
+        typeof store.listCompletedInstallFormFacts === "function"
+          ? await store.listCompletedInstallFormFacts(actor.organizationId, {
+              from: BASELINE_WINDOW.from,
+              toExclusive: BASELINE_WINDOW.toExclusive
+            })
+          : [];
+      const morawareAccountNames = [];
+      if (typeof store.listMorawareAccountNames === "function") {
+        const names = hintAccountNames(hints, packKey);
+        const runIds = [...new Set(formFacts.map((f) => f.reportRunId).filter(Boolean))];
+        for (const reportRunId of runIds) {
+          morawareAccountNames.push(
+            ...(await store.listMorawareAccountNames(actor.organizationId, { reportRunId, accountNames: names }))
+          );
+        }
+      }
+      const report = reconcileCompletedSfBaselineGap({
+        assignedUserId,
+        packKey,
+        hints,
+        accounts,
+        reviews,
+        morawareLinks,
+        formFacts,
+        morawareAccountNames,
+        labelByUser: labels.labelByUser,
+        showIds
+      });
+      return {
+        ...report,
+        assignedUserId: assignedUserId || null,
+        salespersonLabel: assignedUserId
+          ? labels.labelByUser.get(assignedUserId) || UNKNOWN_SALESPERSON_LABEL
+          : null,
+        recommendedNextStep: report.identityApprovalRequired
+          ? "Resolve no-candidate and pending exact identities in Identity Review. Do not write attribution until the stable-ID reconstruction matches the May–July acceptance totals."
+          : report.activationGate === "BASELINE_MISMATCH"
+            ? "Stable-ID reconstruction still does not match the May–July acceptance totals. Do not write attribution facts."
+            : "Do not write attribution facts until an explicit Actual SF enablement task."
+      };
     },
 
     async previewBulkIdentityReviews(user, reviewIds = []) {

@@ -2148,6 +2148,81 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       }
     },
 
+    async listCompletedInstallFormFacts(organizationId, { from = null, toExclusive = null } = {}) {
+      try {
+        return await pageSelect(
+          () => {
+            let q = db()
+              .from("moraware_prepared_completed_install_form_facts")
+              .select(
+                "id,source_job_id,source_form_id,source_account_id,form_identity_status,completed_install_date,sqft,creditable,is_active,superseded_by,report_run_id,report_feed_id,observation_key"
+              )
+              .eq("organization_id", organizationId)
+              .eq("is_active", true)
+              .is("superseded_by", null)
+              .order("id", { ascending: true });
+            if (from) q = q.gte("completed_install_date", from);
+            if (toExclusive) q = q.lt("completed_install_date", toExclusive);
+            return q;
+          },
+          (row) => ({
+            id: row.id,
+            sourceJobId: row.source_job_id,
+            sourceFormId: row.source_form_id,
+            sourceAccountId: row.source_account_id,
+            formIdentityStatus: row.form_identity_status,
+            completedInstallDate: row.completed_install_date,
+            sqft: row.sqft == null ? null : Number(row.sqft),
+            creditable: row.creditable !== false,
+            isActive: row.is_active !== false,
+            supersededBy: row.superseded_by,
+            reportRunId: row.report_run_id,
+            reportFeedId: row.report_feed_id,
+            observationKey: row.observation_key
+          })
+        );
+      } catch (error) {
+        throwDb(error, "Could not list completed-install form facts.");
+      }
+    },
+
+    async listMorawareAccountNames(organizationId, { reportRunId = null, accountNames = [] } = {}) {
+      const names = [...new Set((accountNames || []).map((n) => String(n || "").trim()).filter(Boolean))];
+      if (!reportRunId || !names.length) return [];
+      const out = [];
+      const chunk = 80;
+      try {
+        for (let i = 0; i < names.length; i += chunk) {
+          const slice = names.slice(i, i + chunk);
+          const rows = await pageSelect(
+            () =>
+              db()
+                .from("moraware_report_raw_rows")
+                .select("account_id,account_name")
+                .eq("organization_id", organizationId)
+                .eq("report_run_id", reportRunId)
+                .in("account_name", slice)
+                .not("account_id", "is", null)
+                .order("account_id", { ascending: true }),
+            (row) => ({
+              externalId: row.account_id ? String(row.account_id) : null,
+              accountName: row.account_name || null
+            })
+          );
+          out.push(...rows);
+        }
+      } catch (error) {
+        throwDb(error, "Could not list Moraware account names for baseline reconciliation.");
+      }
+      const seen = new Set();
+      return out.filter((row) => {
+        const key = `${row.externalId}|${row.accountName}`;
+        if (!row.externalId || !row.accountName || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    },
+
     async replaceIdentityReviews(organizationId, rows) {
       const { error: delError } = await db()
         .from("sales_ops_account_identity_reviews")

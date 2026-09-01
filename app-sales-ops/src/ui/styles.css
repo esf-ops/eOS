@@ -404,6 +404,10 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 .identity-preview-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; list-style: none; padding: 0; margin: 0 0 14px; }
 .identity-preview-summary li { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line); }
 .identity-preview-summary span { color: #8a847e; font-size: 11px; }
+.baseline-book-head, .baseline-book-row { grid-template-columns: minmax(160px, 1.4fr) repeat(2, minmax(80px, 1fr)); }
+.baseline-recon-head, .baseline-recon-row, .baseline-cause-head, .baseline-cause-row { grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(64px, 1fr)); }
+.baseline-queue-head, .baseline-queue-row { grid-template-columns: minmax(180px, 1.4fr) repeat(4, minmax(56px, 0.6fr) ) minmax(120px, 0.9fr) minmax(220px, 1.6fr); align-items: start; }
+.baseline-queue-row small { display: block; color: #8a847e; font-size: 11px; }
 .plan-selected-identity { display: grid; gap: 4px; margin: 0 0 16px; }
 .plan-selected-identity small { color: #8a847e; }
 .commission-config { margin-top: 24px; display: grid; gap: 8px; }
