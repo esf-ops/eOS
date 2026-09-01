@@ -112,6 +112,26 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
     }
   });
 
+  app.get("/api/sales-ops/me/book-intelligence", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getBookIntelligenceForUser(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/me/operating-view", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getOperatingView(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
   app.get("/api/sales-ops/me/performance", ...guard, async (req, res) => {
     try {
       const data = await svc.getMyPerformance(actorUser(req), { period: req.query.period || null });
@@ -145,6 +165,7 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
         actualStatus: data.currentMonth?.actualStatus,
         actualSf: data.currentMonth?.actualSf,
         accounts: data.accounts,
+        ytdAccounts: data.ytdAccounts,
         actualSfDefinition: data.actualSfDefinition
       });
     } catch (e) {
@@ -361,6 +382,49 @@ export function attachSalesOpsRoutes(app, { requireAuth, requireHeadAccess, getS
   app.get("/api/sales-ops/team/performance", ...guard, async (req, res) => {
     try {
       const data = await svc.getTeamPerformance(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/team/people", ...guard, async (req, res) => {
+    try {
+      const data = await svc.listOperatingPeople(actorUser(req));
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/team/:userId/operating-view", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getOperatingView(actorUser(req), req.params.userId);
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/team/:userId/book-intelligence", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getBookIntelligenceForUser(actorUser(req), req.params.userId);
+      jsonNoStore(res);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      sendError(res, e);
+    }
+  });
+
+  app.get("/api/sales-ops/team/:userId/accounts", ...guard, async (req, res) => {
+    try {
+      const data = await svc.getScopedAccounts(actorUser(req), req.params.userId, {
+        limit: req.query.limit,
+        cursor: req.query.cursor
+      });
       jsonNoStore(res);
       res.json({ ok: true, ...data });
     } catch (e) {

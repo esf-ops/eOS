@@ -4768,4 +4768,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | Counting unique unapproved candidates as “stable-ID reconciled” mixed preview with activation and would have required linking Cabinet shop merely to reconstruct 89 SF that already has an approved historical mapping. |
 | **Out of scope** | Publishing a salesperson plan, Monday/Moraware/QuickBooks writes, changing commission policy or Moraware metric definition. |
 | **Impacted** | `salesOpsBaselineGap.mjs`, Sales Ops Baseline gap UI, this doc, SYSTEM_BLUEPRINT. |
-| **Impacted** | `eliteos_sales_ops_historical_identity_v6.sql`, identity review rebuild, Baseline gap, Account Directory rename/Moraware link for Ries Design, this doc. |
+---
+
+### 353. Sales Ops operating coherence: one person context and one readiness authority (2026-09-01)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-01 |
+| **Decision** | Sales Ops is one operating application, not a stack of admin tools. Manager/admin users get a single persistent salesperson context that applies to Overview, Accounts, Plan, Performance, and commission-where-enabled. Sales-role users are locked to self. Actual SF is visible from governed attribution independently of a published Goal. Unresolved sibling-account identity does not hide credited production. Primary navigation is Overview, Accounts, Plan, Performance, plus Team for managers/admins. Plan Builder, Identity Review, Baseline Gap, and other diagnostics live under Setup. Scorecards and Commission stay out of primary nav until they have approved operational content. UI consumes one Brain readiness DTO (`identityCoverage`, `attributionActive`, `actualSfAvailable`, `publishedPlanAvailable`, `commissionEnabled`). |
+| **Why** | Production attribution was live while Performance still rendered IDENTITY_APPROVAL_REQUIRED because month assembly and definition status were plan-gated. Hero/Overview used the signed-in admin while Performance could show another person. Empty Scorecards/Commission/admin tabs made the head feel like disconnected tools. |
+| **Out of scope** | COMPLETED_INSTALLATION_SF definition, historical attribution facts, Account Directory authority, Monday ownership, account-intelligence thresholds, commission policy, identity approvals, Monday writes. |
+| **Impacted** | `salesOpsReadiness.mjs`, `salesOpsPerformanceQuery.mjs`, Sales Ops operating-view/book-intelligence/scoped-account APIs, Sales Ops Head nav/Overview/hero/Accounts/Plan empty states, this doc, SYSTEM_BLUEPRINT. |
+

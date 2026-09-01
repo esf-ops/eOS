@@ -135,7 +135,7 @@ export function monthLongLabel(period: string) {
 
 export function productionDisplay(account: BookAccount) {
   if (account.productionStatus === "IDENTITY_APPROVAL_REQUIRED" || account.suggestedHealth === "DATA_GAP" || account.appliedHealth === "DATA_GAP") {
-    return "Production unavailable — identity review required";
+    return "Production history unavailable until account identity is resolved.";
   }
   if (account.trailingCompletedSf == null || account.productionStatus === "NO_PRODUCTION_EVIDENCE") {
     return "No production evidence";

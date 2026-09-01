@@ -6,9 +6,13 @@
 
 /**
  * @param {AccountListAccess | null | undefined} access
+ * @param {{ viewingSelectedBook?: boolean } | null | undefined} [options]
  * @returns {string}
  */
-export function accountListScopeCopy(access) {
+export function accountListScopeCopy(access, options) {
+  if (options?.viewingSelectedBook) {
+    return "You are viewing this salesperson’s currently assigned Monday book. Unmapped Monday owners stay hidden.";
+  }
   if (access?.isOrgAdmin) {
     return "You can see every active account in this organization. Unmapped Monday owners stay hidden from normal sales books but remain visible here.";
   }

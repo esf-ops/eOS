@@ -34,6 +34,8 @@ for (const f of files) {
 const app = read("src/ui/SalesOpsApp.tsx");
 const workspace = read("src/ui/Account360Workspace.tsx");
 assert.ok(app.includes("/api/sales-ops/me/accounts?limit=50"));
+assert.ok(app.includes("/api/sales-ops/team/${"));
+assert.ok(app.includes("/accounts?limit=50"));
 assert.ok(app.includes("/updates?limit=50"));
 assert.ok(app.includes("/subitems?limit=50"));
 assert.ok(app.includes("/files?limit=50"));
@@ -58,15 +60,21 @@ assert.ok(!app.includes("Assign the approved"));
 assert.ok(!app.includes("cedar_valley_2026_2028"));
 assert.ok(!/localStorage\.setItem/.test(app));
 assert.ok(app.includes("20000"), "visible-tab poll interval");
-assert.ok(app.includes("/api/sales-ops/me/performance"));
-assert.ok(app.includes("/api/sales-ops/me/performance/accounts"));
-assert.ok(app.includes("/api/sales-ops/team/performance"));
+assert.ok(app.includes("/api/sales-ops/me/operating-view"));
 assert.ok(app.includes("/api/sales-ops/team/${"));
-assert.ok(app.includes("accounts=1"));
+assert.ok(app.includes("operating-view"));
+assert.ok(app.includes("book-intelligence"));
 assert.ok(app.includes("Plan Builder"));
-assert.ok(app.includes("Team Performance"));
+assert.ok(app.includes("Team"));
 assert.ok(app.includes("Identity Review"));
-assert.ok(app.includes("Baseline gap"));
+assert.ok(app.includes("Baseline Gap"));
+assert.ok(app.includes("assigned accounts"));
+assert.ok(app.includes("No published plan"));
+assert.ok(app.includes("Sales performance"));
+assert.ok(!app.includes('"Scorecards"'));
+assert.ok(!app.includes('["commission"'));
+assert.ok(app.includes("sessionStorage"));
+assert.ok(app.includes("canSelectSalesperson") || app.includes("Viewing"));
 assert.ok(read("src/ui/BaselineGap.tsx").includes("/api/sales-ops/admin/baseline-gap"));
 assert.ok(read("src/ui/BaselineGap.tsx").includes("salespersonDisplayName"));
 assert.ok(read("src/ui/BaselineGap.tsx").includes("Authoritative / approved reconstruction"));
@@ -112,7 +120,7 @@ assert.ok(read("src/ui/PlanAdmin.tsx").includes("anchors"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("Generate proposed monthly path"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("Meaningful customer touches"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("Compensation not yet configured"));
-assert.ok(read("src/ui/PlanExperience.tsx").includes("Production unavailable — identity review required"));
+assert.ok(read("src/ui/PlanExperience.tsx").includes("Production history unavailable until account identity is resolved."));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("plan-preview-modal"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("Show estimated commission to salesperson"));
 assert.ok(read("src/ui/PlanAdmin.tsx").includes("Plan priority"));
@@ -138,7 +146,7 @@ assert.ok(read("src/ui/styles.css").includes("plan-preview-modal"));
 assert.ok(read("src/ui/styles.css").includes("max-width: 1120px"));
 assert.ok(read("src/ui/styles.css").includes(".plan-experience { width: min(100%, 960px)"));
 assert.ok(!read("src/ui/styles.css").includes(".plan-preview-modal { position: relative; width: min(1040px, 100%);"));
-assert.ok(read("src/ui/SalesOpsApp.tsx").includes("/api/sales-ops/me/plan/book-intelligence"));
+assert.ok(read("src/ui/SalesOpsApp.tsx").includes("/api/sales-ops/me/book-intelligence"));
 assert.equal(read("src/ui/SalesOpsApp.tsx").includes("reload().then"), false);
 assert.ok(!/Thera/.test(app));
 assert.ok(!/Thera/.test(read("src/ui/PlanAdmin.tsx")));
@@ -164,6 +172,10 @@ assert.equal(
 assert.equal(
   accountListScopeCopy({ isOrgAdmin: true, isManager: true }),
   "You can see every active account in this organization. Unmapped Monday owners stay hidden from normal sales books but remain visible here."
+);
+assert.equal(
+  accountListScopeCopy({ isOrgAdmin: true, isManager: false }, { viewingSelectedBook: true }),
+  "You are viewing this salesperson’s currently assigned Monday book. Unmapped Monday owners stay hidden."
 );
 assert.ok(accountListScopeCopy({}).includes("your assigned book"));
 assert.equal(/user_profiles|role === ["']admin["']/.test(read("src/lib/accountListScopeCopy.mjs")), false);

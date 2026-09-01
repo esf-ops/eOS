@@ -229,7 +229,7 @@ export function classifyAccountEvidence(account, facts, { asOf = new Date(), thr
   const healthReasonCodes = [];
 
   if (!hasIdentity) {
-    reasons.push("Production unavailable — identity review required");
+    reasons.push("Production history unavailable until account identity is resolved.");
     return {
       suggestedRole: null,
       suggestedHealth: "DATA_GAP",

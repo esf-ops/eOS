@@ -312,6 +312,49 @@ async function main() {
   assert.equal(contrib[0].canOpenWorkspace, true);
   assert.equal(contrib[1].canOpenWorkspace, false);
 
+  await store.insertAttributionFact({
+    organizationId: ORG,
+    salespersonUserId: REP_B,
+    accountDirectoryAccountId: AD_1,
+    salesOpsAccountId: "acc-1",
+    morawareJobId: "job-may-blake",
+    qualifyingEvent: "sentinel_test_event",
+    qualifyingDate: "2026-05-08",
+    performanceMonth: "2026-05",
+    creditedSf: 100,
+    attributionBasis: "explicit_fact"
+  });
+  const blakeNoPlan = await svc.getMyPerformance(blake);
+  assert.equal(blakeNoPlan.readiness.attributionActive, true);
+  assert.equal(blakeNoPlan.readiness.publishedPlanAvailable, false);
+  assert.equal(blakeNoPlan.readiness.actualSfAvailable, true);
+  assert.equal(blakeNoPlan.ytd.actualSf, 100);
+  assert.equal(blakeNoPlan.currentMonth.actualSf, 0);
+  assert.equal(blakeNoPlan.currentMonth.goalSf, null);
+  assert.equal(blakeNoPlan.currentMonth.varianceSf, null);
+  assert.equal(blakeNoPlan.currentMonth.actualStatus, "AVAILABLE");
+  assert.equal(blakeNoPlan.actualSfDefinition.status, "AVAILABLE");
+  assert.equal(blakeNoPlan.months.find((m) => m.period === "2026-05").actualSf, 100);
+
+  const operating = await svc.getOperatingView(admin, REP_B);
+  assert.equal(operating.readiness.actualSfAvailable, true);
+  assert.equal(operating.readiness.publishedPlanAvailable, false);
+  assert.equal(operating.performance.ytd.actualSf, 100);
+  assert.equal(operating.plan, null);
+  assert.ok(operating.assignedCount >= 0);
+
+  const scopedAcc = await svc.getScopedAccounts(admin, REP_B, { limit: 50 });
+  assert.equal(typeof scopedAcc.assignedCount, "number");
+  assert.equal(scopedAcc.assignedUserId, REP_B);
+  await assert.rejects(() => svc.getScopedAccounts(blake, REP_A), (e) => e.status === 404);
+  await assert.rejects(() => svc.listOperatingPeople(blake), (e) => e.status === 404);
+  const people = await svc.listOperatingPeople(admin);
+  assert.ok(people.people.some((p) => p.userId === REP_A && p.displayName === "Alex Sentinel"));
+
+  const bookNoPlan = await svc.getBookIntelligenceForUser(admin, REP_B);
+  assert.ok(bookNoPlan.accounts);
+  assert.equal(bookNoPlan.canOpenIdentityReview, true);
+
   await publishedPlan(svc, REP_B, mergeExplicitMonthlyTargets([], "2026-09-01", "2026-12-31"));
   console.log("salesOpsPerformance.test.mjs: ok");
 }

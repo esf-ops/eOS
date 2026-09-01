@@ -945,6 +945,20 @@ export function createSalesOpsSupabaseStore(getSupabase) {
       }
       return (data || []).map(mapAccount);
     },
+    async countAccountsForUser(organizationId, userId) {
+      const { count, error } = await db()
+        .from("sales_ops_accounts")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("assigned_user_id", userId)
+        .eq("archived", false)
+        .eq("source_state", "active");
+      if (error) {
+        const rows = await this.listAccountsForUser(organizationId, userId);
+        return rows.length;
+      }
+      return Number(count || 0);
+    },
     async listAccountsPage(organizationId, { assignedUserIds = null, limit = 50, cursor = null, sourceState = "active" } = {}) {
       let q = db()
         .from("sales_ops_accounts")
@@ -1194,6 +1208,16 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .maybeSingle();
       if (error) throwDb(error, "Could not load manager assignment.");
       return mapManager(data);
+    },
+    async listManagersForReport(organizationId, reportUserId) {
+      const { data, error } = await db()
+        .from("sales_ops_manager_assignments")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("report_user_id", reportUserId)
+        .eq("active", true);
+      if (error) throwDb(error, "Could not list managers for salesperson.");
+      return (data || []).map(mapManager);
     },
 
     async upsertCommissionSnapshot(row) {

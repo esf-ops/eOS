@@ -71,7 +71,7 @@ function classify(accountExtras, sfByPeriod) {
   assert.equal(gap.suggestedHealth, "DATA_GAP");
   assert.equal(gap.trailingCompletedSf, null);
   assert.equal(gap.productionStatus, "IDENTITY_APPROVAL_REQUIRED");
-  assert.ok(gap.reasons.includes("Production unavailable — identity review required"));
+  assert.ok(gap.reasons.includes("Production history unavailable until account identity is resolved."));
 }
 
 {

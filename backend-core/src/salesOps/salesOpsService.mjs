@@ -50,6 +50,8 @@ import { createReconcileProgress, reconcileStatusFromSyncState } from "./salesOp
 import { loadMondayScheduleStatus, mondayScheduleHealthFields, withMondayScheduleLock } from "./salesOpsMondaySchedule.mjs";
 import { previewExactPersonMappings } from "./salesOpsMondayPersonMap.mjs";
 import { assembleTeamPerformance, assembleUserPerformance, loadIdentityAudit } from "./salesOpsPerformanceQuery.mjs";
+import { assembleBookIntelligence, sortBookAccounts } from "./salesOpsAccountIntelligence.mjs";
+import { salesOpsOperatingReadiness } from "./salesOpsReadiness.mjs";
 import {
   approveIdentityReview,
   bulkApproveIdentityReviews,
@@ -243,6 +245,7 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       access: {
         isOrgAdmin: isOrgAdminRole(actor.role),
         isManager: reports.length > 0,
+        canSelectSalesperson: isOrgAdminRole(actor.role) || reports.length > 0,
         canAdministerPlans: isOrgAdminRole(actor.role) || reports.length > 0,
         canPublishPlans: canPublishPlans(actor.role)
       },
@@ -349,6 +352,139 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         period,
         includeAccounts
       });
+    },
+
+    async listOperatingPeople(user) {
+      const actor = actorFromUser(user);
+      assertActor(actor);
+      const reports = isOrgAdminRole(actor.role)
+        ? []
+        : await store.listReportsForManager(actor.organizationId, actor.userId);
+      if (!isOrgAdminRole(actor.role) && !reports.length) throw NOT_FOUND();
+      const { mappings, labelByUser } = await salespersonDisplayContext(actor.organizationId);
+      let userIds;
+      if (isOrgAdminRole(actor.role)) {
+        userIds = [...new Set((mappings || []).map((m) => String(m.userId)).filter(Boolean))];
+      } else {
+        userIds = [...new Set([actor.userId, ...reports.map((r) => String(r.reportUserId))])];
+      }
+      const people = userIds
+        .map((userId) => ({
+          userId,
+          displayName: labelByUser.get(String(userId)) || UNKNOWN_SALESPERSON_LABEL
+        }))
+        .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+      return { people };
+    },
+
+    async getBookIntelligenceForUser(user, targetUserId = null) {
+      const actor = actorFromUser(user);
+      const target = String(targetUserId || actor.userId);
+      if (target !== actor.userId) await canAccessUser(actor, target);
+      else assertActor(actor);
+      const bundle = await loadEffectiveBundle(actor.organizationId, target);
+      if (bundle?.plan) {
+        return planAdmin.getOwnedBookIntelligence(actor, bundle.plan);
+      }
+      const accounts = await store.listAccountsForUser(actor.organizationId, target);
+      const facts =
+        typeof store.listAttributionFacts === "function"
+          ? await store.listAttributionFacts(actor.organizationId, { userIds: [target] })
+          : [];
+      const book = assembleBookIntelligence(accounts, facts, { salespersonUserId: target });
+      return {
+        ...book,
+        canOpenIdentityReview: isOrgAdminRole(actor.role),
+        compensation: {
+          configured: false,
+          finallyApproved: false,
+          showEstimatedCommission: false,
+          eligibleAccountCount: 0,
+          proposals: []
+        }
+      };
+    },
+
+    async getOperatingView(user, targetUserId = null) {
+      const actor = actorFromUser(user);
+      const target = String(targetUserId || actor.userId);
+      if (target !== actor.userId) await canAccessUser(actor, target);
+      else assertActor(actor);
+      const [{ labelByUser }, performance, accounts, facts, bundle, managers] = await Promise.all([
+        salespersonDisplayContext(actor.organizationId),
+        assembleUserPerformance(store, {
+          organizationId: actor.organizationId,
+          userId: target,
+          now: typeof now === "function" ? now() : now,
+          includeAccounts: true
+        }),
+        store.listAccountsForUser(actor.organizationId, target),
+        typeof store.listAttributionFacts === "function"
+          ? store.listAttributionFacts(actor.organizationId, { userIds: [target] })
+          : [],
+        loadEffectiveBundle(actor.organizationId, target),
+        typeof store.listManagersForReport === "function"
+          ? store.listManagersForReport(actor.organizationId, target)
+          : []
+      ]);
+      const plan = bundle?.plan || null;
+      const book = assembleBookIntelligence(accounts, facts, { salespersonUserId: target });
+      const displayName = labelByUser.get(target) || UNKNOWN_SALESPERSON_LABEL;
+      const managerId = managers[0]
+        ? String(managers[0].managerUserId)
+        : plan?.managerUserId
+          ? String(plan.managerUserId)
+          : "";
+      const readiness = salesOpsOperatingReadiness({
+        facts,
+        publishedPlan: plan,
+        commissionEnabled: Boolean(plan?.commissionEnabled),
+        accounts
+      });
+      const priorities = sortBookAccounts(book.accounts)
+        .filter((row) => row.appliedHealth !== "DATA_GAP")
+        .slice(0, 5)
+        .map((row) => ({
+          salesOpsAccountId: row.salesOpsAccountId,
+          accountName: row.accountName,
+          appliedRole: row.appliedRole,
+          appliedHealth: row.appliedHealth,
+          roleLabel: row.roleLabel,
+          healthLabel: row.healthLabel,
+          reasonCopy: row.reasonCopy,
+          trailingCompletedSf: row.trailingCompletedSf
+        }));
+      return {
+        person: {
+          userId: target,
+          displayName,
+          firstName: firstNameFromFullName(displayName, ""),
+          managerDisplayName: managerId ? labelByUser.get(managerId) || null : null,
+          territoryName: plan?.territoryName || null
+        },
+        readiness,
+        performance,
+        assignedCount: accounts.length,
+        plan: plan
+          ? {
+              id: plan.id,
+              planName: plan.planName,
+              status: plan.status,
+              northStarMetric: plan.northStarMetric,
+              northStarTarget: plan.northStarTarget,
+              northStarTargetDate: plan.northStarTargetDate,
+              headline: plan.headline || null,
+              subtitle: plan.subtitle || null,
+              commissionEnabled: Boolean(plan.commissionEnabled)
+            }
+          : null,
+        book: {
+          roleCounts: book.roleCounts,
+          healthCounts: book.healthCounts,
+          identityGapCount: book.identityGapCount,
+          priorities
+        }
+      };
     },
 
     async getTeamPerformance(user) {
@@ -813,10 +949,43 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
       const accounts = page.rows.map(toAccountListDto);
       accounts.forEach((a) => assertNoForbiddenDto(a, "accountList"));
       const last = page.rows[page.rows.length - 1];
+      let assignedCount = null;
+      if (Array.isArray(assignedUserIds) && assignedUserIds.length === 1) {
+        assignedCount =
+          typeof store.countAccountsForUser === "function"
+            ? await store.countAccountsForUser(actor.organizationId, assignedUserIds[0])
+            : (await store.listAccountsForUser(actor.organizationId, assignedUserIds[0])).length;
+      }
       return {
         accounts,
         nextCursor: page.hasMore && last ? encodeListCursor(last.accountName, last.id) : null,
-        limit
+        limit,
+        assignedCount
+      };
+    },
+
+    async getScopedAccounts(user, targetUserId, query = {}) {
+      const actor = actorFromUser(user);
+      await canAccessUser(actor, targetUserId);
+      const target = String(targetUserId);
+      const limit = parseListLimit(query.limit);
+      const cursor = decodeListCursor(query.cursor);
+      const page = typeof store.listAccountsPage === "function"
+        ? await store.listAccountsPage(actor.organizationId, { assignedUserIds: [target], limit, cursor })
+        : { rows: await store.listAccountsForUser(actor.organizationId, target), hasMore: false };
+      const accounts = page.rows.map(toAccountListDto);
+      accounts.forEach((a) => assertNoForbiddenDto(a, "accountList"));
+      const last = page.rows[page.rows.length - 1];
+      const assignedCount =
+        typeof store.countAccountsForUser === "function"
+          ? await store.countAccountsForUser(actor.organizationId, target)
+          : (await store.listAccountsForUser(actor.organizationId, target)).length;
+      return {
+        accounts,
+        nextCursor: page.hasMore && last ? encodeListCursor(last.accountName, last.id) : null,
+        limit,
+        assignedCount,
+        assignedUserId: target
       };
     },
 

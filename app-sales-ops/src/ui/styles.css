@@ -412,6 +412,34 @@ footer { background: #101011; color: #888481; padding: 42px 0; }.footer-placehol
 .plan-selected-identity small { color: #8a847e; }
 .commission-config { margin-top: 24px; display: grid; gap: 8px; }
 .text-link { border: 0; background: transparent; color: var(--red); padding: 0; font-weight: 650; text-align: left; }
+.person-context { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin: 0 0 28px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.person-context strong { font-size: 22px; letter-spacing: -.03em; }
+.person-context label { min-width: 280px; }
+.person-context .kicker { margin-bottom: 6px; }
+.command-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0 0 18px; }
+.command-card { background: #fbfaf7; border: 1px solid var(--line); padding: 24px; min-height: 180px; }
+.command-card h3 { margin: 0 0 12px; font-size: 24px; letter-spacing: -.04em; }
+.command-card p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.command-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.command-metrics span { display: block; color: #716d69; font-size: 11px; }
+.command-metrics strong { font: 500 22px var(--font-geist-mono), monospace; letter-spacing: -.04em; }
+.account-group { margin: 28px 0 8px; }
+.account-group h3 { margin: 0 0 10px; font-size: 22px; letter-spacing: -.03em; }
+.account-line-list { display: grid; gap: 8px; }
+.account-line { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; border: 1px solid var(--line); background: #fbfaf7; padding: 14px 16px; text-align: left; }
+.account-line strong { display: block; }
+.account-line small { display: block; margin-top: 4px; color: #8a847e; font-size: 12px; }
+.account-line:hover { border-color: rgba(186,47,41,.42); }
+.showing-count { margin-left: 10px; color: var(--muted); font-size: 16px; font-weight: 400; }
+.setup-subnav { display: flex; gap: 8px; margin: 0 0 24px; flex-wrap: wrap; }
+.setup-subnav button { border: 1px solid var(--line); background: #fbfaf7; padding: 10px 14px; font-weight: 650; }
+.setup-subnav button.active { border-color: var(--red); color: var(--red); }
+.site-header.compact-hero { min-height: 360px; }
+.site-header.compact-hero .hero { min-height: 280px; padding: 48px 0 40px; }
+
+@media (max-width: 900px) {
+  .command-grid, .person-context { grid-template-columns: 1fr; display: grid; }
+}
 
 @media (max-width: 900px) {
   .plan-admin-layout, .plan-admin-filters { grid-template-columns: 1fr; }

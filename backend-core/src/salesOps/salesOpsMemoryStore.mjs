@@ -408,6 +408,10 @@ export function createSalesOpsMemoryStore() {
         .sort((a, b) => String(a.accountName).localeCompare(String(b.accountName)))
         .map(clone);
     },
+    async countAccountsForUser(organizationId, userId) {
+      const rows = await this.listAccountsForUser(organizationId, userId);
+      return rows.length;
+    },
     async listAccountsPage(organizationId, { assignedUserIds = null, limit = 50, cursor = null, sourceState = "active" } = {}) {
       let rows = [...accounts.values()].filter((a) => {
         if (a.organizationId !== organizationId) return false;
@@ -541,6 +545,11 @@ export function createSalesOpsMemoryStore() {
           return clone(a);
       }
       return null;
+    },
+    async listManagersForReport(organizationId, reportUserId) {
+      return [...managerAssignments.values()]
+        .filter((a) => a.organizationId === organizationId && a.reportUserId === reportUserId && a.active)
+        .map(clone);
     },
 
     async upsertCommissionSnapshot(row) {

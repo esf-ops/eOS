@@ -18,7 +18,9 @@ import Account360Workspace, {
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
-type Tab = "overview" | "performance" | "entry" | "accounts" | "plan" | "commission" | "team" | "admin" | "identity" | "baseline";
+type Tab = "overview" | "performance" | "accounts" | "plan" | "team" | "setup";
+type SetupPanel = "builder" | "identity" | "baseline";
+const VIEWING_STORAGE_KEY = "eliteos.salesOps.viewingUserId";
 
 type Insight = {
   eyebrow: string;
@@ -79,8 +81,103 @@ type PerformanceDto = {
   rollingThreeMonthActualSf: number | null;
   months: PerformanceMonth[];
   accounts?: PerformanceAccount[];
+  ytdAccounts?: PerformanceAccount[];
   actualSfDefinition?: { status?: string; note?: string };
+  readiness?: {
+    identityCoverage?: { assignedCount?: number; linkedCount?: number; unresolvedCount?: number };
+    attributionActive?: boolean;
+    actualSfAvailable?: boolean;
+    publishedPlanAvailable?: boolean;
+    commissionEnabled?: boolean;
+  };
 };
+
+type OperatingPerson = {
+  userId: string;
+  displayName: string;
+  firstName?: string;
+  managerDisplayName?: string | null;
+  territoryName?: string | null;
+};
+
+type OperatingView = {
+  person: OperatingPerson;
+  readiness: NonNullable<PerformanceDto["readiness"]>;
+  performance: PerformanceDto;
+  assignedCount: number;
+  plan: Record<string, unknown> | null;
+  book: {
+    roleCounts?: Record<string, number>;
+    healthCounts?: Record<string, number>;
+    identityGapCount?: number;
+    priorities?: Array<{
+      salesOpsAccountId: string;
+      accountName: string;
+      roleLabel?: string;
+      healthLabel?: string;
+      reasonCopy?: string;
+      trailingCompletedSf?: number | null;
+    }>;
+  };
+};
+
+type BookAccountRow = {
+  salesOpsAccountId: string;
+  accountName: string;
+  market?: string | null;
+  branch?: string | null;
+  appliedRole?: string | null;
+  appliedHealth?: string | null;
+  roleLabel?: string;
+  healthLabel?: string;
+  reasonCopy?: string;
+  trailingCompletedSf?: number | null;
+};
+
+const ACCOUNT_BUCKETS: { key: string; kicker: string; title: string; match: (row: BookAccountRow) => boolean }[] = [
+  {
+    key: "priority-anchor",
+    kicker: "PRIORITY",
+    title: "Anchor + Needs Attention",
+    match: (row) => row.appliedRole === "ANCHOR" && row.appliedHealth === "NEEDS_ATTENTION"
+  },
+  {
+    key: "priority-growth",
+    kicker: "PRIORITY",
+    title: "Growth + Needs Attention",
+    match: (row) => row.appliedRole === "GROWTH_OPPORTUNITY" && row.appliedHealth === "NEEDS_ATTENTION"
+  },
+  {
+    key: "priority-reactivation",
+    kicker: "PRIORITY",
+    title: "Reactivation",
+    match: (row) => row.appliedRole === "REACTIVATION"
+  },
+  {
+    key: "protect",
+    kicker: "PROTECT",
+    title: "Anchor",
+    match: (row) => row.appliedRole === "ANCHOR" && row.appliedHealth !== "NEEDS_ATTENTION" && row.appliedHealth !== "DATA_GAP"
+  },
+  {
+    key: "grow",
+    kicker: "GROW",
+    title: "Growth Opportunity",
+    match: (row) => row.appliedRole === "GROWTH_OPPORTUNITY" && row.appliedHealth !== "NEEDS_ATTENTION" && row.appliedHealth !== "DATA_GAP"
+  },
+  {
+    key: "develop",
+    kicker: "DEVELOP",
+    title: "New / Unproven",
+    match: (row) => row.appliedRole === "NEW_UNPROVEN"
+  },
+  {
+    key: "data-gaps",
+    kicker: "DATA GAPS",
+    title: "Unresolved identity",
+    match: (row) => row.appliedHealth === "DATA_GAP" || !row.appliedRole
+  }
+];
 
 function fmtMaybe(value: number | null | undefined) {
   if (value == null || Number.isNaN(Number(value))) return "—";
@@ -194,6 +291,7 @@ export default function SalesOpsApp() {
   } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [setupPanel, setSetupPanel] = useState<SetupPanel>("builder");
   const [form, setForm] = useState<Scorecard>(blankScore("2026-09"));
   const [saved, setSaved] = useState(false);
   const [yearFilter, setYearFilter] = useState("all");
@@ -216,7 +314,26 @@ export default function SalesOpsApp() {
     period: string;
     rows: Array<Record<string, unknown>>;
   } | null>(null);
-  const [scopedUserId, setScopedUserId] = useState<string | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(VIEWING_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const [people, setPeople] = useState<Array<{ userId: string; displayName: string }>>([]);
+  const [operating, setOperating] = useState<OperatingView | null>(null);
+  const [assignedCount, setAssignedCount] = useState<number | null>(null);
+
+  function persistViewing(userId: string | null) {
+    setViewingUserId(userId);
+    try {
+      if (userId) sessionStorage.setItem(VIEWING_STORAGE_KEY, userId);
+      else sessionStorage.removeItem(VIEWING_STORAGE_KEY);
+    } catch {
+      /* sessionStorage is a UI preference, not data authority */
+    }
+  }
 
   useEffect(() => {
     if (!supabase) return;
@@ -233,55 +350,34 @@ export default function SalesOpsApp() {
     try {
       const meRes = (await apiGet("/api/sales-ops/me", sessionToken)) as Record<string, unknown>;
       setMe(meRes);
-      try {
-        const planRes = (await apiGet("/api/sales-ops/me/plan", sessionToken)) as typeof planBundle;
-        setPlanBundle(planRes);
-        const prog = (await apiGet("/api/sales-ops/me/progress", sessionToken)) as Record<string, unknown>;
-        setProgress(prog);
-        setScorecards((prog.scorecards as Scorecard[]) || []);
-      } catch (e) {
-        if (!(e instanceof ApiError && e.status === 404)) throw e;
-        setPlanBundle(null);
-      }
-      try {
-        const hist = (await apiGet("/api/sales-ops/me/plans", sessionToken)) as { plans: Array<Record<string, unknown>> };
-        setPlanHistory(hist.plans || []);
-      } catch {
-        setPlanHistory([]);
-      }
-      const acc = (await apiGet("/api/sales-ops/me/accounts?limit=50", sessionToken)) as {
-        accounts: Account[];
-        nextCursor?: string | null;
-      };
-      setAccounts(acc.accounts || []);
-      setAccountsCursor(acc.nextCursor || null);
-      const comm = (await apiGet("/api/sales-ops/me/commission", sessionToken)) as typeof commission;
-      setCommission(comm);
-      try {
-        const selfId = String((meRes.user as { id?: string } | undefined)?.id || "");
-        const targetId = scopedUserId && scopedUserId !== selfId ? scopedUserId : "";
-        if (targetId) {
-          const perf = (await apiGet(
-            `/api/sales-ops/team/${targetId}/performance?accounts=1`,
-            sessionToken
-          )) as PerformanceDto;
-          setPerformance(perf);
-          setPerfAccounts(perf.accounts || []);
-        } else {
-          const perf = (await apiGet("/api/sales-ops/me/performance", sessionToken)) as PerformanceDto;
-          setPerformance(perf);
-          const contrib = (await apiGet(
-            `/api/sales-ops/me/performance/accounts${perf.period ? `?period=${encodeURIComponent(perf.period)}` : ""}`,
-            sessionToken
-          )) as { accounts?: PerformanceAccount[] };
-          setPerfAccounts(contrib.accounts || []);
+      const access = meRes.access as {
+        isManager?: boolean;
+        isOrgAdmin?: boolean;
+        canAdministerPlans?: boolean;
+        canSelectSalesperson?: boolean;
+      } | undefined;
+      const canSelect = Boolean(access?.canSelectSalesperson || access?.isOrgAdmin || access?.isManager);
+      const selfId = String((meRes.user as { id?: string } | undefined)?.id || "");
+      let peopleList: Array<{ userId: string; displayName: string }> = [];
+      if (canSelect) {
+        try {
+          const listed = (await apiGet("/api/sales-ops/team/people", sessionToken)) as {
+            people?: Array<{ userId: string; displayName: string }>;
+          };
+          peopleList = listed.people || [];
+        } catch {
+          peopleList = [];
         }
-      } catch {
-        setPerformance(null);
-        setPerfAccounts([]);
+        setPeople(peopleList);
+      } else {
+        setPeople([]);
       }
-      const access = meRes.access as { isManager?: boolean; canAdministerPlans?: boolean } | undefined;
-      if (access?.isManager || access?.canAdministerPlans) {
+      const target = canSelect
+        ? viewingUserId && peopleList.some((p) => p.userId === viewingUserId)
+          ? viewingUserId
+          : null
+        : selfId;
+      if (canSelect) {
         const t = (await apiGet("/api/sales-ops/team", sessionToken)) as { reports: Array<Record<string, unknown>> };
         setTeam(t);
         try {
@@ -293,11 +389,95 @@ export default function SalesOpsApp() {
         } catch {
           setTeamPerformance(null);
         }
+      } else {
+        setTeam(null);
+        setTeamPerformance(null);
+      }
+      if (!target) {
+        setOperating(null);
+        setPerformance(null);
+        setPerfAccounts([]);
+        setPlanBundle(null);
+        setPlanBook(null);
+        setAccounts([]);
+        setAccountsCursor(null);
+        setAssignedCount(null);
+        setCommission(null);
+        setProgress(null);
+        setPlanHistory([]);
+        return;
+      }
+      const scoped = canSelect && target !== selfId;
+      const op = (await apiGet(
+        scoped ? `/api/sales-ops/team/${target}/operating-view` : "/api/sales-ops/me/operating-view",
+        sessionToken
+      )) as OperatingView;
+      setOperating(op);
+      setPerformance(op.performance);
+      setPerfAccounts(op.performance?.ytdAccounts || op.performance?.accounts || []);
+      setAssignedCount(op.assignedCount ?? null);
+      const acc = (await apiGet(
+        scoped ? `/api/sales-ops/team/${target}/accounts?limit=50` : "/api/sales-ops/me/accounts?limit=50",
+        sessionToken
+      )) as { accounts: Account[]; nextCursor?: string | null; assignedCount?: number | null };
+      setAccounts(acc.accounts || []);
+      setAccountsCursor(acc.nextCursor || null);
+      if (acc.assignedCount != null) setAssignedCount(acc.assignedCount);
+      try {
+        const book = (await apiGet(
+          scoped ? `/api/sales-ops/team/${target}/book-intelligence` : "/api/sales-ops/me/book-intelligence",
+          sessionToken
+        )) as BookIntelligence;
+        setPlanBook(book);
+      } catch {
+        setPlanBook(null);
+      }
+      if (op.plan) {
+        try {
+          const planRes = (await apiGet(
+            scoped ? `/api/sales-ops/team/${target}/plan` : "/api/sales-ops/me/plan",
+            sessionToken
+          )) as typeof planBundle;
+          setPlanBundle(planRes);
+        } catch (e) {
+          if (!(e instanceof ApiError && e.status === 404)) throw e;
+          setPlanBundle(null);
+        }
+        if (!scoped) {
+          try {
+            const prog = (await apiGet("/api/sales-ops/me/progress", sessionToken)) as Record<string, unknown>;
+            setProgress(prog);
+            setScorecards((prog.scorecards as Scorecard[]) || []);
+          } catch {
+            setProgress(null);
+          }
+        } else {
+          setProgress(null);
+        }
+      } else {
+        setPlanBundle(null);
+        setProgress(null);
+      }
+      try {
+        const hist = (await apiGet("/api/sales-ops/me/plans", sessionToken)) as { plans: Array<Record<string, unknown>> };
+        setPlanHistory(scoped ? [] : hist.plans || []);
+      } catch {
+        setPlanHistory([]);
+      }
+      if (!scoped) {
+        try {
+          const comm = (await apiGet("/api/sales-ops/me/commission", sessionToken)) as typeof commission;
+          setCommission(comm);
+        } catch {
+          setCommission(null);
+        }
+      } else {
+        setCommission(null);
       }
     } catch (e) {
       setLoadError(e instanceof ApiError ? e.message : String((e as Error)?.message || e));
     }
-  }, [sessionToken, scopedUserId]);
+  }, [sessionToken, viewingUserId]);
 
   useEffect(() => {
     void reload();
@@ -311,23 +491,41 @@ export default function SalesOpsApp() {
     return () => window.clearInterval(id);
   }, [sessionToken, reload]);
 
-  useEffect(() => {
-    if (!sessionToken || tab !== "plan") return;
-    void apiGet("/api/sales-ops/me/plan/book-intelligence", sessionToken)
-      .then((data) => setPlanBook(data as BookIntelligence))
-      .catch(() => setPlanBook(null));
-  }, [sessionToken, tab, planBundle?.plan]);
-
   const ramp: PeriodTarget[] = (planBundle?.periodTargets as PeriodTarget[]) || [];
-  const user = (me?.user || {}) as { firstName?: string; fullName?: string; email?: string; role?: string };
-  const plan = (me?.plan || planBundle?.plan || null) as Record<string, unknown> | null;
+  const user = (me?.user || {}) as { id?: string; firstName?: string; fullName?: string; email?: string; role?: string };
+  const access = (me?.access || {}) as {
+    isOrgAdmin?: boolean;
+    isManager?: boolean;
+    canAdministerPlans?: boolean;
+    canSelectSalesperson?: boolean;
+    canPublishPlans?: boolean;
+  };
+  const canSelect = Boolean(access.canSelectSalesperson || access.isOrgAdmin || access.isManager);
+  const subject = operating?.person || null;
+  const subjectPlan = operating?.plan || null;
+  const readiness = operating?.readiness || performance?.readiness || null;
+  const publishedPlan = Boolean(readiness?.publishedPlanAvailable && subjectPlan);
+  const northStar = publishedPlan ? Number(subjectPlan?.northStarTarget) : null;
+  const hasNorthStar = northStar != null && Number.isFinite(northStar) && northStar > 0;
+  const subjectName = salespersonDisplayName(subject?.displayName || (canSelect ? "" : user.fullName) || "");
+  const headline = hasNorthStar
+    ? String(subjectPlan?.headline || `${subject?.firstName || subjectName || "Sales"}'s path to ${fmt.format(northStar as number)} sq ft`)
+    : subjectName
+      ? `${subjectName}`
+      : "Sales Ops";
+  const heroEm = hasNorthStar ? `${fmt.format(northStar as number)} sq ft.` : "Sales performance";
+  const heroLead = hasNorthStar
+    ? String(subjectPlan?.subtitle || "A measurable operating system from territory launch to repeatable, durable growth.")
+    : subjectName
+      ? "Actual production is tracked independently of a published plan."
+      : "Select a salesperson to see the same operating view they would use.";
   const integration = (me?.integration || {}) as {
     stale?: boolean;
     lastSuccessAt?: string | null;
     mondayEnabled?: boolean;
     mondayWriteEnabled?: boolean;
   };
-  const headline = String(plan?.headline || `${user.firstName || "Your"}'s path to ${fmt.format(Number(plan?.northStarTarget || 0))} sq ft`);
+  const plan = (subjectPlan || me?.plan || planBundle?.plan || null) as Record<string, unknown> | null;
   const latest = (progress?.progress as { latest?: Scorecard; latestRamp?: PeriodTarget; attainment?: number; rollingAttainment?: number; pipelineCoverage?: number; closeRate?: number; closeRateStandard?: number; recentActual?: number; status?: "green" | "yellow" | "red" | "pending" }) || {};
 
   async function signIn(e: FormEvent) {
@@ -362,16 +560,29 @@ export default function SalesOpsApp() {
   const maxChart = Math.max(1, ...filteredRamp.map((item) => Math.max(Number(item.installedTarget), Number(scorecards.find((r) => r.period === item.period)?.installed ?? 0))));
   const filteredAccounts = useMemo(() => {
     const query = accountQuery.trim().toLowerCase();
-    return accounts.filter((account) => {
-      const tier = account.intelligence?.recommendedTier || "Develop";
-      const tierMatches = accountTier === "All" || tier === accountTier;
-      const queryMatches =
-        !query ||
-        [account.accountName, account.accountType, account.market, account.status, account.intelligence?.strategicPlay]
-          .some((value) => value?.toLowerCase().includes(query));
-      return tierMatches && queryMatches;
+    const bookRows = ((planBook?.accounts || []) as BookAccountRow[]).filter((row) => {
+      if (!query) return true;
+      return [row.accountName, row.market, row.branch, row.roleLabel, row.healthLabel, row.reasonCopy]
+        .some((value) => String(value || "").toLowerCase().includes(query));
     });
-  }, [accounts, accountQuery, accountTier]);
+    if (bookRows.length) return bookRows;
+    return accounts
+      .filter((account) => !query || account.accountName.toLowerCase().includes(query))
+      .map((account) => ({
+        salesOpsAccountId: account.id,
+        accountName: account.accountName,
+        market: account.market,
+        branch: account.branch,
+        appliedRole: null,
+        appliedHealth: account.accountDirectoryAccountId ? null : "DATA_GAP",
+        roleLabel: "Role unavailable",
+        healthLabel: account.accountDirectoryAccountId ? "Unknown" : "Data gap",
+        reasonCopy: account.accountDirectoryAccountId
+          ? ""
+          : "Production history unavailable until account identity is resolved.",
+        trailingCompletedSf: null
+      }));
+  }, [accounts, accountQuery, planBook]);
 
   function change(field: keyof Scorecard, value: string) {
     setSaved(false);
@@ -395,10 +606,14 @@ export default function SalesOpsApp() {
 
   async function loadMoreAccounts() {
     if (!sessionToken || !accountsCursor) return;
-    const acc = (await apiGet(`/api/sales-ops/me/accounts?limit=50&cursor=${encodeURIComponent(accountsCursor)}`, sessionToken)) as {
-      accounts: Account[];
-      nextCursor?: string | null;
-    };
+    const selfId = String(user.id || "");
+    const scoped = canSelect && viewingUserId && viewingUserId !== selfId;
+    const acc = (await apiGet(
+      scoped
+        ? `/api/sales-ops/team/${viewingUserId}/accounts?limit=50&cursor=${encodeURIComponent(accountsCursor)}`
+        : `/api/sales-ops/me/accounts?limit=50&cursor=${encodeURIComponent(accountsCursor)}`,
+      sessionToken
+    )) as { accounts: Account[]; nextCursor?: string | null };
     setAccounts((current) => [...current, ...(acc.accounts || [])]);
     setAccountsCursor(acc.nextCursor || null);
   }
@@ -609,23 +824,17 @@ export default function SalesOpsApp() {
     );
   }
 
-  const selectedRamp = ramp.find((item) => item.period === form.period) ?? ramp[0];
-  const insights = { ...DEFAULT_INSIGHTS, ...(planBundle?.insights || {}) };
-  const showInsight = (key: string) => {
-    if (insights[key]) setInsight(insights[key]);
-  };
   const tabs: [Tab, string, string, boolean][] = [
     ["overview", "01", "Overview", true],
-    ["performance", "02", "Performance", true],
-    ["accounts", "03", "Accounts", true],
-    ["plan", "04", "Plan", true],
-    ["entry", "05", "Scorecards", true],
-    ["commission", "06", "Commission", true],
-    ["team", "07", "Team Performance", Boolean((me?.access as { isManager?: boolean; isOrgAdmin?: boolean } | undefined)?.isManager || (me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
-    ["admin", "08", "Plan Builder", Boolean((me?.access as { canAdministerPlans?: boolean } | undefined)?.canAdministerPlans)],
-    ["identity", "09", "Identity Review", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)],
-    ["baseline", "10", "Baseline gap", Boolean((me?.access as { isOrgAdmin?: boolean } | undefined)?.isOrgAdmin)]
+    ["accounts", "02", "Accounts", true],
+    ["plan", "03", "Plan", true],
+    ["performance", "04", "Performance", true],
+    ["team", "05", "Team", canSelect],
+    ["setup", "06", "Setup", Boolean(access.canAdministerPlans || access.isOrgAdmin)]
   ];
+  const ytdContributors = performance?.ytdAccounts || perfAccounts;
+  const roleCounts = operating?.book?.roleCounts || {};
+  const healthCounts = operating?.book?.healthCounts || {};
 
   return (
     <div className="sales-ops-root">
@@ -642,28 +851,36 @@ export default function SalesOpsApp() {
         onSignOut={() => void signOut()}
       />
       <main>
-        <header className="site-header">
+        <header className={`site-header ${hasNorthStar ? "" : "compact-hero"}`}>
           <div className="header-glow" />
           <div className="hero-fallback" aria-hidden="true" />
           <div className="hero shell">
             <div className="hero-copy">
-              <p className="eyebrow">{String(plan?.territoryName || "Sales territory")}</p>
+              <p className="eyebrow">{String(subject?.territoryName || subjectPlan?.territoryName || "Sales territory")}</p>
               <h1>
                 {headline.replace(/(\d[\d,]*\s*sq ft)/i, "")}
                 <br />
-                <em>{fmt.format(Number(plan?.northStarTarget || 0))} sq ft.</em>
+                <em>{heroEm}</em>
               </h1>
-              <p>{String(plan?.subtitle || "A measurable operating system from territory launch to repeatable, durable growth.")}</p>
+              <p>{heroLead}</p>
             </div>
-            <div className="hero-target">
-              <span>North star</span>
-              <strong>{fmt.format(Number(plan?.northStarTarget || 0))}</strong>
-              <small>
-                {String(plan?.northStarMetric || "installed sq ft / month")}
-                <br />
-                {plan?.northStarTargetDate ? `by ${String(plan.northStarTargetDate)}` : ""}
-              </small>
-            </div>
+            {hasNorthStar ? (
+              <div className="hero-target">
+                <span>North star</span>
+                <strong>{fmt.format(northStar as number)}</strong>
+                <small>
+                  {String(subjectPlan?.northStarMetric || "installed sq ft / month")}
+                  <br />
+                  {subjectPlan?.northStarTargetDate ? `by ${String(subjectPlan.northStarTargetDate)}` : ""}
+                </small>
+              </div>
+            ) : operating?.performance?.ytd?.actualSf != null ? (
+              <div className="hero-target">
+                <span>YTD actual</span>
+                <strong>{fmt.format(Number(operating.performance.ytd.actualSf))}</strong>
+                <small>Completed installation SF</small>
+              </div>
+            ) : null}
           </div>
         </header>
 
@@ -679,6 +896,28 @@ export default function SalesOpsApp() {
         </nav>
 
         <section className="shell page-shell">
+          {canSelect ? (
+            <div className="person-context">
+              <div>
+                <p className="kicker">Viewing</p>
+                <strong>{subjectName || "Select a salesperson"}</strong>
+              </div>
+              <label>
+                Salesperson
+                <select
+                  value={viewingUserId || ""}
+                  onChange={(e) => persistViewing(e.target.value || null)}
+                >
+                  <option value="">Select a salesperson</option>
+                  {people.map((row) => (
+                    <option key={row.userId} value={row.userId}>
+                      {salespersonDisplayName(row.displayName)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
           {loadError && <div className="stale-banner"><b>Could not load Sales Ops.</b> {loadError}</div>}
           {integration.stale && (
             <div className="stale-banner">
@@ -688,70 +927,119 @@ export default function SalesOpsApp() {
 
           {tab === "overview" && (
             <div className="tab-page">
-              {!plan && <div className="empty-banner"><div><p className="kicker">No active plan</p><h3>A manager or admin needs to publish your sales plan.</h3></div></div>}
-              {Boolean((me as { upcomingPlan?: { planName?: string; effectiveStartDate?: string } } | null)?.upcomingPlan) && (
-                <div className="stale-banner">
-                  <b>Upcoming plan.</b> {(me as { upcomingPlan?: { planName?: string; effectiveStartDate?: string } }).upcomingPlan?.planName} is scheduled for {(me as { upcomingPlan?: { effectiveStartDate?: string } }).upcomingPlan?.effectiveStartDate}. It is not your active plan yet.
-                </div>
-              )}
-              {plan && !plan.acknowledgedAt && (
-                <div className="ack-banner">
+              {canSelect && !operating ? (
+                <div className="empty-banner">
                   <div>
-                    <p className="kicker">Acknowledgment</p>
-                    <h3>A new published plan is ready for you to acknowledge.</h3>
+                    <p className="kicker">Person context</p>
+                    <h3>Select a salesperson to open the operating view.</h3>
+                    <p>Overview, Accounts, Plan, and Performance all use this same person.</p>
                   </div>
-                  <button className="primary-button" type="button" onClick={() => void acknowledgePlan()}>Acknowledge plan</button>
                 </div>
-              )}
-              <div className="section-heading split-heading">
-                <div>
-                  <p className="kicker">{String(plan?.planName || "The operating system")}</p>
-                  <h2>One outcome. Clear behaviors.<br />Shared ownership.</h2>
-                </div>
-                <p>{String((planBundle as { planCopy?: { introduction?: string } } | null)?.planCopy?.introduction || plan?.subtitle || "Installed square feet is the outcome. Pipeline, account movement and disciplined activity tell us early whether the territory is on course.")}</p>
-              </div>
-              <div className="north-star-grid">
-                <article className="feature-card dark-card explorable" role="button" tabIndex={0} onClick={() => showInsight("installed")}>
-                  <span className="card-index">01 / RESULT</span>
-                  <h3>Credited installed<br />square feet</h3>
-                  <p>The formal monthly result, coached with a rolling three-month view.</p>
-                  <div className="card-stat">
-                    <strong>{fmt.format(Number(plan?.northStarTarget || 0))}</strong>
-                    <span>north star</span>
+              ) : (
+                <>
+                  {!publishedPlan && (
+                    <div className="empty-banner">
+                      <div>
+                        <p className="kicker">No published plan</p>
+                        <h3>No published plan{subjectName ? ` for ${subjectName}` : ""}.</h3>
+                        <p>Actual performance is already being tracked. Goal stays unavailable until a plan is published.</p>
+                      </div>
+                      {access.canAdministerPlans ? (
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={() => {
+                            setSetupPanel("builder");
+                            setTab("setup");
+                          }}
+                        >
+                          Build plan
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                  {plan && !plan.acknowledgedAt && !canSelect && (
+                    <div className="ack-banner">
+                      <div>
+                        <p className="kicker">Acknowledgment</p>
+                        <h3>A new published plan is ready for you to acknowledge.</h3>
+                      </div>
+                      <button className="primary-button" type="button" onClick={() => void acknowledgePlan()}>Acknowledge plan</button>
+                    </div>
+                  )}
+                  <div className="command-grid">
+                    <article className="command-card">
+                      <p className="kicker">Person</p>
+                      <h3>{subjectName || "Salesperson"}</h3>
+                      <p>Manager: {subject?.managerDisplayName ? salespersonDisplayName(subject.managerDisplayName) : "—"}</p>
+                      <p>Territory: {subject?.territoryName || "—"}</p>
+                    </article>
+                    <article className="command-card">
+                      <p className="kicker">Current performance · {performance?.period || "—"}</p>
+                      <div className="command-metrics">
+                        <div><span>Actual</span><strong>{fmtMaybe(performance?.currentMonth?.actualSf)}</strong></div>
+                        <div><span>Goal</span><strong>{fmtMaybe(performance?.currentMonth?.goalSf)}</strong></div>
+                        <div><span>Variance</span><strong>{fmtMaybe(performance?.currentMonth?.varianceSf)}</strong></div>
+                        <div><span>Attainment</span><strong>{fmtPct(performance?.currentMonth?.attainmentPct)}</strong></div>
+                      </div>
+                    </article>
+                    <article className="command-card">
+                      <p className="kicker">YTD</p>
+                      <div className="command-metrics">
+                        <div><span>Actual</span><strong>{fmtMaybe(performance?.ytd?.actualSf)}</strong></div>
+                        <div><span>Goal</span><strong>{fmtMaybe(performance?.ytd?.goalSf)}</strong></div>
+                        <div><span>Variance</span><strong>{fmtMaybe(performance?.ytd?.varianceSf)}</strong></div>
+                      </div>
+                    </article>
                   </div>
-                </article>
-                <article className="feature-card texture-card explorable" role="button" tabIndex={0} onClick={() => showInsight("pipeline")}>
-                  <span className="card-index">02 / SIGNAL</span>
-                  <h3>Qualified<br />pipeline coverage</h3>
-                  <p>Named opportunities with square feet, decision path, next action and realistic install timing.</p>
-                </article>
-                <article className="feature-card light-card explorable" role="button" tabIndex={0} onClick={() => showInsight("engine")}>
-                  <span className="card-index">03 / ENGINE</span>
-                  <h3>Activity that<br />creates a next step</h3>
-                  <div className="mini-metrics">
-                    {(planBundle?.metricTargets || []).slice(0, 4).map((m) => (
-                      <button type="button" key={String(m.metricKey)} onClick={(event) => { event.stopPropagation(); showInsight("engine"); }}>
-                        <strong>{String(m.targetValue)}</strong>
-                        <span>{String(m.label)}</span>
-                        <i aria-hidden="true">↗</i>
-                      </button>
-                    ))}
+                  <div className="command-grid">
+                    <article className="command-card">
+                      <p className="kicker">Account intelligence</p>
+                      <div className="command-metrics">
+                        <div><span>Anchor</span><strong>{fmt.format(Number(roleCounts.ANCHOR || 0))}</strong></div>
+                        <div><span>Growth</span><strong>{fmt.format(Number(roleCounts.GROWTH_OPPORTUNITY || 0))}</strong></div>
+                        <div><span>Reactivation</span><strong>{fmt.format(Number(roleCounts.REACTIVATION || 0))}</strong></div>
+                        <div><span>Needs Attention</span><strong>{fmt.format(Number(healthCounts.NEEDS_ATTENTION || 0))}</strong></div>
+                        <div><span>Identity / data gap</span><strong>{fmt.format(Number(operating?.book?.identityGapCount || healthCounts.DATA_GAP || 0))}</strong></div>
+                      </div>
+                    </article>
+                    <article className="command-card">
+                      <p className="kicker">Top contributing accounts</p>
+                      {(ytdContributors || []).slice(0, 8).map((row) => (
+                        <div className="workspace-line" key={row.accountDirectoryAccountId}>
+                          <span>
+                            {row.canOpenWorkspace && row.salesOpsAccountId ? (
+                              <button type="button" className="text-link" onClick={() => { void openAccountById(row.salesOpsAccountId as string); setTab("accounts"); }}>
+                                {row.accountName || "Assigned account"}
+                              </button>
+                            ) : (
+                              row.accountName || "Account"
+                            )}
+                          </span>
+                          <strong>{fmtMaybe(row.creditedSf)} SF</strong>
+                        </div>
+                      ))}
+                      {(ytdContributors || []).length === 0 && <p className="workspace-muted">No credited YTD contribution yet.</p>}
+                    </article>
+                    <article className="command-card">
+                      <p className="kicker">Priorities</p>
+                      {(operating?.book?.priorities || []).map((row) => (
+                        <div className="workspace-line" key={row.salesOpsAccountId}>
+                          <span>
+                            <button type="button" className="text-link" onClick={() => { void openAccountById(row.salesOpsAccountId); setTab("accounts"); }}>
+                              {row.accountName}
+                            </button>
+                            <small>{[row.roleLabel, row.healthLabel].filter(Boolean).join(" · ")}</small>
+                          </span>
+                          <strong>{row.reasonCopy || ""}</strong>
+                        </div>
+                      ))}
+                      {(operating?.book?.priorities || []).length === 0 && (
+                        <p className="workspace-muted">No governed account-action priorities beyond identity gaps.</p>
+                      )}
+                    </article>
                   </div>
-                </article>
-              </div>
-              {planHistory.length > 0 && (
-                <div className="plan-history">
-                  <p className="kicker">Published plan history</p>
-                  <ul>
-                    {planHistory.map((row) => (
-                      <li key={String(row.id)}>
-                        <strong>{String(row.planName || "Plan")}</strong>
-                        <span>v{String(row.versionNumber || 1)} · {String(row.status)}</span>
-                        <small>{String(row.effectiveStartDate || "—")} → {String(row.effectiveEndDate || "open")}</small>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -761,42 +1049,15 @@ export default function SalesOpsApp() {
               <div className="section-heading split-heading progress-heading">
                 <div>
                   <p className="kicker">
-                    {scopedUserId
-                      ? `${salespersonDisplayName(
-                          String(
-                            (teamPerformance?.rows || []).find((row) => String(row.userId) === scopedUserId)?.displayName ||
-                              ""
-                          )
-                        )} · team member performance`
-                      : `Current month ${performance?.period || ""}`}
+                    {subjectName ? `${subjectName} · ` : ""}Current month {performance?.period || ""}
                   </p>
                   <h2>Goal versus actual square feet.</h2>
                 </div>
-                {(teamPerformance?.rows || []).length > 0 ? (
-                  <label>
-                    Salesperson
-                    <select
-                      value={scopedUserId || ""}
-                      onChange={(e) => setScopedUserId(e.target.value || null)}
-                    >
-                      <option value="">My performance</option>
-                      {(teamPerformance?.rows || []).map((row) => (
-                        <option key={String(row.userId)} value={String(row.userId)}>
-                          {salespersonDisplayName(String(row.displayName || ""))}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : scopedUserId ? (
-                  <button type="button" className="text-link" onClick={() => setScopedUserId(null)}>
-                    My performance
-                  </button>
-                ) : null}
               </div>
-              {performance?.currentMonth?.actualStatus && performance.currentMonth.actualStatus !== "AVAILABLE" && (
+              {readiness && !readiness.actualSfAvailable && (
                 <div className="stale-banner">
-                  <b>{performance.currentMonth.actualStatus.split("_").join(" ")}.</b>{" "}
-                  {performance.actualSfDefinition?.note || "Actual SF is not treated as zero when the governed source is unavailable."}
+                  <b>Actual SF is not available yet.</b>{" "}
+                  {performance?.actualSfDefinition?.note || "Credited production appears here after attribution is active. Missing Goal does not hide Actual SF."}
                 </div>
               )}
               <div className="score-grid">
@@ -943,206 +1204,130 @@ export default function SalesOpsApp() {
             </div>
           )}
 
-          {tab === "entry" && selectedRamp && (
-            <div className="tab-page">
-              <form className="entry-layout" onSubmit={(e) => void saveScorecard(e)}>
-                <div className="entry-main">
-                  <div className="form-section month-section">
-                    <div>
-                      <label htmlFor="month">Reporting month</label>
-                      <select id="month" value={form.period} onChange={(e) => change("period", e.target.value)}>
-                        {ramp.map((item) => (
-                          <option value={item.period} key={item.period}>
-                            {item.label} {item.year}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="target-chip">
-                      <span>Installed target</span>
-                      <strong>
-                        {fmt.format(Number(selectedRamp.installedTarget))} <small>sq ft</small>
-                      </strong>
-                    </div>
-                  </div>
-                  <div className="form-section">
-                    <div className="field-grid three">
-                      {(["installed", "quoted", "awarded"] as const).map((field) => (
-                        <div className="field-control" key={field}>
-                          <label htmlFor={field}>
-                            {field} sq ft <span className={`source-chip ${sourceLabel(scorecards.find((s) => s.period === form.period)?.sources?.[field]).cls}`}>{sourceLabel(scorecards.find((s) => s.period === form.period)?.sources?.[field]).text}</span>
-                          </label>
-                          <input id={field} type="number" min="0" value={form[field]} onChange={(e) => change(field, e.target.value)} />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="field-grid two" style={{ marginTop: 18 }}>
-                      <div className="field-control">
-                        <label htmlFor="pipeline">Qualified 90-day pipeline</label>
-                        <input id="pipeline" type="number" min="0" value={form.pipeline} onChange={(e) => change("pipeline", e.target.value)} />
-                      </div>
-                      <div className="field-control">
-                        <label htmlFor="note">Manager note</label>
-                        <textarea id="note" value={form.note} onChange={(e) => change("note", e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <aside className="entry-aside">
-                  <div className="preview-card">
-                    <p className="kicker">Live preview</p>
-                    <h3>
-                      {selectedRamp.label} {selectedRamp.year}
-                    </h3>
-                    <button className="save-button" type="submit">
-                      Save scorecard <ArrowIcon />
-                    </button>
-                    {saved && <div className="save-confirmation">Scorecard saved to eliteOS.</div>}
-                  </div>
-                  <div className="privacy-note">
-                    <span>Brain persistence</span>
-                    <p>Marks are stored in eliteOS for your authenticated user. They are not kept in this browser as the authority.</p>
-                  </div>
-                </aside>
-              </form>
-            </div>
-          )}
-
           {tab === "accounts" && (
             <div className="tab-page account-page">
               <div className="account-integrity">
                 <div className="integrity-mark"><span>✓</span></div>
                 <div>
-                  <p className="kicker">Source-of-truth protection</p>
+                  <p className="kicker">Assigned book</p>
                   <h3>Monday owns assignment. Historical production is evidence—not ownership.</h3>
-                  <p>{accountListScopeCopy(me?.access as { isOrgAdmin?: boolean; isManager?: boolean } | undefined)}</p>
+                  <p>{accountListScopeCopy(access, { viewingSelectedBook: Boolean(canSelect && viewingUserId) })}</p>
                 </div>
                 <small>
-                  Synced
+                  Assigned
                   <br />
-                  <b>{accounts[0]?.syncedAt ? String(accounts[0].syncedAt).slice(0, 10) : "awaiting sync"}</b>
+                  <b>{assignedCount != null ? fmt.format(assignedCount) : "—"}</b>
                 </small>
               </div>
               <div className="account-workbench">
                 <div>
-                  <p className="kicker">Priority workbench</p>
-                  <h2>{filteredAccounts.length} accounts in view</h2>
+                  <p className="kicker">Account book</p>
+                  <h2>
+                    {assignedCount != null ? `${fmt.format(assignedCount)} assigned accounts` : "Assigned accounts"}
+                    {assignedCount != null && filteredAccounts.length !== assignedCount ? (
+                      <small className="showing-count"> Showing {fmt.format(filteredAccounts.length)}</small>
+                    ) : null}
+                  </h2>
                 </div>
                 <div className="account-controls">
                   <label>
                     <span>Find an account</span>
-                    <input type="search" value={accountQuery} onChange={(e) => setAccountQuery(e.target.value)} placeholder="Search name, market, type…" />
+                    <input type="search" value={accountQuery} onChange={(e) => setAccountQuery(e.target.value)} placeholder="Search name, market…" />
                   </label>
-                  <div className="tier-filters">
-                    {["All", "Anchor candidate", "Growth", "Reactivate", "Develop"].map((tier) => (
-                      <button type="button" key={tier} className={accountTier === tier ? "active" : ""} onClick={() => setAccountTier(tier)}>
-                        {tier === "Anchor candidate" ? "Anchor" : tier}
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
-              <div className="account-grid">
-                {filteredAccounts.map((account) => {
-                  const performance = account.intelligence?.performance;
-                  const tier = account.intelligence?.recommendedTier || "Develop";
-                  const tone = tier.toLowerCase().replace(" candidate", "");
-                  return (
-                    <article className={`account-card ${tone}`} key={account.id} role="button" tabIndex={0} onClick={() => void openAccount(account)}>
-                      <div className="account-card-top">
-                        <span className="tier-chip"><i />{tier}</span>
-                        <small>{account.status || "Status not set"}</small>
-                      </div>
-                      <h3>{account.accountName}</h3>
-                      <p className="account-play">{account.intelligence?.strategicPlay || "Qualify potential"}</p>
-                      {performance ? (
-                        <div className="account-performance">
-                          <div><strong>{fmt.format(Number(performance.trailing12SqFt || 0))}</strong><span>TTM sq ft</span></div>
-                          <div><strong>{performance.trailing12Jobs || 0}</strong><span>jobs</span></div>
-                        </div>
-                      ) : (
-                        <div className="account-performance-empty"><span>No verified production match</span><b>Qualify the potential</b></div>
-                      )}
-                      <div className="account-card-foot"><span>{account.market || account.branch || "Profile incomplete"}</span><b>Open workspace <ArrowIcon /></b></div>
-                    </article>
-                  );
-                })}
-                {accountsCursor && (
-                  <button type="button" onClick={() => void loadMoreAccounts()}>Load more accounts</button>
-                )}
-              </div>
+              {ACCOUNT_BUCKETS.map((group) => {
+                const used = new Set<string>();
+                for (const prior of ACCOUNT_BUCKETS) {
+                  if (prior.key === group.key) break;
+                  for (const row of filteredAccounts) {
+                    if (prior.match(row)) used.add(row.salesOpsAccountId);
+                  }
+                }
+                const items = filteredAccounts.filter((row) => !used.has(row.salesOpsAccountId) && group.match(row));
+                if (!items.length) return null;
+                return (
+                  <section className="account-group" key={group.key}>
+                    <p className="kicker">{group.kicker}</p>
+                    <h3>{group.title}</h3>
+                    {group.key === "data-gaps" ? (
+                      <p className="workspace-muted">
+                        Production history unavailable until account identity is resolved.
+                        {access.isOrgAdmin ? " Identity Review is in Setup." : " Sales does not administer identity from this view."}
+                      </p>
+                    ) : null}
+                    <div className="account-line-list">
+                      {items.map((row) => (
+                        <button
+                          type="button"
+                          className="account-line"
+                          key={row.salesOpsAccountId}
+                          onClick={() => void openAccountById(row.salesOpsAccountId, { id: row.salesOpsAccountId, accountName: row.accountName })}
+                        >
+                          <span>
+                            <strong>{row.accountName}</strong>
+                            <small>{[row.roleLabel, row.healthLabel, row.market || row.branch].filter(Boolean).join(" · ")}</small>
+                          </span>
+                          <b>
+                            {row.appliedHealth === "DATA_GAP"
+                              ? "Identity unresolved"
+                              : row.trailingCompletedSf != null
+                                ? `${fmt.format(Number(row.trailingCompletedSf))} SF`
+                                : "Open"}
+                          </b>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+              {!filteredAccounts.length && <p className="workspace-muted">No assigned accounts in this book.</p>}
             </div>
           )}
 
           {tab === "plan" && (
             <div className="tab-page">
-              {planBundle ? (
+              {planBundle && publishedPlan ? (
                 <PlanExperience
                   bundle={planBundle as ExperienceBundle}
                   book={planBook}
-                  salespersonName={salespersonDisplayName(user.fullName, user.firstName)}
+                  salespersonName={subjectName || salespersonDisplayName(user.fullName, user.firstName)}
                   performance={performance}
                   compensation={planBook?.compensation || null}
                   showCompensation={Boolean(plan?.commissionEnabled)}
+                  onIdentityReview={access.isOrgAdmin ? () => { setSetupPanel("identity"); setTab("setup"); } : null}
                 />
               ) : (
-                <div className="section-heading">
-                  <p className="kicker">Assigned plan</p>
-                  <h2>No published plan</h2>
-                  <p>Your assigned operating plan will appear here after it is published.</p>
+                <div className="empty-banner">
+                  <div>
+                    <p className="kicker">Plan</p>
+                    <h3>No published plan{subjectName ? ` for ${subjectName}` : ""}.</h3>
+                    <p>Actual performance is already being tracked. This page stays empty until a plan is published.</p>
+                  </div>
+                  {access.canAdministerPlans ? (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => {
+                        setSetupPanel("builder");
+                        setTab("setup");
+                      }}
+                    >
+                      Build draft plan
+                    </button>
+                  ) : null}
                 </div>
               )}
-              {planHistory.length > 0 && (
-                <div className="plan-history">
-                  <p className="kicker">Published plan history</p>
-                  <ul>
-                    {planHistory.map((row) => (
-                      <li key={String(row.id)}>
-                        <strong>{String(row.planName || "Plan")}</strong>
-                        <span>v{String(row.versionNumber || 1)} · {String(row.status)}</span>
-                        <small>{String(row.effectiveStartDate || "—")} → {String(row.effectiveEndDate || "open")}</small>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "commission" && (
-            <div className="tab-page">
-              {!commission?.enabled ? (
-                <div className="gated-banner">
-                  <b>Commission is not enabled for this plan.</b> No other salesperson’s commission evidence is shown. Enablement is a per-plan feature, not a shared ledger.
-                </div>
-              ) : (
-                <div>
-                  <p className="kicker">Your commission snapshot</p>
-                  <h2>Scoped to your assignment.</h2>
-                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(commission.snapshot || {}, null, 2)}</pre>
-                </div>
-              )}
-              {commission && "compensation" in commission && commission.compensation ? (
-                <div className="commission-config">
-                  <p className="kicker">Compensation configuration</p>
-                  <h2>{(commission.compensation as { finallyApproved?: boolean }).finallyApproved ? "Approved" : "Proposal — not finally approved"}</h2>
-                  <p className="workspace-muted">
-                    Performance targets, commission eligibility, rates, and payment approval stay separate. Locked or paid
-                    monthly reports never silently recalculate.
-                  </p>
-                  <small>
-                    Workflow: {String(((commission.compensation as { workflow?: string[] }).workflow || []).join(" → "))}
-                  </small>
-                </div>
-              ) : null}
             </div>
           )}
 
           {tab === "team" && (
             <div className="tab-page">
               <p className="kicker">Team performance</p>
-              <h2>Governed scope only.</h2>
-              <p className="workspace-muted">Sales sees self. Managers see assigned reports. Admin/executive sees the organization. Actual SF stays unavailable until worksheet completed-first-install fields exist on Moraware prepared facts.</p>
+              <h2>Organization / report scope.</h2>
+              <p className="workspace-muted">
+                Actual SF and Goal are independent. A blank Goal does not hide credited Actual SF. Click a salesperson to open their operating view.
+              </p>
               <div className="month-goal-table" role="table" aria-label="Team performance">
                 <div className="month-goal-head team-perf-head" role="row">
                   <span>Salesperson</span>
@@ -1159,8 +1344,8 @@ export default function SalesOpsApp() {
                     className="month-goal-row team-perf-row"
                     key={String(row.userId)}
                     onClick={() => {
-                      setScopedUserId(String(row.userId));
-                      setTab("performance");
+                      persistViewing(String(row.userId));
+                      setTab("overview");
                     }}
                   >
                     <span>
@@ -1186,28 +1371,42 @@ export default function SalesOpsApp() {
             </div>
           )}
 
-          {tab === "admin" && sessionToken && (
-            <PlanAdmin
-              token={sessionToken}
-              access={(me?.access as { isOrgAdmin?: boolean; canPublishPlans?: boolean }) || {}}
-              onChanged={() => void reload()}
-              onOpenIdentityReview={() => setTab("identity")}
-            />
+          {tab === "setup" && sessionToken && (
+            <div className="tab-page">
+              <div className="setup-subnav">
+                {access.canAdministerPlans ? (
+                  <button type="button" className={setupPanel === "builder" ? "active" : ""} onClick={() => setSetupPanel("builder")}>
+                    Plan Builder
+                  </button>
+                ) : null}
+                {access.isOrgAdmin ? (
+                  <>
+                    <button type="button" className={setupPanel === "identity" ? "active" : ""} onClick={() => setSetupPanel("identity")}>
+                      Identity Review
+                    </button>
+                    <button type="button" className={setupPanel === "baseline" ? "active" : ""} onClick={() => setSetupPanel("baseline")}>
+                      Baseline Gap
+                    </button>
+                  </>
+                ) : null}
+              </div>
+              {setupPanel === "builder" && access.canAdministerPlans ? (
+                <PlanAdmin
+                  token={sessionToken}
+                  access={{ isOrgAdmin: access.isOrgAdmin, canPublishPlans: access.canPublishPlans }}
+                  onChanged={() => void reload()}
+                  onOpenIdentityReview={() => setSetupPanel("identity")}
+                />
+              ) : null}
+              {setupPanel === "identity" && access.isOrgAdmin ? (
+                <IdentityReview token={sessionToken} access={{ isOrgAdmin: access.isOrgAdmin }} />
+              ) : null}
+              {setupPanel === "baseline" && access.isOrgAdmin ? (
+                <BaselineGap token={sessionToken} access={{ isOrgAdmin: access.isOrgAdmin }} />
+              ) : null}
+            </div>
           )}
 
-          {tab === "identity" && sessionToken && (
-            <IdentityReview
-              token={sessionToken}
-              access={(me?.access as { isOrgAdmin?: boolean }) || {}}
-            />
-          )}
-
-          {tab === "baseline" && sessionToken && (
-            <BaselineGap
-              token={sessionToken}
-              access={(me?.access as { isOrgAdmin?: boolean }) || {}}
-            />
-          )}
         </section>
       </main>
 
