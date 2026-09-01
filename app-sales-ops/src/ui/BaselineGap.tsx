@@ -24,6 +24,9 @@ type QueueRow = {
   requiredAction: string;
 };
 
+type MonthSlice = { may: number; june: number; july: number; total: number };
+type Recon = { actual: MonthSlice; reconciled: boolean };
+
 type GapReport = {
   verdict: string;
   activationGate: string;
@@ -33,9 +36,14 @@ type GapReport = {
   assignedUserId?: string | null;
   salespersonLabel?: string | null;
   recommendedNextStep?: string;
-  expected?: { may: number; june: number; july: number; total: number };
-  nameMatchedReconstruction?: { actual: { may: number; june: number; july: number; total: number }; reconciled: boolean };
-  stableIdReconstruction?: { actual: { may: number; june: number; july: number; total: number }; reconciled: boolean };
+  expected?: MonthSlice;
+  nameMatchedReconstruction?: Recon;
+  diagnosticPotentialReconstruction?: Recon;
+  stableIdReconstruction?: Recon;
+  authoritativeReconstruction?: Recon;
+  currentApprovedIdentitySf?: MonthSlice;
+  historicalApprovedMappingSf?: MonthSlice;
+  totalAuthoritativeSf?: MonthSlice;
   unresolvedStableIdSf?: number;
   currentBookPreviewGapSf?: number;
   currentBookVsHistoricalBook?: { both: BookSlice; historicalOnly: BookSlice; currentOnly: BookSlice };
@@ -106,7 +114,10 @@ export default function BaselineGap({ token, access }: { token: string; access: 
 
   const book = report?.currentBookVsHistoricalBook;
   const nameActual = report?.nameMatchedReconstruction?.actual;
-  const stableActual = report?.stableIdReconstruction?.actual;
+  const diagnosticActual = report?.diagnosticPotentialReconstruction?.actual;
+  const authoritativeActual = report?.authoritativeReconstruction?.actual || report?.stableIdReconstruction?.actual;
+  const currentApproved = report?.currentApprovedIdentitySf;
+  const historicalMapping = report?.historicalApprovedMappingSf;
 
   return (
     <div className="tab-page identity-review">
@@ -114,7 +125,8 @@ export default function BaselineGap({ token, access }: { token: string; access: 
       <h2>Explain the May–July completed-install gap before Actual SF is written.</h2>
       <p className="workspace-muted">
         Historical credit uses the approved starter book, not today’s Monday assignment. Current owner is CRM
-        visibility only. This report does not approve identity and does not write attribution facts.
+        visibility only. This report does not approve identity and does not write attribution facts. Only the
+        authoritative reconstruction can activate Actual SF.
       </p>
       {error && <div className="field-error">{error}</div>}
       <div className="plan-admin-actions identity-review-filters">
@@ -177,7 +189,11 @@ export default function BaselineGap({ token, access }: { token: string; access: 
             </div>
           ))}
 
-          <h3>Acceptance reconstruction</h3>
+          <h3>Diagnostic / potential reconstruction</h3>
+          <p className="workspace-muted">
+            May include unique Identity Review candidates and name matches. Useful for review. Never authorizes
+            attribution.
+          </p>
           <div className="month-goal-head baseline-recon-head">
             <span>Source</span>
             <span>May</span>
@@ -200,11 +216,45 @@ export default function BaselineGap({ token, access }: { token: string; access: 
             <span>{fmt(nameActual?.total)}</span>
           </div>
           <div className="month-goal-row baseline-recon-row">
-            <strong>Stable ID (approved + Moraware)</strong>
-            <span>{fmt(stableActual?.may)}</span>
-            <span>{fmt(stableActual?.june)}</span>
-            <span>{fmt(stableActual?.july)}</span>
-            <span>{fmt(stableActual?.total)}</span>
+            <strong>Potential (includes unapproved candidates)</strong>
+            <span>{fmt(diagnosticActual?.may)}</span>
+            <span>{fmt(diagnosticActual?.june)}</span>
+            <span>{fmt(diagnosticActual?.july)}</span>
+            <span>{fmt(diagnosticActual?.total)}</span>
+          </div>
+
+          <h3>Authoritative / approved reconstruction</h3>
+          <p className="workspace-muted">
+            Approved Monday → Account Directory links plus explicit human-approved historical mappings only.
+            This is the activation gate.
+          </p>
+          <div className="month-goal-head baseline-recon-head">
+            <span>Source</span>
+            <span>May</span>
+            <span>June</span>
+            <span>July</span>
+            <span>Total</span>
+          </div>
+          <div className="month-goal-row baseline-recon-row">
+            <strong>Current approved identity</strong>
+            <span>{fmt(currentApproved?.may)}</span>
+            <span>{fmt(currentApproved?.june)}</span>
+            <span>{fmt(currentApproved?.july)}</span>
+            <span>{fmt(currentApproved?.total)}</span>
+          </div>
+          <div className="month-goal-row baseline-recon-row">
+            <strong>Approved historical mapping</strong>
+            <span>{fmt(historicalMapping?.may)}</span>
+            <span>{fmt(historicalMapping?.june)}</span>
+            <span>{fmt(historicalMapping?.july)}</span>
+            <span>{fmt(historicalMapping?.total)}</span>
+          </div>
+          <div className="month-goal-row baseline-recon-row">
+            <strong>Authoritative total</strong>
+            <span>{fmt(authoritativeActual?.may)}</span>
+            <span>{fmt(authoritativeActual?.june)}</span>
+            <span>{fmt(authoritativeActual?.july)}</span>
+            <span>{fmt(authoritativeActual?.total)}</span>
           </div>
 
           <h3>Gap by cause</h3>

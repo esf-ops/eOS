@@ -123,16 +123,49 @@ function reviewForAccount(reviewsByAccountId, accountId) {
   return reviewsByAccountId.get(String(accountId || "")) || null;
 }
 
-function candidateAd(review, account) {
-  const approved = String(account?.accountDirectoryAccountId || review?.linkedAccountDirectoryAccountId || "").trim();
-  if (approved) return approved;
-  const candidates = review?.candidates || [];
-  if (candidates.length === 1) return String(candidates[0].accountDirectoryAccountId || "").trim() || null;
+function mondayApprovedAd(account, review) {
+  const fromAccount = String(account?.accountDirectoryAccountId || "").trim();
+  if (fromAccount) return fromAccount;
+  if (isExactSourceIdStatus(review?.status)) {
+    return String(review?.linkedAccountDirectoryAccountId || "").trim() || null;
+  }
   return null;
 }
 
+function historicalApprovedAd(hint) {
+  if (String(hint?.historicalIdentityStatus || "") !== "approved") return null;
+  return String(hint?.accountDirectoryAccountId || "").trim() || null;
+}
+
+function uniqueCandidateAd(review) {
+  const candidates = review?.candidates || [];
+  if (candidates.length !== 1) return null;
+  return String(candidates[0].accountDirectoryAccountId || "").trim() || null;
+}
+
+/** Diagnostic only. Unique unapproved candidates never authorize attribution. */
+function diagnosticAd(review, account, hint) {
+  return mondayApprovedAd(account, review) || historicalApprovedAd(hint) || uniqueCandidateAd(review);
+}
+
+/** Activation gate. Approved Monday identity or explicit historical mapping only. */
+function authoritativeAd(review, account, hint) {
+  return mondayApprovedAd(account, review) || historicalApprovedAd(hint);
+}
+
+function attributionAuthority(review, account, hint) {
+  if (mondayApprovedAd(account, review)) return "monday_approved";
+  if (historicalApprovedAd(hint)) return "historical_mapping";
+  if (uniqueCandidateAd(review)) return "unapproved_candidate";
+  return "none";
+}
+
+function candidateAd(review, account) {
+  return mondayApprovedAd(account, review) || uniqueCandidateAd(review);
+}
+
 function attributionAd(review, account, hint) {
-  return candidateAd(review, account) || String(hint?.accountDirectoryAccountId || "").trim() || null;
+  return diagnosticAd(review, account, hint);
 }
 
 function exactPending(review) {
@@ -289,14 +322,20 @@ export function reconcileCompletedSfBaselineGap({
       .map((a) => a.id)
   );
 
-  const mwToHistorical = new Map();
+  const mwToDiagnostic = new Map();
+  const mwToAuthoritative = new Map();
   const nameToHistorical = new Map();
   for (const row of historicalAccounts) {
     const review = reviewForAccount(reviewsByAccountId, row.account.id);
-    const ad = attributionAd(review, row.account, row.hint);
-    for (const ext of morawareIdsForAd(morawareByAccount, ad)) {
-      if (!mwToHistorical.has(ext)) mwToHistorical.set(ext, []);
-      mwToHistorical.get(ext).push(row);
+    const diagnostic = diagnosticAd(review, row.account, row.hint);
+    const authoritative = authoritativeAd(review, row.account, row.hint);
+    for (const ext of morawareIdsForAd(morawareByAccount, diagnostic)) {
+      if (!mwToDiagnostic.has(ext)) mwToDiagnostic.set(ext, []);
+      mwToDiagnostic.get(ext).push(row);
+    }
+    for (const ext of morawareIdsForAd(morawareByAccount, authoritative)) {
+      if (!mwToAuthoritative.has(ext)) mwToAuthoritative.set(ext, []);
+      mwToAuthoritative.get(ext).push(row);
     }
     for (const key of hintKeys(row.hint)) {
       if (!nameToHistorical.has(key)) nameToHistorical.set(key, []);
@@ -314,7 +353,10 @@ export function reconcileCompletedSfBaselineGap({
     perAccount.set(row.account.id, {
       ...row,
       months: emptyMonths(),
-      stableMonths: emptyMonths(),
+      diagnosticMonths: emptyMonths(),
+      authoritativeMonths: emptyMonths(),
+      currentApprovedMonths: emptyMonths(),
+      historicalMappingMonths: emptyMonths(),
       factCount: 0,
       unresolvedFactSf: 0,
       duplicateFactSf: 0
@@ -329,7 +371,9 @@ export function reconcileCompletedSfBaselineGap({
     if (!month || !sf) continue;
     const sourceAccountId = String(fact.sourceAccountId || fact.source_account_id || "").trim();
     const reportName = nkey(fact.accountName || fact.account_name || nameByMw.get(sourceAccountId) || "");
-    let owners = sourceAccountId ? mwToHistorical.get(sourceAccountId) || [] : [];
+    const diagnosticOwners = sourceAccountId ? mwToDiagnostic.get(sourceAccountId) || [] : [];
+    const authoritativeOwners = sourceAccountId ? mwToAuthoritative.get(sourceAccountId) || [] : [];
+    let owners = diagnosticOwners;
     if (!owners.length && reportName) owners = nameToHistorical.get(reportName) || [];
     if (owners.length > 1) {
       const first = perAccount.get(owners[0].account.id);
@@ -343,10 +387,16 @@ export function reconcileCompletedSfBaselineGap({
     const rec = perAccount.get(owners[0].account.id);
     rec.factCount += 1;
     addMonths(rec.months, month, sf);
-    if (isMatchedCreditable(fact) && sourceAccountId && (mwToHistorical.get(sourceAccountId) || []).length) {
-      addMonths(rec.stableMonths, month, sf);
+    if (isMatchedCreditable(fact) && diagnosticOwners.length === 1) {
+      addMonths(rec.diagnosticMonths, month, sf);
     } else if (!isMatchedCreditable(fact)) {
       rec.unresolvedFactSf = round2(rec.unresolvedFactSf + sf);
+    }
+    if (isMatchedCreditable(fact) && authoritativeOwners.length === 1) {
+      addMonths(rec.authoritativeMonths, month, sf);
+      const review = reviewForAccount(reviewsByAccountId, rec.account.id);
+      if (mondayApprovedAd(rec.account, review)) addMonths(rec.currentApprovedMonths, month, sf);
+      else addMonths(rec.historicalMappingMonths, month, sf);
     }
   }
 
@@ -356,18 +406,20 @@ export function reconcileCompletedSfBaselineGap({
     const account = rec.account;
     const review = reviewForAccount(reviewsByAccountId, account.id);
     const currentlyOwned = salespersonUserId ? String(account.assignedUserId || "") === salespersonUserId : false;
-    const mondayApprovedAd = String(account.accountDirectoryAccountId || review?.linkedAccountDirectoryAccountId || "").trim();
-    const attribution = attributionAd(review, account, rec.hint);
+    const mondayAd = mondayApprovedAd(account, review);
+    const historicalAd = historicalApprovedAd(rec.hint);
+    const attribution = diagnosticAd(review, account, rec.hint);
+    const approvedIdentity = authoritativeAd(review, account, rec.hint);
     const morawareIds = morawareIdsForAd(morawareByAccount, attribution);
-    const historicalAliasApproved = Boolean(rec.hint.accountDirectoryAccountId) && !mondayApprovedAd;
+    const historicalAliasApproved = Boolean(historicalAd) && !mondayAd;
     const possibleDuplicate = (review?.evidence || []).includes("possible_duplicate_of")
       || String(review?.conflictReason || "").startsWith("POSSIBLE_DUPLICATE");
     const bucket = classifyAccountBucket({
       currentlyOwned,
       review,
-      approvedAd: mondayApprovedAd,
+      approvedAd: mondayAd,
       morawareIds,
-      hasUnresolvedFacts: rec.unresolvedFactSf > 0 && rec.stableMonths.total === 0,
+      hasUnresolvedFacts: rec.unresolvedFactSf > 0 && rec.authoritativeMonths.total === 0 && rec.diagnosticMonths.total === 0,
       weak: isWeakHint(rec.hint),
       exclusion: false,
       ambiguousMondayMatches: false,
@@ -385,7 +437,7 @@ export function reconcileCompletedSfBaselineGap({
       assignedUserId: account.assignedUserId
     });
     const candidateStatus =
-      mondayApprovedAd || isExactSourceIdStatus(review?.status)
+      mondayAd || isExactSourceIdStatus(review?.status)
         ? "approved"
         : historicalAliasApproved
           ? "historical_alias_approved"
@@ -405,8 +457,10 @@ export function reconcileCompletedSfBaselineGap({
       juneSf: rec.months.june,
       julySf: rec.months.july,
       totalSf: rec.months.total,
-      stableIdSf: rec.stableMonths.total,
-      missingStableIdSf: round2(rec.months.total - rec.stableMonths.total),
+      stableIdSf: rec.authoritativeMonths.total,
+      diagnosticPotentialSf: rec.diagnosticMonths.total,
+      missingStableIdSf: round2(rec.months.total - rec.authoritativeMonths.total),
+      attributionAuthority: attributionAuthority(review, account, rec.hint),
       currentOwner: identityOwnershipLabel({
         ownershipState,
         salespersonDisplayName: ownerId ? ownerName : null
@@ -429,7 +483,7 @@ export function reconcileCompletedSfBaselineGap({
     };
     if (showIds) {
       row.salesOpsAccountId = account.id;
-      row.accountDirectoryAccountId = attribution || mondayApprovedAd || null;
+      row.accountDirectoryAccountId = approvedIdentity || attribution || mondayAd || null;
       row.morawareIds = morawareIds;
     }
     historicalRows.push(row);
@@ -440,14 +494,26 @@ export function reconcileCompletedSfBaselineGap({
   historicalRows.sort((a, b) => b.totalSf - a.totalSf || a.accountName.localeCompare(b.accountName));
 
   const historicalMonths = emptyMonths();
-  const stableMonths = emptyMonths();
+  const diagnosticMonths = emptyMonths();
+  const authoritativeMonths = emptyMonths();
+  const currentApprovedMonths = emptyMonths();
+  const historicalMappingMonths = emptyMonths();
   for (const rec of perAccount.values()) {
     addMonths(historicalMonths, "may", rec.months.may);
     addMonths(historicalMonths, "june", rec.months.june);
     addMonths(historicalMonths, "july", rec.months.july);
-    addMonths(stableMonths, "may", rec.stableMonths.may);
-    addMonths(stableMonths, "june", rec.stableMonths.june);
-    addMonths(stableMonths, "july", rec.stableMonths.july);
+    addMonths(diagnosticMonths, "may", rec.diagnosticMonths.may);
+    addMonths(diagnosticMonths, "june", rec.diagnosticMonths.june);
+    addMonths(diagnosticMonths, "july", rec.diagnosticMonths.july);
+    addMonths(authoritativeMonths, "may", rec.authoritativeMonths.may);
+    addMonths(authoritativeMonths, "june", rec.authoritativeMonths.june);
+    addMonths(authoritativeMonths, "july", rec.authoritativeMonths.july);
+    addMonths(currentApprovedMonths, "may", rec.currentApprovedMonths.may);
+    addMonths(currentApprovedMonths, "june", rec.currentApprovedMonths.june);
+    addMonths(currentApprovedMonths, "july", rec.currentApprovedMonths.july);
+    addMonths(historicalMappingMonths, "may", rec.historicalMappingMonths.may);
+    addMonths(historicalMappingMonths, "june", rec.historicalMappingMonths.june);
+    addMonths(historicalMappingMonths, "july", rec.historicalMappingMonths.july);
   }
 
   let currentOnlyCount = 0;
@@ -456,7 +522,7 @@ export function reconcileCompletedSfBaselineGap({
     if (!currentIds.has(account.id) || historicalIds.has(account.id)) continue;
     currentOnlyCount += 1;
     const review = reviewForAccount(reviewsByAccountId, account.id);
-    const ad = candidateAd(review, account);
+    const ad = mondayApprovedAd(account, review);
     const ids = new Set(morawareIdsForAd(morawareByAccount, ad));
     if (!ids.size) continue;
     for (const fact of windowFacts) {
@@ -481,24 +547,31 @@ export function reconcileCompletedSfBaselineGap({
     total: historicalMonths.total,
     average: Math.round((historicalMonths.total / 3) * 10) / 10
   });
-  const stableId = compareCompletedSfBaseline({
-    may: stableMonths.may,
-    june: stableMonths.june,
-    july: stableMonths.july,
-    total: stableMonths.total,
-    average: Math.round((stableMonths.total / 3) * 10) / 10
+  const diagnosticPotential = compareCompletedSfBaseline({
+    may: diagnosticMonths.may,
+    june: diagnosticMonths.june,
+    july: diagnosticMonths.july,
+    total: diagnosticMonths.total,
+    average: Math.round((diagnosticMonths.total / 3) * 10) / 10
+  });
+  const authoritative = compareCompletedSfBaseline({
+    may: authoritativeMonths.may,
+    june: authoritativeMonths.june,
+    july: authoritativeMonths.july,
+    total: authoritativeMonths.total,
+    average: Math.round((authoritativeMonths.total / 3) * 10) / 10
   });
 
-  const unresolvedStableSf = round2(COMPLETED_SF_BASELINE_ACCEPTANCE.total - stableMonths.total);
-  const previewGap = round2(COMPLETED_SF_BASELINE_ACCEPTANCE.total - (stableMonths.total + currentOnlyMonths.total));
+  const unresolvedStableSf = round2(COMPLETED_SF_BASELINE_ACCEPTANCE.total - authoritativeMonths.total);
+  const previewGap = round2(COMPLETED_SF_BASELINE_ACCEPTANCE.total - (authoritativeMonths.total + currentOnlyMonths.total));
   const identityApprovalRequired = historicalRows.some((row) => ["B", "C", "D"].includes(row.bucketLetter));
   const historicalOwnershipGapFound = historicalOnlyCount > 0 || historicalRows.some((row) => row.bucketLetter === "E");
 
   let verdict = "BASELINE_RECONCILIATION_READY";
-  if (stableId.reconciled && nameMatched.reconciled) verdict = "BASELINE_RECONCILED";
+  if (authoritative.reconciled && nameMatched.reconciled) verdict = "BASELINE_RECONCILED";
   else if (identityApprovalRequired) verdict = "IDENTITY_APPROVAL_REQUIRED";
   else if (historicalOwnershipGapFound) verdict = "HISTORICAL_OWNERSHIP_GAP_FOUND";
-  else if (!stableId.reconciled || !nameMatched.reconciled) verdict = "BASELINE_MISMATCH";
+  else if (!authoritative.reconciled || !nameMatched.reconciled) verdict = "BASELINE_MISMATCH";
 
   const approvedCount = historicalRows.filter((row) => row.accountDirectoryCandidateStatus === "approved").length;
   const pendingExactCount = historicalRows.filter((row) => row.accountDirectoryCandidateStatus === "pending_exact").length;
@@ -506,7 +579,7 @@ export function reconcileCompletedSfBaselineGap({
 
   return {
     verdict,
-    activationGate: stableId.reconciled ? "BASELINE_RECONCILED" : "BASELINE_MISMATCH",
+    activationGate: authoritative.reconciled ? "BASELINE_RECONCILED" : "BASELINE_MISMATCH",
     identityApprovalRequired,
     historicalOwnershipGapFound,
     attributionWrites: false,
@@ -514,7 +587,12 @@ export function reconcileCompletedSfBaselineGap({
     window: BASELINE_WINDOW,
     expected: { ...COMPLETED_SF_BASELINE_ACCEPTANCE },
     nameMatchedReconstruction: nameMatched,
-    stableIdReconstruction: stableId,
+    diagnosticPotentialReconstruction: diagnosticPotential,
+    stableIdReconstruction: authoritative,
+    authoritativeReconstruction: authoritative,
+    currentApprovedIdentitySf: { ...currentApprovedMonths },
+    historicalApprovedMappingSf: { ...historicalMappingMonths },
+    totalAuthoritativeSf: { ...authoritativeMonths },
     unresolvedStableIdSf: unresolvedStableSf,
     currentBookPreviewGapSf: previewGap,
     currentBookVsHistoricalBook: {

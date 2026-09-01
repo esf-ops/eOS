@@ -238,6 +238,9 @@ async function main() {
   assert.equal(gapBody.attributionWrites, false);
   assert.ok(["BASELINE_RECONCILIATION_READY", "BASELINE_RECONCILED", "HISTORICAL_OWNERSHIP_GAP_FOUND", "IDENTITY_APPROVAL_REQUIRED", "BASELINE_MISMATCH"].includes(gapBody.verdict));
   assert.equal(gapBody.activationGate === "BASELINE_RECONCILED" || gapBody.activationGate === "BASELINE_MISMATCH", true);
+  assert.ok(gapBody.authoritativeReconstruction || gapBody.stableIdReconstruction);
+  assert.ok(gapBody.currentApprovedIdentitySf);
+  assert.ok(gapBody.historicalApprovedMappingSf);
   const bulkDenied = await fetch(`${base}/api/sales-ops/admin/identity-reviews/bulk-preview`, {
     method: "POST",
     headers: { Authorization: "Bearer a", "content-type": "application/json" },

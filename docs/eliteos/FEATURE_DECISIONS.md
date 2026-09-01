@@ -4755,5 +4755,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Date** | 2026-09-01 |
 | **Decision** | A human-approved `starter_handoff_v1` alias may store `account_directory_account_id` on `sales_ops_identity_review_hints` (`historical_identity_status=approved`) so May–July stable-ID reconstruction can use that Account Directory UUID and its Moraware links **without** creating or approving a Monday CRM link. Thera's generic Monday Lead **Cabinet shop** is **POSSIBLE_DUPLICATE_OF** the exact-named Active Monday **Epworth Cabinet Shop** (Casey) and must not be auto-linked or merged. Identity Review still cannot approve an empty candidate list. Display-name typos on an existing AD row are corrected in place (former spelling kept as `former_display_name` alias); a second AD account is not created. Actual SF stays off until the stable-ID gate equals 574.5 / 669.0 / 334.0 / 1,577.5. |
 | **Why** | Historical commissionable identity for Epworth is the starter alias + Moraware 538 + canonical AD, which is not the same decision as which Monday CRM row currently owns the account. |
-| **Out of scope** | Creating AD accounts from Monday names, auto-approving Monday links, Builders Select identity change until Chris confirms the QuickBooks root finding, attribution fact writes, plan publish. |
+| **Out of scope** | Creating AD accounts from Monday names, auto-approving Monday links, publishing a salesperson plan, Monday writes. |
+
+---
+
+### 352. Authoritative baseline reconstruction excludes unapproved Identity Review candidates (2026-09-01)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-01 |
+| **Decision** | Actual SF activation is gated on an **authoritative** May–July reconstruction only: (A) human-approved Monday → Account Directory identity plus Moraware external IDs, or (B) an explicit `historical_identity_status=approved` starter-alias → AD mapping. Unique unapproved Identity Review candidates, fuzzy/name-only previews, and current Monday ownership are **diagnostic** only and never authorize `sales_ops_sf_attribution_facts`. Baseline gap shows both reconstructions. Current CRM identity is not fabricated to satisfy historical credit (Thera's **Cabinet shop** Lead stays unlinked; Casey's **Epworth Cabinet Shop** ownership is unchanged). |
+| **Why** | Counting unique unapproved candidates as “stable-ID reconciled” mixed preview with activation and would have required linking Cabinet shop merely to reconstruct 89 SF that already has an approved historical mapping. |
+| **Out of scope** | Publishing a salesperson plan, Monday/Moraware/QuickBooks writes, changing commission policy or Moraware metric definition. |
+| **Impacted** | `salesOpsBaselineGap.mjs`, Sales Ops Baseline gap UI, this doc, SYSTEM_BLUEPRINT. |
 | **Impacted** | `eliteos_sales_ops_historical_identity_v6.sql`, identity review rebuild, Baseline gap, Account Directory rename/Moraware link for Ries Design, this doc. |

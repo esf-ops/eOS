@@ -69,6 +69,8 @@ assert.ok(app.includes("Identity Review"));
 assert.ok(app.includes("Baseline gap"));
 assert.ok(read("src/ui/BaselineGap.tsx").includes("/api/sales-ops/admin/baseline-gap"));
 assert.ok(read("src/ui/BaselineGap.tsx").includes("salespersonDisplayName"));
+assert.ok(read("src/ui/BaselineGap.tsx").includes("Authoritative / approved reconstruction"));
+assert.ok(read("src/ui/BaselineGap.tsx").includes("Diagnostic / potential reconstruction"));
 assert.ok(!/Thera/.test(read("src/ui/BaselineGap.tsx")));
 assert.equal(read("src/ui/BaselineGap.tsx").includes("|| p.userId"), false);
 assert.ok(read("src/ui/IdentityReview.tsx").includes("/api/sales-ops/admin/identity-reviews"));

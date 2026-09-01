@@ -2363,6 +2363,11 @@ export function createSalesOpsSupabaseStore(getSupabase) {
         .select("id,account_directory_account_id")
         .maybeSingle();
       if (error) throwDb(error, "Could not update Sales Ops Account Directory projection.");
+      if (!data) {
+        const err = new Error("Sales Ops account was not updated with the approved Account Directory id.");
+        err.code = "account_directory_projection_missing";
+        throw err;
+      }
       return data;
     },
 

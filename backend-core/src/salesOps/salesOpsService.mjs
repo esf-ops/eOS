@@ -509,17 +509,25 @@ export function createSalesOpsService({ store, monday, audit, now } = {}) {
         labelByUser: labels.labelByUser,
         showIds
       });
+      const existingFacts =
+        assignedUserId && typeof store.listAttributionFacts === "function"
+          ? await store.listAttributionFacts(actor.organizationId, { userIds: [assignedUserId] })
+          : [];
+      const attributionWrites = (existingFacts || []).some((f) => String(f.status || "credited") === "credited");
       return {
         ...report,
+        attributionWrites,
         assignedUserId: assignedUserId || null,
         salespersonLabel: assignedUserId
           ? labels.labelByUser.get(assignedUserId) || UNKNOWN_SALESPERSON_LABEL
           : null,
-        recommendedNextStep: report.identityApprovalRequired
-          ? "Resolve no-candidate and pending exact identities in Identity Review. Do not write attribution until the stable-ID reconstruction matches the May–July acceptance totals."
+        recommendedNextStep: attributionWrites
+          ? "Authoritative reconstruction is live. Credited completed-install facts are the Actual SF source. Diagnostic candidate previews are not the activation gate."
+          : report.identityApprovalRequired
+          ? "Resolve remaining Identity Review rows that still lack approved Monday identity or an approved historical mapping. Diagnostic candidate totals do not authorize attribution."
           : report.activationGate === "BASELINE_MISMATCH"
-            ? "Stable-ID reconstruction still does not match the May–July acceptance totals. Do not write attribution facts."
-            : "Do not write attribution facts until an explicit Actual SF enablement task."
+            ? "Authoritative reconstruction (approved Monday identity + approved historical mappings only) still does not match the May–July acceptance totals. Do not write attribution facts."
+            : "Authoritative reconstruction matches the May–July totals. Diagnostic candidate previews are not the activation gate."
       };
     },
 
