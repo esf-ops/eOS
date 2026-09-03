@@ -781,6 +781,61 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/requested-selections",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowSetScopeService.getRequestedSelections({
+          organizationId,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || ""))
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] requested-selections get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load requested selections.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/requested-selections",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowSetScopeService.updateRequestedSelection({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
+          selectionId: body.selectionId != null ? String(body.selectionId) : null,
+          action: body.action != null ? String(body.action) : null,
+          patch: body.patch && typeof body.patch === "object" ? body.patch : null,
+          item: body.item && typeof body.item === "object" ? body.item : null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.requested_selections",
+            userId: req.user?.id ?? null,
+            takeoffJobId: result.takeoffJobId ?? null,
+            selectionAction: body.action ?? null,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] requested-selections update failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to update requested selections.");
+      }
+    }
+  );
+
   app.post(
     "/api/elite100-quote-flow/queue/:takeoffJobId/set-scope",
     ...staffStack,

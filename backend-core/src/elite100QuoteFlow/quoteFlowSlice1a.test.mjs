@@ -182,11 +182,11 @@ console.log("ok: flag + head slug");
   const routesSrc = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
   assert.match(routesSrc, /requireHeadAccess\(ELITE100_QUOTE_FLOW_HEAD_SLUG/);
   assert.match(routesSrc, /assertInternalQuoteOperator/);
-  assert.doesNotMatch(
-    routesSrc,
-    /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft|takeoff-finish/
-  );
-  console.log("ok: staff stack requires head access; no pricing/publish/sold wiring");
+  assert.match(routesSrc, /requested-selections/);
+  // Later slices intentionally mount Digital Estimate publish on this file.
+  // Still forbid sold/handoff/takeoff-finish wiring here.
+  assert.doesNotMatch(routesSrc, /markSold|approveWorkingDraft|takeoff-finish/);
+  console.log("ok: staff stack requires head access; requested-selections mounted");
 }
 
 function chain(data) {

@@ -4,10 +4,14 @@
  * Reuses existing Takeoff job / Gemini draft / corrections / approve-and-build APIs.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import CustomerRequestedSelectionsPanel, {
+  type RequestedSelectionItem
+} from "./CustomerRequestedSelectionsPanel";
 import {
   approveAndBuildEstimate,
   generateAiTakeoffDraft,
   labApiGet,
+  labApiPost,
   LabApiError,
   saveTakeoffCorrection,
   type ApprovalBlockerItem
@@ -272,6 +276,9 @@ export default function ConsolidatedTakeoffReview() {
       return false;
     }
   }, []);
+
+  const [requestedSelections, setRequestedSelections] = useState<RequestedSelectionItem[]>([]);
+  const [selectionBusyId, setSelectionBusyId] = useState<string | null>(null);
 
   const urlWorkspace = useMemo(() => {
     try {
@@ -597,6 +604,13 @@ export default function ConsolidatedTakeoffReview() {
       setAiPhase("ready");
     } else {
       setAiPhase("queued");
+    }
+
+    const sel = job?.quoteFlowRequestedSelections;
+    if (sel && Array.isArray(sel.items)) {
+      setRequestedSelections(sel.items as RequestedSelectionItem[]);
+    } else {
+      setRequestedSelections([]);
     }
 
     const dirty =
@@ -1626,6 +1640,25 @@ export default function ConsolidatedTakeoffReview() {
     return <div className="ctr-shell ctr-state">Loading…</div>;
   }
 
+  async function updateRequestedSelectionAction(selectionId: string, action: string) {
+    if (!authToken || !takeoffJobId || isReadonly) return;
+    setSelectionBusyId(selectionId);
+    try {
+      const res = (await labApiPost(
+        `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/requested-selections`,
+        authToken,
+        { selectionId, action }
+      )) as { requestedSelections?: { items?: RequestedSelectionItem[] } };
+      if (Array.isArray(res?.requestedSelections?.items)) {
+        setRequestedSelections(res.requestedSelections.items);
+      }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Unable to update selection");
+    } finally {
+      setSelectionBusyId(null);
+    }
+  }
+
   if (!authToken) {
     return (
       <div className="ctr-shell">
@@ -1943,6 +1976,17 @@ export default function ConsolidatedTakeoffReview() {
               Mark the countertop runs that meet a wall or cabinet. Islands and open edges
               should be left off.
             </p>
+
+            {quoteFlowSetScope && requestedSelections.length > 0 ? (
+              <CustomerRequestedSelectionsPanel
+                items={requestedSelections}
+                readonly={isReadonly}
+                busyId={selectionBusyId}
+                onConfirm={(id) => void updateRequestedSelectionAction(id, "confirm")}
+                onReject={(id) => void updateRequestedSelectionAction(id, "reject")}
+                onUnresolve={(id) => void updateRequestedSelectionAction(id, "unresolve")}
+              />
+            ) : null}
 
             <div className="ctr-table-wrap" ref={tableWrapRef} data-testid="ctr-table-wrap">
               <table className="ctr-table" data-testid="ctr-worksheet">

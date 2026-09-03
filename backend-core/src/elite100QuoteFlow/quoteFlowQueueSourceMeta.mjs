@@ -262,6 +262,17 @@ export function buildQuoteFlowTakeoffSourceMeta(input = {}) {
     quoteName: established.quoteName,
     quoteNameUserSet: established.quoteNameUserSet === true,
     quoteNameSource: established.quoteNameSource,
+    sourceEmailBodyPreview: sanitizeQueueSourceText(input.sourceEmailBodyPreview, 4000),
+    sourceEmailBodyCharCount:
+      Number.isFinite(Number(input.sourceEmailBodyCharCount)) && Number(input.sourceEmailBodyCharCount) > 0
+        ? Math.floor(Number(input.sourceEmailBodyCharCount))
+        : input.sourceEmailBodyPreview
+          ? String(input.sourceEmailBodyPreview).length
+          : null,
+    requestedSelections:
+      input.requestedSelections && typeof input.requestedSelections === "object"
+        ? input.requestedSelections
+        : null,
     senderLabel: sanitizeQueueSourceText(input.senderLabel, 160),
     customerLabel: sanitizeQueueSourceText(input.customerLabel, 160),
     selectedPlanFilename,
@@ -359,13 +370,50 @@ export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
     next.quoteNameSource = next.quoteNameSource || "email_subject";
   }
 
+  // Preserve bounded email body + confirmed requested selections across reruns.
+  if (prev.sourceEmailBodyPreview && !next.sourceEmailBodyPreview) {
+    next.sourceEmailBodyPreview = prev.sourceEmailBodyPreview;
+    next.sourceEmailBodyCharCount = prev.sourceEmailBodyCharCount || null;
+  }
+
   return {
     ...base,
     quoteFlow: {
       ...prev,
-      ...next
+      ...next,
+      requestedSelections: mergeRequestedSelectionsSafe(prev.requestedSelections, next.requestedSelections)
     }
   };
+}
+
+function mergeRequestedSelectionsSafe(prevSel, nextSel) {
+  try {
+    const prev = prevSel && typeof prevSel === "object" ? prevSel : null;
+    const next = nextSel && typeof nextSel === "object" ? nextSel : null;
+    if (!prev) return next;
+    if (!next) return prev;
+    const prevItems = Array.isArray(prev.items) ? prev.items : [];
+    const nextItems = Array.isArray(next.items) ? next.items : [];
+    const keep = prevItems.filter((i) => i?.status === "confirmed" || i?.status === "rejected");
+    const keepIds = new Set(keep.map((i) => String(i.id)));
+    const keepFp = new Set(
+      keep.map(
+        (i) =>
+          `${i.kind}|${String(i.customerRawText || "").toLowerCase()}|${String(i.roomHint || "").toLowerCase()}`
+      )
+    );
+    const merged = [
+      ...keep,
+      ...nextItems.filter((i) => {
+        if (keepIds.has(String(i?.id))) return false;
+        const fp = `${i?.kind}|${String(i?.customerRawText || "").toLowerCase()}|${String(i?.roomHint || "").toLowerCase()}`;
+        return !keepFp.has(fp);
+      })
+    ];
+    return { ...prev, ...next, items: merged.slice(0, 80) };
+  } catch {
+    return nextSel || prevSel || null;
+  }
 }
 
 /**

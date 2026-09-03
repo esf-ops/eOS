@@ -5223,3 +5223,81 @@ body.ctr-split-dragging img {
 .ctr-waterfall-physical--collapsed .ctr-waterfall-physical__body {
   display: none;
 }
+
+
+/* Customer requested selections (Quote Flow Review Takeoff) */
+.ctr-customer-requested {
+  margin: 8px 0 10px;
+  border: 1px solid var(--ctr-line, #d7dde8);
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+.ctr-customer-requested__toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--ctr-ink, #0b1a33);
+  cursor: pointer;
+  text-align: left;
+}
+.ctr-customer-requested__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+.ctr-customer-requested__item {
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+.ctr-customer-requested__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.ctr-customer-requested__status {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #667;
+}
+.ctr-customer-requested__status--confirmed { color: #1f6b3a; }
+.ctr-customer-requested__status--unresolved,
+.ctr-customer-requested__status--proposed { color: #8a5a12; }
+.ctr-customer-requested__status--rejected { color: #8a3b2a; }
+.ctr-customer-requested__row { margin: 2px 0; }
+.ctr-customer-requested__warn {
+  margin-top: 4px;
+  color: #8a5a12;
+  font-weight: 650;
+}
+.ctr-customer-requested__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ctr-btn--small {
+  padding: 4px 8px;
+  font-size: 0.78rem;
+}
+.ctr-btn--ghost {
+  background: transparent;
+  border: 1px solid #c9d2e0;
+}

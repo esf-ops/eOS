@@ -751,6 +751,16 @@ export async function getTakeoffWorkspace({
     exayard: pickSafeExayardJobMetadata(jobRow.metadata)?.exayard ?? null,
     processing: buildProcessingStatus(jobRow),
     errorMessage: jobRow.error_message ?? null,
+    // Staff-safe Quote Flow draft selections (no secrets / no raw Graph HTML).
+    quoteFlowRequestedSelections:
+      jobRow.metadata?.quoteFlow?.requestedSelections &&
+      typeof jobRow.metadata.quoteFlow.requestedSelections === "object"
+        ? jobRow.metadata.quoteFlow.requestedSelections
+        : null,
+    quoteName:
+      typeof jobRow.metadata?.quoteFlow?.quoteName === "string"
+        ? jobRow.metadata.quoteFlow.quoteName
+        : null
   };
 }
 

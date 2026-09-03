@@ -27,6 +27,10 @@ import {
   pickQuoteRequestSubjectFromInboxItem
 } from "./quoteFlowQueueSourceMeta.mjs";
 import {
+  boundSourceEmailBody,
+  buildResolvedRequestedSelections
+} from "./quoteFlowRequestedSelections.mjs";
+import {
   contentDispositionInline,
   planViewerError
 } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
@@ -131,6 +135,22 @@ export function createQuoteFlowService(deps) {
         ? [{ filename: selectedPlanFilename, attachmentKey: keys[0] || null }]
         : [];
 
+    const bodyPreview = boundSourceEmailBody(
+      inboxItem?.bodyPreview || inboxItem?.bodyText || inboxItem?.body || null,
+      4000
+    );
+    let requestedSelections = null;
+    try {
+      requestedSelections = await buildResolvedRequestedSelections({
+        bodyText: bodyPreview,
+        subject: inboxItem?.subject || inboxItem?.requestSubject || null,
+        messageKey: messageKey || inboxItem?.messageKey || null,
+        getSupabase
+      });
+    } catch {
+      requestedSelections = null;
+    }
+
     const quoteFlow = buildQuoteFlowTakeoffSourceMeta({
       requestSubject: pickQuoteRequestSubjectFromInboxItem(inboxItem, {
         selectedPlanFilename,
@@ -147,7 +167,10 @@ export function createQuoteFlowService(deps) {
       packetMerged,
       packetFiles,
       messageKey: messageKey || inboxItem?.messageKey || null,
-      sourceMailboxLabel: inboxItem?.mailboxLabel || inboxItem?.sourceMailboxLabel || null
+      sourceMailboxLabel: inboxItem?.mailboxLabel || inboxItem?.sourceMailboxLabel || null,
+      sourceEmailBodyPreview: bodyPreview,
+      sourceEmailBodyCharCount: bodyPreview ? bodyPreview.length : null,
+      requestedSelections
     });
     await persistQuoteFlowTakeoffSourceMeta({
       getSupabase,

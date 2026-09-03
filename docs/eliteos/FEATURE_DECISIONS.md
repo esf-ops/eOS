@@ -4793,3 +4793,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | AI takeoff math, pricing, Digital Estimate publish, attachment filenames, original email subjects, quote-number generation. |
 | **Revisit trigger** | Dedicated `quote_name` column if JSON metadata becomes overloaded across products. |
 
+### 355. Quote Flow customer-requested selections (email → Review → Set Scope) (2026-09-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-03 · `main` |
+| **Decision** | Extract customer selection *requests* from forwarded quote email body into `quote_takeoff_jobs.metadata.quoteFlow.requestedSelections` (plus bounded `sourceEmailBodyPreview`, max 4k). Three states: **customer requested** → **catalog resolved** → **estimator confirmed**. Only confirmed items apply into studio estimate scope on Set Scope. AI/deterministic extraction never silently becomes official pricing. Waterfall requests become review warnings only — no invented panel geometry. Material colors resolve only via governed Elite catalog → price group mapping; vague prose stays unresolved. Room-specific assignments preserved when stated. Bounded email body on job metadata is an intentional privacy/ops exception so takeoff can extract without re-fetching Graph on every review. |
+| **Why** | Estimators were re-entering material/sink/edge/tear-out/backsplash asks already present in the customer email after AI Takeoff only measured geometry. |
+| **Impacted** | `quoteFlowRequestedSelections`, stamp/merge in `quoteFlowQueueSourceMeta` / `quoteFlowService`, Set Scope apply, Quote Flow `requested-selections` API, takeoff workspace DTO, Review Takeoff Customer requested panel, tests, this doc. |
+| **Protected / unchanged** | Canonical Quote Name, takeoff measurement math, Pricing Admin rates, customer pricing authority, Digital Estimate portal UX, quote-number generation, Moraware/QB/Monday. |
+| **Deferred** | LLM structured extraction (v1 is deterministic), full fixture SKU catalog beyond governed sink/edge/add-on keys, Digital Estimate customer interactive selections, brand/manufacturer-only matching without catalog color. |
+| **Revisit trigger** | Dedicated table if selection history/audit outgrows job metadata JSON; fuller Graph body fetch if inbox `bodyPreview` truncates too aggressively. |
+
+---
+

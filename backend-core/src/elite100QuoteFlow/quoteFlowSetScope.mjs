@@ -24,6 +24,12 @@ import {
   persistQuoteFlowQuoteName
 } from "./quoteFlowQueueSourceMeta.mjs";
 import {
+  applyConfirmedSelectionsToScope,
+  applyEstimatorSelectionAction,
+  addManualRequestedSelection,
+  summarizeRequestedSelections
+} from "./quoteFlowRequestedSelections.mjs";
+import {
   createMemoryQuoteFlowQueueStateStore,
   createQuoteFlowQueueStateStore
 } from "./quoteFlowQueueStateStore.mjs";
@@ -458,6 +464,127 @@ export function createQuoteFlowSetScopeService(deps) {
     }
   }
 
+  async function readJobQuoteFlowMeta(organizationId, takeoffJobId) {
+    if (typeof getSupabase !== "function") return null;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+    try {
+      const { data } = await supabase
+        .from("quote_takeoff_jobs")
+        .select("id,metadata")
+        .eq("organization_id", organizationId)
+        .eq("id", takeoffJobId)
+        .maybeSingle();
+      const meta = data?.metadata && typeof data.metadata === "object" ? data.metadata : {};
+      return meta.quoteFlow && typeof meta.quoteFlow === "object" ? meta.quoteFlow : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function writeJobRequestedSelections(organizationId, takeoffJobId, requestedSelections) {
+    if (typeof getSupabase !== "function") return { ok: false };
+    const supabase = getSupabase();
+    if (!supabase) return { ok: false };
+    const { data: row } = await supabase
+      .from("quote_takeoff_jobs")
+      .select("id,metadata")
+      .eq("organization_id", organizationId)
+      .eq("id", takeoffJobId)
+      .maybeSingle();
+    if (!row?.id) return { ok: false, reason: "job_not_found" };
+    const meta = row.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
+    const qf = meta.quoteFlow && typeof meta.quoteFlow === "object" ? { ...meta.quoteFlow } : {};
+    meta.quoteFlow = { ...qf, requestedSelections };
+    const { error } = await supabase
+      .from("quote_takeoff_jobs")
+      .update({ metadata: meta })
+      .eq("organization_id", organizationId)
+      .eq("id", takeoffJobId);
+    if (error) return { ok: false, reason: "write_failed" };
+    return { ok: true, requestedSelections };
+  }
+
+  async function getRequestedSelections({ organizationId, takeoffJobId }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = await readJobQuoteFlowMeta(organizationId, jobId);
+    const requestedSelections = qf?.requestedSelections || { items: [] };
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      requestedSelections,
+      summary: summarizeRequestedSelections(requestedSelections)
+    };
+  }
+
+  async function updateRequestedSelection({
+    organizationId,
+    takeoffJobId,
+    actorUserId = null,
+    selectionId,
+    action,
+    patch = null,
+    item = null
+  }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = (await readJobQuoteFlowMeta(organizationId, jobId)) || {};
+    let next;
+    if (action === "add") {
+      next = addManualRequestedSelection(qf.requestedSelections, item || patch || {}, actorUserId);
+    } else {
+      next = applyEstimatorSelectionAction(qf.requestedSelections, {
+        selectionId,
+        action,
+        actorUserId,
+        patch
+      });
+    }
+    const written = await writeJobRequestedSelections(organizationId, jobId, next);
+    if (!written.ok) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to save requested selections.",
+        statusCode: 503
+      });
+    }
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      requestedSelections: next,
+      summary: summarizeRequestedSelections(next)
+    };
+  }
+
+  async function applyConfirmedSelectionsOntoEstimate({
+    organizationId,
+    takeoffJobId,
+    actorUserId,
+    estimate
+  }) {
+    if (!estimate?.id || !studioEstimateService?.updateScope) return estimate;
+    const qf = await readJobQuoteFlowMeta(organizationId, takeoffJobId);
+    const requested = qf?.requestedSelections || null;
+    const confirmed = Array.isArray(requested?.items)
+      ? requested.items.filter((i) => i?.status === "confirmed")
+      : [];
+    if (!confirmed.length) return estimate;
+    const nextScope = applyConfirmedSelectionsToScope(estimate.scope || {}, requested, {
+      roomsFromTakeoff: Array.isArray(estimate.scope?.rooms) ? estimate.scope.rooms : []
+    });
+    try {
+      const updated = await studioEstimateService.updateScope({
+        organizationId,
+        estimateId: estimate.id,
+        actorUserId,
+        body: { scope: nextScope }
+      });
+      return updated?.estimate || updated || { ...estimate, scope: nextScope };
+    } catch {
+      return { ...estimate, scope: nextScope };
+    }
+  }
+
   function isAlreadyApprovedError(e) {
     const code = String(e?.code || "").toLowerCase();
     const msg = String(e?.message || "").toLowerCase();
@@ -791,6 +918,12 @@ export function createQuoteFlowSetScopeService(deps) {
           estimate
         });
       }
+      estimate = await applyConfirmedSelectionsOntoEstimate({
+        organizationId,
+        takeoffJobId: jobId,
+        actorUserId,
+        estimate
+      });
       return scopedSuccessPayload({
         estimate,
         intakeCaseId,
@@ -827,6 +960,13 @@ export function createQuoteFlowSetScopeService(deps) {
         estimate
       });
     }
+
+    estimate = await applyConfirmedSelectionsOntoEstimate({
+      organizationId,
+      takeoffJobId: jobId,
+      actorUserId,
+      estimate
+    });
 
     return scopedSuccessPayload({
       estimate,
@@ -953,8 +1093,15 @@ export function createQuoteFlowSetScopeService(deps) {
       }
     }
 
+    const withSelections = await applyConfirmedSelectionsOntoEstimate({
+      organizationId,
+      takeoffJobId: jobId,
+      actorUserId,
+      estimate: { ...estimate, id: estimate?.id || estimateId }
+    });
+
     return scopedSuccessPayload({
-      estimate: { ...estimate, id: estimate?.id || estimateId },
+      estimate: withSelections,
       intakeCaseId,
       takeoffJobId: jobId,
       created: true,
@@ -969,6 +1116,8 @@ export function createQuoteFlowSetScopeService(deps) {
     setScope,
     setManualScope,
     updateQuoteName,
+    getRequestedSelections,
+    updateRequestedSelection,
     archiveQueueItem,
     restoreQueueItem
   };
