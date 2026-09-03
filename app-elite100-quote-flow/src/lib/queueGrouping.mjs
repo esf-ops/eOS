@@ -57,6 +57,46 @@ export function isOpaquePlanFilename(name) {
 }
 
 /**
+ * @param {string|null|undefined} name
+ */
+export function looksLikeAttachmentFilename(name) {
+  const s = String(name || "").trim();
+  if (!s) return false;
+  return /\.(pdf|png|jpe?g|gif|webp|tif{1,2}|heic|dwg|dxf|svg)$/i.test(s);
+}
+
+/**
+ * @param {string|null|undefined} name
+ * @param {Array<string|null|undefined>} planNames
+ */
+export function matchesAnyPlanFilename(name, planNames = []) {
+  const raw = String(name || "").trim();
+  if (!raw) return false;
+  const base = filenameWithoutExtension(raw).toLowerCase();
+  const lower = raw.toLowerCase();
+  for (const p of planNames) {
+    const plan = String(p || "").trim();
+    if (!plan) continue;
+    if (lower === plan.toLowerCase()) return true;
+    if (base && base === filenameWithoutExtension(plan).toLowerCase()) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {string|null|undefined} value
+ */
+export function isUsableRequestSubject(value) {
+  const s = asString(value);
+  if (!s) return false;
+  if (s === "(no subject)") return false;
+  if (/not named|not identified|^unknown$/i.test(s)) return false;
+  if (isOpaquePlanFilename(s)) return false;
+  if (looksLikeAttachmentFilename(s)) return false;
+  return true;
+}
+
+/**
  * @param {object} item
  */
 export function resolveQueueGroupKey(item) {
@@ -160,26 +200,67 @@ export function filterQueueItems(items, filter = "all_active", search = "") {
 
 /**
  * Editable Estimate / Job name default.
+ * Precedence: explicit saved name → email subject → request title → plan filename fallback.
+ * PDF filenames never overwrite a valid request subject.
  * @param {object} item
  */
 export function resolveDefaultEstimateName(item) {
+  const planNames = [
+    item?.selectedPlanFilename,
+    item?.takeoffPlanFilename,
+    item?.planFilename,
+    item?.packetFilename,
+    item?.attachmentName,
+    ...(Array.isArray(item?.packetFiles) ? item.packetFiles.map((f) => f?.filename) : [])
+  ].filter(Boolean);
+
+  const explicitSaved = asString(
+    item?.scopeProjectName ||
+      item?.estimateProjectName ||
+      item?.quoteFlowEstimateName ||
+      item?.scope?.projectName ||
+      item?.scope?.quoteFlowEstimateName
+  );
+  if (
+    explicitSaved &&
+    !isWeakLabel(explicitSaved) &&
+    !looksLikeAttachmentFilename(explicitSaved) &&
+    !matchesAnyPlanFilename(explicitSaved, planNames) &&
+    !isOpaquePlanFilename(explicitSaved)
+  ) {
+    return explicitSaved;
+  }
+
+  const subject = asString(item?.requestSubject || item?.subject);
+  if (isUsableRequestSubject(subject) && !matchesAnyPlanFilename(subject, planNames)) {
+    return subject;
+  }
+
+  // Recover when API estimateName was previously set to the plan filename.
+  if (
+    (looksLikeAttachmentFilename(explicitSaved) ||
+      matchesAnyPlanFilename(explicitSaved, planNames)) &&
+    isUsableRequestSubject(subject)
+  ) {
+    return subject;
+  }
+
   const fromApi = asString(item?.estimateName || item?.defaultEstimateName || item?.requestTitle);
   if (
     fromApi &&
     !isWeakLabel(fromApi) &&
     !/^AAMk/i.test(fromApi) &&
     !/unknown contact/i.test(fromApi) &&
-    !isOpaquePlanFilename(fromApi)
+    !isOpaquePlanFilename(fromApi) &&
+    !looksLikeAttachmentFilename(fromApi) &&
+    !matchesAnyPlanFilename(fromApi, planNames)
   ) {
     return fromApi;
   }
 
-  const subject = asString(item?.requestSubject || item?.subject);
   if (
-    subject &&
-    subject !== "(no subject)" &&
-    !/not named|not identified/i.test(subject) &&
-    !isOpaquePlanFilename(subject)
+    (looksLikeAttachmentFilename(fromApi) || matchesAnyPlanFilename(fromApi, planNames)) &&
+    isUsableRequestSubject(subject)
   ) {
     return subject;
   }
@@ -193,11 +274,10 @@ export function resolveDefaultEstimateName(item) {
     project &&
     !isWeakLabel(project) &&
     !/not named|not identified/i.test(project) &&
-    !isOpaquePlanFilename(project)
+    !isOpaquePlanFilename(project) &&
+    !looksLikeAttachmentFilename(project) &&
+    !matchesAnyPlanFilename(project, planNames)
   ) {
-    if (item?.planFilename && project === item.planFilename) {
-      return filenameWithoutExtension(item.planFilename) || project;
-    }
     return project;
   }
 
@@ -205,6 +285,8 @@ export function resolveDefaultEstimateName(item) {
   if (selected && !isOpaquePlanFilename(selected) && !/^AAMk/i.test(selected)) {
     return filenameWithoutExtension(selected) || selected;
   }
+
+  if (explicitSaved && !isWeakLabel(explicitSaved)) return explicitSaved;
 
   const customer = resolveQueueCustomer(item, { allowUntitled: false });
   if (customer && !isWeakLabel(customer) && !/^Plan:/i.test(customer)) return customer;

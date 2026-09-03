@@ -29,6 +29,78 @@ export function isOpaquePlanFilename(name) {
 }
 
 /**
+ * True when a label is clearly an attachment/source document name, not a quote identity.
+ * @param {string|null|undefined} name
+ */
+export function looksLikeAttachmentFilename(name) {
+  const s = String(name || "").trim();
+  if (!s) return false;
+  return /\.(pdf|png|jpe?g|gif|webp|tif{1,2}|heic|dwg|dxf|svg)$/i.test(s);
+}
+
+/**
+ * @param {string|null|undefined} name
+ * @param {Array<string|null|undefined>} planNames
+ */
+export function matchesAnyPlanFilename(name, planNames = []) {
+  const raw = String(name || "").trim();
+  if (!raw) return false;
+  const base = filenameWithoutExtension(raw).toLowerCase();
+  const lower = raw.toLowerCase();
+  for (const p of planNames) {
+    const plan = String(p || "").trim();
+    if (!plan) continue;
+    if (lower === plan.toLowerCase()) return true;
+    if (base && base === filenameWithoutExtension(plan).toLowerCase()) return true;
+  }
+  return false;
+}
+
+/**
+ * Usable human-facing request/email subject (not a plan filename).
+ * @param {string|null|undefined} value
+ */
+export function isUsableRequestSubject(value) {
+  const s = sanitizeQueueSourceText(value, 320);
+  if (!s) return false;
+  if (s === "(no subject)") return false;
+  if (/not named|not identified|^unknown$/i.test(s)) return false;
+  if (isOpaquePlanFilename(s)) return false;
+  if (looksLikeAttachmentFilename(s)) return false;
+  return true;
+}
+
+/**
+ * Prefer the original email/request subject. Never treat attachment filenames as subject.
+ * @param {object|null|undefined} inboxItem
+ * @param {{ selectedPlanFilename?: string|null, packetFiles?: Array<{filename?: string|null}> }} [opts]
+ */
+export function pickQuoteRequestSubjectFromInboxItem(inboxItem, opts = {}) {
+  const planNames = [
+    opts.selectedPlanFilename,
+    ...(Array.isArray(opts.packetFiles) ? opts.packetFiles.map((f) => f?.filename) : []),
+    inboxItem?.bestPlanCandidate?.filename,
+    inboxItem?.takeoffPlanFilename,
+    inboxItem?.planFilename,
+    inboxItem?.selectedPlanFilename,
+    inboxItem?.attachmentName
+  ].filter(Boolean);
+
+  const candidates = [
+    inboxItem?.subject,
+    inboxItem?.requestSubject,
+    inboxItem?.requestTitle,
+    inboxItem?.projectLabel
+  ];
+  for (const c of candidates) {
+    if (!isUsableRequestSubject(c)) continue;
+    if (matchesAnyPlanFilename(c, planNames)) continue;
+    return sanitizeQueueSourceText(c, 320);
+  }
+  return null;
+}
+
+/**
  * @param {string|null|undefined} value
  * @param {number} [max]
  */
@@ -79,7 +151,9 @@ export function buildQuoteFlowTakeoffSourceMeta(input = {}) {
   const packetFilename = sanitizeQueueSourceText(input.packetFilename, 180);
 
   return {
-    requestSubject: sanitizeQueueSourceText(input.requestSubject, 320),
+    requestSubject: isUsableRequestSubject(input.requestSubject)
+      ? sanitizeQueueSourceText(input.requestSubject, 320)
+      : null,
     senderLabel: sanitizeQueueSourceText(input.senderLabel, 160),
     customerLabel: sanitizeQueueSourceText(input.customerLabel, 160),
     selectedPlanFilename,
@@ -128,11 +202,23 @@ export function readQuoteFlowTakeoffSourceMeta(takeoffJob) {
 export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
   const base =
     existingMetadata && typeof existingMetadata === "object" ? { ...existingMetadata } : {};
+  const prev =
+    base.quoteFlow && typeof base.quoteFlow === "object" ? { ...base.quoteFlow } : {};
+  const next = quoteFlow && typeof quoteFlow === "object" ? { ...quoteFlow } : {};
+
+  // Never wipe / replace a good request subject with null or a plan filename.
+  if (
+    isUsableRequestSubject(prev.requestSubject) &&
+    !isUsableRequestSubject(next.requestSubject)
+  ) {
+    next.requestSubject = sanitizeQueueSourceText(prev.requestSubject, 320);
+  }
+
   return {
     ...base,
     quoteFlow: {
-      ...(base.quoteFlow && typeof base.quoteFlow === "object" ? base.quoteFlow : {}),
-      ...quoteFlow
+      ...prev,
+      ...next
     }
   };
 }

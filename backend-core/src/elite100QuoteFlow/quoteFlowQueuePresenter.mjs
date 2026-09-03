@@ -7,6 +7,9 @@ import { formatQuoteFlowPersonLabel } from "./quoteFlowInboxPresenter.mjs";
 import {
   filenameWithoutExtension as packetFilenameWithoutExtension,
   isOpaquePlanFilename,
+  isUsableRequestSubject,
+  looksLikeAttachmentFilename,
+  matchesAnyPlanFilename,
   readQuoteFlowTakeoffSourceMeta,
   sanitizeQueueSourceText
 } from "./quoteFlowQueueSourceMeta.mjs";
@@ -14,7 +17,7 @@ import {
 /** Processing / queued rows newer than this are treated as "recent" for archive confirm. */
 export const QUOTE_FLOW_QUEUE_RECENT_PROCESSING_MS = 6 * 60 * 60 * 1000;
 
-export { isOpaquePlanFilename };
+export { isOpaquePlanFilename, isUsableRequestSubject, looksLikeAttachmentFilename };
 
 /**
  * Stable archive key for a queue row. Prefer takeoff job → intake case → message → fallback.
@@ -151,37 +154,82 @@ export function shortTakeoffJobLabel(jobId) {
 
 /**
  * Default editable Estimate / Job name for Set Scope.
- * Order: edited name → subject → packet/plan (non-opaque) → sender → short id.
+ * Precedence:
+ * 1. Explicit estimator-saved scope/estimate name (not a plan filename)
+ * 2. Original quote-request / email subject
+ * 3. Existing intake/request title (non-filename)
+ * 4. Attachment/plan filename only as last-resort fallback
+ *
+ * A PDF filename must never overwrite a valid email subject.
+ *
  * @param {object} row
  * @param {ReturnType<typeof resolveQueueRowLabels>|null} [labels]
  */
 export function resolveDefaultEstimateName(row = {}, labels = null) {
   const L = labels || resolveQueueRowLabels(row);
+  const planNames = [
+    L.selectedPlanFilename,
+    L.planFilename,
+    L.packetFilename,
+    ...(Array.isArray(L.packetFiles) ? L.packetFiles.map((f) => f?.filename) : []),
+    row.selectedPlanFilename,
+    row.planFilename,
+    row.takeoffPlanFilename,
+    row.attachmentName
+  ].filter(Boolean);
+
   const existing = String(
     row.scopeProjectName ||
       row.estimateProjectName ||
       row.quoteFlowEstimateName ||
       row.scope?.projectName ||
+      row.scope?.quoteFlowEstimateName ||
       ""
   ).trim();
-  if (existing && !/not named|not identified|^unknown/i.test(existing) && !isWeakQueueLabel(existing)) {
+  if (
+    existing &&
+    !/not named|not identified|^unknown/i.test(existing) &&
+    !isWeakQueueLabel(existing) &&
+    !looksLikeAttachmentFilename(existing) &&
+    !matchesAnyPlanFilename(existing, planNames)
+  ) {
     return existing;
   }
 
   const subject = String(
     row.requestSubject || row.subject || L.requestSubject || ""
   ).trim();
+  if (isUsableRequestSubject(subject) && !matchesAnyPlanFilename(subject, planNames)) {
+    return subject;
+  }
+
+  // If a prior bad save stored the plan filename as projectName, recover to subject when present.
   if (
-    subject &&
-    subject !== "(no subject)" &&
-    !/not named|not identified/i.test(subject) &&
-    !isOpaquePlanFilename(subject)
+    existing &&
+    (looksLikeAttachmentFilename(existing) || matchesAnyPlanFilename(existing, planNames)) &&
+    isUsableRequestSubject(subject)
   ) {
     return subject;
   }
 
+  const requestTitle = String(row.requestTitle || L.projectDisplay || "").trim();
+  if (
+    requestTitle &&
+    requestTitle !== "Quote request" &&
+    !/not named|not identified/i.test(requestTitle) &&
+    !isWeakQueueLabel(requestTitle) &&
+    !isOpaquePlanFilename(requestTitle) &&
+    !looksLikeAttachmentFilename(requestTitle) &&
+    !matchesAnyPlanFilename(requestTitle, planNames)
+  ) {
+    return requestTitle;
+  }
+
   if (L.packetMerged && L.packetFilename && !isOpaquePlanFilename(L.packetFilename)) {
-    return filenameWithoutExtension(L.packetFilename) || L.packetFilename;
+    const packetBase = filenameWithoutExtension(L.packetFilename) || L.packetFilename;
+    if (packetBase && !looksLikeAttachmentFilename(packetBase)) {
+      // packet filename may still be derived from subject; ok as soft fallback below subject
+    }
   }
 
   const project = String(L.projectDisplay || "").trim();
@@ -190,18 +238,23 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
     project !== "Quote request" &&
     !/not named|not identified/i.test(project) &&
     !isWeakQueueLabel(project) &&
-    !isOpaquePlanFilename(project)
+    !isOpaquePlanFilename(project) &&
+    !looksLikeAttachmentFilename(project) &&
+    !matchesAnyPlanFilename(project, planNames)
   ) {
-    if (L.planFilename && project === L.planFilename) {
-      return filenameWithoutExtension(L.planFilename) || project;
-    }
     return project;
+  }
+
+  if (L.packetMerged && L.packetFilename && !isOpaquePlanFilename(L.packetFilename)) {
+    return filenameWithoutExtension(L.packetFilename) || L.packetFilename;
   }
 
   const selected = String(L.selectedPlanFilename || L.planFilename || "").trim();
   if (selected && !isOpaquePlanFilename(selected)) {
     return filenameWithoutExtension(selected) || selected;
   }
+
+  if (existing && !isWeakQueueLabel(existing)) return existing;
 
   const customer = String(L.customerDisplay || L.senderLabel || "").trim();
   if (customer && !isWeakQueueLabel(customer) && !/^Plan:/i.test(customer)) {

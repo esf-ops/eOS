@@ -267,7 +267,51 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
   assert.match(takeoffStyles, /ctr-split-divider/);
   assert.match(takeoffStyles, /--ctr-plan-ratio/);
   assert.doesNotMatch(takeoffStyles, /\.ctr-plan\s*\{[^}]*resize:\s*both/);
+  assert.match(takeoffUi, /data-testid="ctr-waterfall-toggle"/);
+  assert.match(takeoffUi, /waterfallCollapsedSummary|Waterfall panels · None added/);
+  assert.match(takeoffUi, /ctr-col-dim--primary/);
+  assert.match(takeoffStyles, /--ctr-col-dim:\s*112px/);
+  assert.match(takeoffStyles, /ctr-waterfall-physical--collapsed/);
   console.log("ok: Review Takeoff split plan/worksheet layout contracts");
+}
+
+{
+  const {
+    resolveDefaultEstimateName,
+    looksLikeAttachmentFilename
+  } = await import(join(appRoot, "src/lib/queueGrouping.mjs"));
+  assert.equal(looksLikeAttachmentFilename("Pearson - Zude R 3D1.pdf"), true);
+  assert.equal(
+    resolveDefaultEstimateName({
+      requestSubject: "FW: PEARSON - ZUDE",
+      subject: "FW: PEARSON - ZUDE",
+      estimateName: "Pearson - Zude R 3D1",
+      planFilename: "Pearson - Zude R 3D1.pdf",
+      selectedPlanFilename: "Pearson - Zude R 3D1.pdf",
+      packetFiles: [
+        { filename: "Pearson - Zude R 3D1.pdf" },
+        { filename: "Pearson Revised Island.pdf" }
+      ]
+    }),
+    "FW: PEARSON - ZUDE"
+  );
+  assert.equal(
+    resolveDefaultEstimateName({
+      scope: { projectName: "Pearson Residence - Zude" },
+      requestSubject: "FW: PEARSON - ZUDE",
+      planFilename: "Pearson - Zude R 3D1.pdf"
+    }),
+    "Pearson Residence - Zude"
+  );
+  assert.equal(
+    resolveDefaultEstimateName({
+      planFilename: "Kitchen Countertops.pdf",
+      selectedPlanFilename: "Kitchen Countertops.pdf"
+    }),
+    "Kitchen Countertops"
+  );
+  assert.match(queue, /estimateNameUserEditedRef/);
+  console.log("ok: estimate name precedence — subject over PDF; explicit rename wins");
 }
 
 {

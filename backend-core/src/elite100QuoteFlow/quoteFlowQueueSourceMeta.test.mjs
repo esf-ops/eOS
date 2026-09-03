@@ -163,9 +163,87 @@ console.log("\nquoteFlowQueueSourceMeta.test.mjs\n");
     }
   });
   assert.equal(read?.requestSubject, "Subject from job metadata");
+  assert.equal(fromJobMeta.estimateName, "Subject from job metadata");
   assert.equal(fromJobMeta.status.key, "ready_for_review");
   assert.equal(fromJobMeta.actionLabel, "Review Takeoff");
   console.log("ok: existing queue archive/remove/set-scope action labels unchanged for ready rows");
+}
+
+{
+  const pearson = presentQuoteFlowQueueItem({
+    id: "case-pearson",
+    takeoffJobId: "job-pearson",
+    workflowStatus: "Takeoff draft ready",
+    takeoffJobStatus: "completed",
+    takeoffReviewStatus: "needs_review",
+    requestSubject: "FW: PEARSON - ZUDE",
+    subject: "FW: PEARSON - ZUDE",
+    planFilename: "Pearson - Zude R 3D1.pdf",
+    selectedPlanFilename: "Pearson - Zude R 3D1.pdf",
+    packetFiles: [
+      { filename: "Pearson - Zude R 3D1.pdf" },
+      { filename: "Pearson Cabinet Elevations.pdf" },
+      { filename: "Pearson Revised Island.pdf" }
+    ],
+    packetMerged: true,
+    packetFileCount: 3
+  });
+  assert.equal(pearson.estimateName, "FW: PEARSON - ZUDE");
+  assert.equal(pearson.defaultEstimateName, "FW: PEARSON - ZUDE");
+  assert.equal(pearson.requestTitle, "FW: PEARSON - ZUDE");
+  assert.equal(pearson.selectedPlanFilename, "Pearson - Zude R 3D1.pdf");
+  assert.doesNotMatch(pearson.estimateName, /\.pdf$/i);
+  assert.equal(
+    resolveDefaultEstimateName({
+      requestSubject: "FW: PEARSON - ZUDE",
+      estimateName: "Pearson - Zude R 3D1",
+      planFilename: "Pearson - Zude R 3D1.pdf",
+      selectedPlanFilename: "Pearson - Zude R 3D1.pdf"
+    }),
+    "FW: PEARSON - ZUDE"
+  );
+  assert.equal(
+    resolveDefaultEstimateName({
+      scope: { projectName: "Pearson Residence - Zude" },
+      requestSubject: "FW: PEARSON - ZUDE",
+      planFilename: "Pearson - Zude R 3D1.pdf"
+    }),
+    "Pearson Residence - Zude"
+  );
+  console.log("ok: email subject beats plan filename; explicit rename wins");
+}
+
+{
+  const { pickQuoteRequestSubjectFromInboxItem, looksLikeAttachmentFilename, mergeQuoteFlowTakeoffMetadata } =
+    await import("./quoteFlowQueueSourceMeta.mjs");
+  assert.equal(looksLikeAttachmentFilename("Pearson - Zude R 3D1.pdf"), true);
+  assert.equal(looksLikeAttachmentFilename("FW: PEARSON - ZUDE"), false);
+  assert.equal(
+    pickQuoteRequestSubjectFromInboxItem({
+      subject: "FW: PEARSON - ZUDE",
+      requestTitle: "Pearson - Zude R 3D1.pdf",
+      bestPlanCandidate: { filename: "Pearson - Zude R 3D1.pdf" }
+    }),
+    "FW: PEARSON - ZUDE"
+  );
+  assert.equal(
+    pickQuoteRequestSubjectFromInboxItem({
+      requestTitle: "Pearson - Zude R 3D1.pdf",
+      subject: "(no subject)",
+      bestPlanCandidate: { filename: "Pearson - Zude R 3D1.pdf" }
+    }),
+    null
+  );
+  const merged = mergeQuoteFlowTakeoffMetadata(
+    { quoteFlow: { requestSubject: "FW: PEARSON - ZUDE", selectedPlanFilename: "a.pdf" } },
+    buildQuoteFlowTakeoffSourceMeta({
+      requestSubject: "Pearson - Zude R 3D2 Revised.pdf",
+      selectedPlanFilename: "Pearson - Zude R 3D2 Revised.pdf"
+    })
+  );
+  assert.equal(merged.quoteFlow.requestSubject, "FW: PEARSON - ZUDE");
+  assert.equal(merged.quoteFlow.selectedPlanFilename, "Pearson - Zude R 3D2 Revised.pdf");
+  console.log("ok: stamp pick prefers subject; merge never overwrites subject with filename");
 }
 
 console.log("\nquoteFlowQueueSourceMeta.test.mjs: ok\n");

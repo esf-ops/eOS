@@ -18,7 +18,7 @@ console.log("\nexposedSidesEditor.ui.test.mjs\n");
 assert.equal(/<details/.test(trigger), false);
 assert.equal(/saveTakeoffCorrection|persistDraft|updateDraft/.test(trigger), false);
 assert.match(trigger, /aria-expanded/);
-assert.match(trigger, /Set exposed sides|formatExposedSidesTriggerText/);
+assert.match(trigger, /Set edges|Set exposed sides|formatExposedSidesTriggerText/);
 console.log("ok: trigger is local button; no in-cell details popover");
 
 assert.match(dialog, /createPortal/);

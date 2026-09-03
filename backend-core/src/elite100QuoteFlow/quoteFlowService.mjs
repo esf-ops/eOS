@@ -23,7 +23,8 @@ import {
 } from "./quoteFlowTakeoffPacket.mjs";
 import {
   buildQuoteFlowTakeoffSourceMeta,
-  persistQuoteFlowTakeoffSourceMeta
+  persistQuoteFlowTakeoffSourceMeta,
+  pickQuoteRequestSubjectFromInboxItem
 } from "./quoteFlowQueueSourceMeta.mjs";
 import {
   contentDispositionInline,
@@ -131,8 +132,10 @@ export function createQuoteFlowService(deps) {
         : [];
 
     const quoteFlow = buildQuoteFlowTakeoffSourceMeta({
-      requestSubject:
-        inboxItem?.requestTitle || inboxItem?.subject || inboxItem?.projectLabel || null,
+      requestSubject: pickQuoteRequestSubjectFromInboxItem(inboxItem, {
+        selectedPlanFilename,
+        packetFiles
+      }),
       senderLabel: inboxItem?.senderLabel || inboxItem?.sender || null,
       customerLabel:
         inboxItem?.customerDisplay || inboxItem?.customerLabel || inboxItem?.senderLabel || null,

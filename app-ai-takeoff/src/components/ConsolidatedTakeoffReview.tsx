@@ -97,6 +97,7 @@ import {
   ratioFromPointerClientX,
   readStoredReviewSplitRatio,
   resolveReviewSplitPreset,
+  waterfallCollapsedSummary,
   writeStoredReviewSplitRatio
 } from "../lib/reviewSplitLayout.mjs";
 
@@ -336,10 +337,16 @@ export default function ConsolidatedTakeoffReview() {
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [planCollapsed, setPlanCollapsed] = useState(false);
-  const [splitRatio, setSplitRatio] = useState(CTR_SPLIT_DEFAULT_RATIO);
+  const [splitRatio, setSplitRatio] = useState(() =>
+    typeof window !== "undefined"
+      ? readStoredReviewSplitRatio(window.localStorage, window.innerWidth)
+      : CTR_SPLIT_DEFAULT_RATIO
+  );
   const [splitNarrow, setSplitNarrow] = useState(false);
   const [focusedPieceKey, setFocusedPieceKey] = useState<string | null>(null);
   const [planFocusPage, setPlanFocusPage] = useState<number | null>(null);
+  /** null = follow default (open when panels exist, collapsed when empty). */
+  const [waterfallOpenOverride, setWaterfallOpenOverride] = useState<boolean | null>(null);
   const [aiAppendNotice, setAiAppendNotice] = useState<string | null>(null);
   const [edgeDialogRunId, setEdgeDialogRunId] = useState<string | null>(null);
   const [unsavedEdgeRunIds, setUnsavedEdgeRunIds] = useState<Set<string>>(() => new Set());
@@ -1314,7 +1321,15 @@ export default function ConsolidatedTakeoffReview() {
   }, [roomOptions, selectedRoomId]);
 
   useEffect(() => {
-    setSplitRatio(readStoredReviewSplitRatio(typeof window !== "undefined" ? window.localStorage : null));
+    const width =
+      splitLayoutRef.current?.getBoundingClientRect()?.width ||
+      (typeof window !== "undefined" ? window.innerWidth : 0);
+    setSplitRatio(
+      readStoredReviewSplitRatio(
+        typeof window !== "undefined" ? window.localStorage : null,
+        width
+      )
+    );
   }, []);
 
   useEffect(() => {
@@ -1329,6 +1344,19 @@ export default function ConsolidatedTakeoffReview() {
     mq.addListener(sync);
     return () => mq.removeListener(sync);
   }, []);
+
+  const waterfallSummary = useMemo(() => summarizeTakeoffDraftForReady(draft), [draft]);
+  const waterfallCount = waterfallSummary.waterfalls.length;
+  const waterfallOpen =
+    waterfallOpenOverride == null ? waterfallCount > 0 : waterfallOpenOverride;
+  const waterfallCountRef = useRef(waterfallCount);
+  useEffect(() => {
+    const prev = waterfallCountRef.current;
+    waterfallCountRef.current = waterfallCount;
+    if ((prev === 0 && waterfallCount > 0) || (prev > 0 && waterfallCount === 0)) {
+      setWaterfallOpenOverride(null);
+    }
+  }, [waterfallCount]);
 
   const applySplitRatio = useCallback((next: number, persist = true) => {
     const width = splitLayoutRef.current?.getBoundingClientRect()?.width ?? 0;
@@ -1922,12 +1950,12 @@ export default function ConsolidatedTakeoffReview() {
                   <tr>
                     <th className="ctr-col-room">Room</th>
                     <th className="ctr-col-piece">Piece</th>
-                    <th className="ctr-col-dim">Length (in)</th>
-                    <th className="ctr-col-dim">Depth (in)</th>
-                    <th className="ctr-col-qty">Quantity</th>
+                    <th className="ctr-col-dim ctr-col-dim--primary">Length (in)</th>
+                    <th className="ctr-col-dim ctr-col-dim--primary">Depth (in)</th>
+                    <th className="ctr-col-qty">Qty</th>
                     <th className="ctr-col-sf">Square feet</th>
                     <th className="ctr-col-bs">Backsplash</th>
-                    <th className="ctr-col-edge">Exposed edges</th>
+                    <th className="ctr-col-edge">Edges</th>
                     <th className="ctr-col-incl">Included</th>
                     <th className="ctr-col-cutouts">Cutouts</th>
                     <th className="ctr-col-notes">Notes</th>
@@ -1970,9 +1998,10 @@ export default function ConsolidatedTakeoffReview() {
                               }
                               onClick={(e) => e.stopPropagation()}
                             />
-                            <span className="ctr-muted">
+                            <span className="ctr-room-meta" data-testid="ctr-room-piece-count">
+                              ·{" "}
                               {section.pieces.length === 0
-                                ? "Empty room — add a piece to measure"
+                                ? "0 pieces"
                                 : `${section.pieces.length} piece${
                                     section.pieces.length === 1 ? "" : "s"
                                   }`}
@@ -1990,7 +2019,7 @@ export default function ConsolidatedTakeoffReview() {
                                 );
                               }}
                             >
-                              Add piece
+                              + Add piece
                             </button>
                             <button
                               type="button"
@@ -2458,228 +2487,283 @@ export default function ConsolidatedTakeoffReview() {
             </div>
 
             <section
-              className="ctr-waterfall-physical"
+              className={
+                waterfallOpen
+                  ? "ctr-waterfall-physical ctr-waterfall-physical--open"
+                  : "ctr-waterfall-physical ctr-waterfall-physical--collapsed"
+              }
               data-testid="ctr-waterfall-physical-scope"
+              data-open={waterfallOpen ? "1" : "0"}
+              data-waterfall-count={String(waterfallCount)}
               aria-label="Waterfall physical scope"
             >
-              <h2 className="ctr-section-title">Waterfall panels (Takeoff physical scope)</h2>
-              {(() => {
-                const summary = summarizeTakeoffDraftForReady(draft);
-                if (!summary.waterfalls.length) {
-                  return (
+              <div className="ctr-waterfall-physical__bar">
+                <button
+                  type="button"
+                  className="ctr-waterfall-physical__toggle"
+                  data-testid="ctr-waterfall-toggle"
+                  aria-expanded={waterfallOpen}
+                  aria-controls="ctr-waterfall-physical-body"
+                  onClick={() => setWaterfallOpenOverride(!waterfallOpen)}
+                >
+                  <span className="ctr-waterfall-physical__chevron" aria-hidden>
+                    {waterfallOpen ? "▾" : "▸"}
+                  </span>
+                  <span data-testid="ctr-waterfall-collapsed-summary">
+                    {waterfallCollapsedSummary(waterfallCount)}
+                  </span>
+                </button>
+                {!waterfallOpen && waterfallCount === 0 && !isReadonly ? (
+                  <button
+                    type="button"
+                    className="ctr-btn-secondary ctr-waterfall-physical__add"
+                    data-testid="ctr-waterfall-add-collapsed"
+                    onClick={() => setWaterfallOpenOverride(true)}
+                  >
+                    Add
+                  </button>
+                ) : null}
+                {!waterfallOpen && waterfallCount > 0 ? (
+                  <button
+                    type="button"
+                    className="ctr-btn-secondary ctr-waterfall-physical__add"
+                    data-testid="ctr-waterfall-open-collapsed"
+                    onClick={() => setWaterfallOpenOverride(true)}
+                  >
+                    Review
+                  </button>
+                ) : null}
+              </div>
+
+              {waterfallOpen ? (
+                <div
+                  id="ctr-waterfall-physical-body"
+                  className="ctr-waterfall-physical__body"
+                  data-testid="ctr-waterfall-physical-body"
+                >
+                  {waterfallCount === 0 ? (
                     <p className="ctr-muted" data-testid="ctr-waterfall-empty">
                       No waterfall panel geometry yet. On an island piece, add a left/right
                       waterfall panel here when this estimate includes or may offer a waterfall.
                     </p>
-                  );
-                }
-                return (
-                  <ul className="ctr-waterfall-list">
-                    {summary.waterfalls.map((wf) => (
-                      <li
-                        key={wf.id}
-                        className="ctr-waterfall-card"
-                        data-testid="ctr-waterfall-panel"
-                        data-waterfall-id={wf.id}
-                      >
-                        <strong data-testid="ctr-waterfall-label">
-                          {wf.pieceLabel} — {String(wf.side).charAt(0).toUpperCase() + String(wf.side).slice(1)}{" "}
-                          waterfall
-                        </strong>
-                        <dl className="ctr-waterfall-facts">
-                          <div>
-                            <dt>Room</dt>
-                            <dd>{wf.roomName}</dd>
-                          </div>
-                          <div>
-                            <dt>Related piece</dt>
-                            <dd>{wf.pieceLabel}</dd>
-                          </div>
-                          <div>
-                            <dt>Side</dt>
-                            <dd>{wf.side}</dd>
-                          </div>
-                          <div>
-                            <dt>Panel width (in)</dt>
-                            <dd>
-                              <input
-                                type="number"
-                                data-testid="ctr-waterfall-width"
-                                disabled={isReadonly}
-                                value={wf.panelWidthIn}
-                                onChange={(e) => {
-                                  const nextW = Number(e.target.value) || 0;
-                                  const next = structuredClone(draftRef.current);
-                                  for (const room of next.rooms || []) {
-                                    for (const area of room.areas || []) {
-                                      for (const run of area.runs || []) {
-                                        if (String(run.id) !== String(wf.pieceId)) continue;
-                                        run.waterfallPanels = (run.waterfallPanels || []).map(
-                                          (p: any) =>
-                                            String(p.id) === String(wf.id) ||
-                                            String(p.side) === String(wf.side)
-                                              ? { ...p, panelWidthIn: nextW }
-                                              : p
-                                        );
-                                        run.waterfallSegmentLengthsIn = {
-                                          ...(run.waterfallSegmentLengthsIn || {}),
-                                          [wf.side]:
-                                            run.waterfallPanels.find(
-                                              (p: any) => String(p.side) === String(wf.side)
-                                            )?.panelHeightIn ||
-                                            run.waterfallSegmentLengthsIn?.[wf.side] ||
-                                            36
-                                        };
-                                      }
-                                    }
-                                  }
-                                  updateDraft(next);
-                                }}
-                              />
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Panel height (in)</dt>
-                            <dd>
-                              <input
-                                type="number"
-                                data-testid="ctr-waterfall-height"
-                                disabled={isReadonly}
-                                value={wf.panelHeightIn}
-                                onChange={(e) => {
-                                  const nextH = Number(e.target.value) || 0;
-                                  const next = structuredClone(draftRef.current);
-                                  for (const room of next.rooms || []) {
-                                    for (const area of room.areas || []) {
-                                      for (const run of area.runs || []) {
-                                        if (String(run.id) !== String(wf.pieceId)) continue;
-                                        run.waterfallPanels = (run.waterfallPanels || []).map(
-                                          (p: any) =>
-                                            String(p.id) === String(wf.id) ||
-                                            String(p.side) === String(wf.side)
-                                              ? { ...p, panelHeightIn: nextH }
-                                              : p
-                                        );
-                                        run.waterfallSegmentLengthsIn = {
-                                          ...(run.waterfallSegmentLengthsIn || {}),
-                                          [wf.side]: nextH
-                                        };
-                                      }
-                                    }
-                                  }
-                                  updateDraft(next);
-                                }}
-                              />
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Quantity</dt>
-                            <dd data-testid="ctr-waterfall-qty">{wf.quantity}</dd>
-                          </div>
-                          <div>
-                            <dt>Included</dt>
-                            <dd>{wf.includedInScope ? "Yes" : "No"}</dd>
-                          </div>
-                        </dl>
-                      </li>
-                    ))}
-                  </ul>
-                );
-              })()}
-              {!isReadonly ? (
-                <div className="ctr-waterfall-island-actions" data-testid="ctr-island-waterfall-actions">
-                  {(draft?.rooms || []).flatMap((room: any) =>
-                    (room.areas || []).flatMap((area: any) =>
-                      (area.runs || [])
-                        .filter((run: any) => /island/i.test(String(run.label || "")))
-                        .map((run: any) => {
-                          const panels = Array.isArray(run.waterfallPanels) ? run.waterfallPanels : [];
-                          const hasLeft = panels.some((p: any) => p.side === "left");
-                          const hasRight = panels.some((p: any) => p.side === "right");
-                          return (
-                            <div key={run.id} className="ctr-island-waterfall-row" data-testid="ctr-island-waterfall-row">
-                              <strong>{run.label}</strong>
-                              {!hasLeft ? (
-                                <button
-                                  type="button"
-                                  className="ctr-btn-secondary"
-                                  data-testid="ctr-add-left-waterfall"
-                                  onClick={() => {
-                                    const next = structuredClone(
-                                      draftRef.current || createEmptyManualTakeoffDraft()
-                                    );
-                                    for (const r of next.rooms || []) {
-                                      for (const a of r.areas || []) {
-                                        for (const piece of a.runs || []) {
-                                          if (String(piece.id) !== String(run.id)) continue;
-                                          const list = Array.isArray(piece.waterfallPanels)
-                                            ? piece.waterfallPanels
-                                            : [];
-                                          list.push({
-                                            id: `wf-${piece.id}-left`,
-                                            side: "left",
-                                            panelWidthIn: Number(piece.depthIn) || 36,
-                                            panelHeightIn: 36,
-                                            quantity: 1,
-                                            included: true
-                                          });
-                                          piece.waterfallPanels = list;
-                                          piece.waterfallSegmentLengthsIn = {
-                                            ...(piece.waterfallSegmentLengthsIn || {}),
-                                            left: 36
-                                          };
-                                        }
-                                      }
-                                    }
-                                    updateDraft(next);
-                                  }}
-                                >
-                                  Add left waterfall
-                                </button>
-                              ) : null}
-                              {!hasRight ? (
-                                <button
-                                  type="button"
-                                  className="ctr-btn-secondary"
-                                  data-testid="ctr-add-right-waterfall"
-                                  onClick={() => {
-                                    const next = structuredClone(
-                                      draftRef.current || createEmptyManualTakeoffDraft()
-                                    );
-                                    for (const r of next.rooms || []) {
-                                      for (const a of r.areas || []) {
-                                        for (const piece of a.runs || []) {
-                                          if (String(piece.id) !== String(run.id)) continue;
-                                          const list = Array.isArray(piece.waterfallPanels)
-                                            ? piece.waterfallPanels
-                                            : [];
-                                          list.push({
-                                            id: `wf-${piece.id}-right`,
-                                            side: "right",
-                                            panelWidthIn: Number(piece.depthIn) || 36,
-                                            panelHeightIn: 36,
-                                            quantity: 1,
-                                            included: true
-                                          });
-                                          piece.waterfallPanels = list;
-                                          piece.waterfallSegmentLengthsIn = {
-                                            ...(piece.waterfallSegmentLengthsIn || {}),
-                                            right: 36
-                                          };
-                                        }
-                                      }
-                                    }
-                                    updateDraft(next);
-                                  }}
-                                >
-                                  Add right waterfall
-                                </button>
-                              ) : null}
+                  ) : (
+                    <ul className="ctr-waterfall-list">
+                      {waterfallSummary.waterfalls.map((wf) => (
+                        <li
+                          key={wf.id}
+                          className="ctr-waterfall-card"
+                          data-testid="ctr-waterfall-panel"
+                          data-waterfall-id={wf.id}
+                        >
+                          <strong data-testid="ctr-waterfall-label">
+                            {wf.pieceLabel} —{" "}
+                            {String(wf.side).charAt(0).toUpperCase() + String(wf.side).slice(1)}{" "}
+                            waterfall
+                          </strong>
+                          <dl className="ctr-waterfall-facts">
+                            <div>
+                              <dt>Room</dt>
+                              <dd>{wf.roomName}</dd>
                             </div>
-                          );
-                        })
-                    )
+                            <div>
+                              <dt>Related piece</dt>
+                              <dd>{wf.pieceLabel}</dd>
+                            </div>
+                            <div>
+                              <dt>Side</dt>
+                              <dd>{wf.side}</dd>
+                            </div>
+                            <div>
+                              <dt>Panel width (in)</dt>
+                              <dd>
+                                <input
+                                  type="number"
+                                  data-testid="ctr-waterfall-width"
+                                  disabled={isReadonly}
+                                  value={wf.panelWidthIn}
+                                  onChange={(e) => {
+                                    const nextW = Number(e.target.value) || 0;
+                                    const next = structuredClone(draftRef.current);
+                                    for (const room of next.rooms || []) {
+                                      for (const area of room.areas || []) {
+                                        for (const run of area.runs || []) {
+                                          if (String(run.id) !== String(wf.pieceId)) continue;
+                                          run.waterfallPanels = (run.waterfallPanels || []).map(
+                                            (p: any) =>
+                                              String(p.id) === String(wf.id) ||
+                                              String(p.side) === String(wf.side)
+                                                ? { ...p, panelWidthIn: nextW }
+                                                : p
+                                          );
+                                          run.waterfallSegmentLengthsIn = {
+                                            ...(run.waterfallSegmentLengthsIn || {}),
+                                            [wf.side]:
+                                              run.waterfallPanels.find(
+                                                (p: any) => String(p.side) === String(wf.side)
+                                              )?.panelHeightIn ||
+                                              run.waterfallSegmentLengthsIn?.[wf.side] ||
+                                              36
+                                          };
+                                        }
+                                      }
+                                    }
+                                    updateDraft(next);
+                                  }}
+                                />
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Panel height (in)</dt>
+                              <dd>
+                                <input
+                                  type="number"
+                                  data-testid="ctr-waterfall-height"
+                                  disabled={isReadonly}
+                                  value={wf.panelHeightIn}
+                                  onChange={(e) => {
+                                    const nextH = Number(e.target.value) || 0;
+                                    const next = structuredClone(draftRef.current);
+                                    for (const room of next.rooms || []) {
+                                      for (const area of room.areas || []) {
+                                        for (const run of area.runs || []) {
+                                          if (String(run.id) !== String(wf.pieceId)) continue;
+                                          run.waterfallPanels = (run.waterfallPanels || []).map(
+                                            (p: any) =>
+                                              String(p.id) === String(wf.id) ||
+                                              String(p.side) === String(wf.side)
+                                                ? { ...p, panelHeightIn: nextH }
+                                                : p
+                                          );
+                                          run.waterfallSegmentLengthsIn = {
+                                            ...(run.waterfallSegmentLengthsIn || {}),
+                                            [wf.side]: nextH
+                                          };
+                                        }
+                                      }
+                                    }
+                                    updateDraft(next);
+                                  }}
+                                />
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Quantity</dt>
+                              <dd data-testid="ctr-waterfall-qty">{wf.quantity}</dd>
+                            </div>
+                            <div>
+                              <dt>Included</dt>
+                              <dd>{wf.includedInScope ? "Yes" : "No"}</dd>
+                            </div>
+                          </dl>
+                        </li>
+                      ))}
+                    </ul>
                   )}
+                  {!isReadonly ? (
+                    <div
+                      className="ctr-waterfall-island-actions"
+                      data-testid="ctr-island-waterfall-actions"
+                    >
+                      {(draft?.rooms || []).flatMap((room: any) =>
+                        (room.areas || []).flatMap((area: any) =>
+                          (area.runs || [])
+                            .filter((run: any) => /island/i.test(String(run.label || "")))
+                            .map((run: any) => {
+                              const panels = Array.isArray(run.waterfallPanels)
+                                ? run.waterfallPanels
+                                : [];
+                              const hasLeft = panels.some((p: any) => p.side === "left");
+                              const hasRight = panels.some((p: any) => p.side === "right");
+                              return (
+                                <div
+                                  key={run.id}
+                                  className="ctr-island-waterfall-row"
+                                  data-testid="ctr-island-waterfall-row"
+                                >
+                                  <strong>{run.label}</strong>
+                                  {!hasLeft ? (
+                                    <button
+                                      type="button"
+                                      className="ctr-btn-secondary"
+                                      data-testid="ctr-add-left-waterfall"
+                                      onClick={() => {
+                                        const next = structuredClone(
+                                          draftRef.current || createEmptyManualTakeoffDraft()
+                                        );
+                                        for (const r of next.rooms || []) {
+                                          for (const a of r.areas || []) {
+                                            for (const piece of a.runs || []) {
+                                              if (String(piece.id) !== String(run.id)) continue;
+                                              const list = Array.isArray(piece.waterfallPanels)
+                                                ? piece.waterfallPanels
+                                                : [];
+                                              list.push({
+                                                id: `wf-${piece.id}-left`,
+                                                side: "left",
+                                                panelWidthIn: Number(piece.depthIn) || 36,
+                                                panelHeightIn: 36,
+                                                quantity: 1,
+                                                included: true
+                                              });
+                                              piece.waterfallPanels = list;
+                                              piece.waterfallSegmentLengthsIn = {
+                                                ...(piece.waterfallSegmentLengthsIn || {}),
+                                                left: 36
+                                              };
+                                            }
+                                          }
+                                        }
+                                        updateDraft(next);
+                                      }}
+                                    >
+                                      Add left waterfall
+                                    </button>
+                                  ) : null}
+                                  {!hasRight ? (
+                                    <button
+                                      type="button"
+                                      className="ctr-btn-secondary"
+                                      data-testid="ctr-add-right-waterfall"
+                                      onClick={() => {
+                                        const next = structuredClone(
+                                          draftRef.current || createEmptyManualTakeoffDraft()
+                                        );
+                                        for (const r of next.rooms || []) {
+                                          for (const a of r.areas || []) {
+                                            for (const piece of a.runs || []) {
+                                              if (String(piece.id) !== String(run.id)) continue;
+                                              const list = Array.isArray(piece.waterfallPanels)
+                                                ? piece.waterfallPanels
+                                                : [];
+                                              list.push({
+                                                id: `wf-${piece.id}-right`,
+                                                side: "right",
+                                                panelWidthIn: Number(piece.depthIn) || 36,
+                                                panelHeightIn: 36,
+                                                quantity: 1,
+                                                included: true
+                                              });
+                                              piece.waterfallPanels = list;
+                                              piece.waterfallSegmentLengthsIn = {
+                                                ...(piece.waterfallSegmentLengthsIn || {}),
+                                                right: 36
+                                              };
+                                            }
+                                          }
+                                        }
+                                        updateDraft(next);
+                                      }}
+                                    >
+                                      Add right waterfall
+                                    </button>
+                                  ) : null}
+                                </div>
+                              );
+                            })
+                        )
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </section>

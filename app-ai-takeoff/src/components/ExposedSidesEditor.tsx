@@ -20,7 +20,7 @@ export type ExposedSidesTriggerProps = {
 };
 
 export function formatExposedSidesTriggerText(row: ExposedSidesTriggerProps["row"]) {
-  if (row.finishedEdgeTotalIn == null) return "Set exposed sides";
+  if (row.finishedEdgeTotalIn == null) return "Set edges";
   const lf = `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF`;
   if (row.localUnsavedEdge) return `${lf} · unsaved`;
   if (row.finishedEdgeApproved) return `${lf} ✓`;

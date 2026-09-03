@@ -198,6 +198,7 @@ export default function EstimateQueuePage(props: Props) {
   const selectedJobIdRef = useRef<string | null>(null);
   const detailModeRef = useRef<DetailMode>("idle");
   const estimateNameByJobRef = useRef<Record<string, string>>({});
+  const estimateNameUserEditedRef = useRef<Record<string, boolean>>({});
   const takeoffIframeRef = useRef<HTMLIFrameElement | null>(null);
   const reviewDirtyRef = useRef(false);
   const reviewCloseBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -238,14 +239,24 @@ export default function EstimateQueuePage(props: Props) {
       setEstimateName("");
       return;
     }
-    const remembered = estimateNameByJobRef.current[jobId];
-    if (remembered) {
-      setEstimateName(remembered);
-      return;
-    }
     const next = resolveDefaultEstimateName(item || {});
+    if (estimateNameUserEditedRef.current[jobId]) {
+      const remembered = estimateNameByJobRef.current[jobId];
+      if (remembered) {
+        setEstimateName(remembered);
+        return;
+      }
+    }
     setEstimateName(next);
     estimateNameByJobRef.current[jobId] = next;
+  }
+
+  function onEstimateNameChange(value: string) {
+    setEstimateName(value);
+    if (selectedJobId) {
+      estimateNameByJobRef.current[selectedJobId] = value;
+      estimateNameUserEditedRef.current[selectedJobId] = true;
+    }
   }
 
   async function loadList(mode: "initial" | "refresh" = "refresh") {
@@ -540,11 +551,6 @@ export default function EstimateQueuePage(props: Props) {
     } else {
       setDetailMode("idle");
     }
-  }
-
-  function onEstimateNameChange(value: string) {
-    setEstimateName(value);
-    if (selectedJobId) estimateNameByJobRef.current[selectedJobId] = value;
   }
 
   function resolvedNameForSubmit(): string {
