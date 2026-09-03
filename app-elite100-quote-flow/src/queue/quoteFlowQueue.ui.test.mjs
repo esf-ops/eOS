@@ -40,7 +40,9 @@ assert.match(queue, /data-testid="qf-queue-goto-estimates"/);
 assert.match(queue, /data-testid="qf-queue-estimate-name"/);
 assert.match(queue, /data-testid="qf-queue-estimate-name-input"/);
 assert.match(queue, /data-testid="qf-queue-workspace-actions"/);
-assert.match(queue, /Estimate name/);
+assert.match(queue, /Quote name/);
+assert.match(queue, /saveQuoteFlowQuoteName|quote-name/);
+assert.match(queue, /isMeaningfulQuoteName/);
 assert.match(queue, /Review AI Takeoff/);
 assert.match(queue, /Create Manual Scope/);
 assert.match(queue, /Set Scope/);
@@ -70,11 +72,13 @@ assert.match(queue, /rowAction === "create_manual_scope"/);
 assert.match(queue, /Needs decision/);
 assert.match(api, /projectName/);
 assert.match(api, /estimateName/);
+assert.match(api, /quote-name/);
+assert.match(api, /saveQuoteFlowQuoteName|quoteName/);
 assert.match(api, /takeoffResult/);
 assert.match(api, /set-manual-scope/);
 assert.match(app, /qf-shell--command/);
-assert.match(grouping, /resolveDefaultEstimateName/);
-assert.match(grouping, /Untitled quote request/);
+assert.match(grouping, /resolveDefaultEstimateName|resolveCanonicalQuoteName/);
+assert.match(grouping, /QUOTE_NAME_REQUIRED_LABEL|Quote name required/);
 assert.doesNotMatch(queue, /Use these measurements/);
 assert.doesNotMatch(queue, /isValidQuoteFlowTriggerSetScope|QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
 assert.doesNotMatch(queue, /Approve Estimate/);
@@ -178,7 +182,7 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
       projectName: "Project not named",
       planFilename: "NCH-McLain Top Drawing.pdf"
     }),
-    "NCH-McLain Top Drawing"
+    "Quote name required"
   );
   assert.equal(resolveQueueTitle(rows[1]), "Relihan VanderSchot Finals Plans");
   const subtitle = resolveQueueSubtitle(rows[1], resolveQueueTitle(rows[1]));
@@ -190,7 +194,7 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
       planFilename: "20260429163807042.pdf",
       takeoffJobId: "abcd1234-ffff-ffff-ffff-ffffffffffff"
     }),
-    "Quote abcd1234"
+    "Quote name required"
   );
   assert.equal(
     resolveQueueTitle({
@@ -278,11 +282,14 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
 {
   const {
     resolveDefaultEstimateName,
-    looksLikeAttachmentFilename
+    looksLikeAttachmentFilename,
+    QUOTE_NAME_REQUIRED_LABEL,
+    isMeaningfulQuoteName
   } = await import(join(appRoot, "src/lib/queueGrouping.mjs"));
   assert.equal(looksLikeAttachmentFilename("Pearson - Zude R 3D1.pdf"), true);
   assert.equal(
     resolveDefaultEstimateName({
+      quoteName: "FW: PEARSON - ZUDE",
       requestSubject: "FW: PEARSON - ZUDE",
       subject: "FW: PEARSON - ZUDE",
       estimateName: "Pearson - Zude R 3D1",
@@ -298,6 +305,7 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
   assert.equal(
     resolveDefaultEstimateName({
       scope: { projectName: "Pearson Residence - Zude" },
+      quoteName: "FW: PEARSON - ZUDE",
       requestSubject: "FW: PEARSON - ZUDE",
       planFilename: "Pearson - Zude R 3D1.pdf"
     }),
@@ -308,21 +316,25 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
       planFilename: "Kitchen Countertops.pdf",
       selectedPlanFilename: "Kitchen Countertops.pdf"
     }),
-    "Kitchen Countertops"
+    QUOTE_NAME_REQUIRED_LABEL
   );
+  assert.equal(isMeaningfulQuoteName("image001"), false);
+  assert.equal(isMeaningfulQuoteName("drawing001.pdf"), false);
   assert.match(queue, /estimateNameUserEditedRef/);
-  console.log("ok: estimate name precedence — subject over PDF; explicit rename wins");
+  assert.match(queue, /persistQuoteNameIfNeeded/);
+  console.log("ok: canonical Quote Name — subject/durable over PDF; filename-only requires name");
 }
 
 {
-  const { presentQuoteFlowQueueItem, resolveDefaultEstimateName: backendName } = await import(
-    join(repoRoot, "backend-core/src/elite100QuoteFlow/quoteFlowQueuePresenter.mjs")
-  );
+  const { presentQuoteFlowQueueItem, resolveDefaultEstimateName: backendName, QUOTE_NAME_REQUIRED_LABEL } =
+    await import(join(repoRoot, "backend-core/src/elite100QuoteFlow/quoteFlowQueuePresenter.mjs"));
   const ready = presentQuoteFlowQueueItem({
     id: "case-1",
     takeoffJobId: "job-1",
     customerName: "Customer not identified",
     projectName: "Project not named",
+    quoteName: "Hoskins Williams Job",
+    requestSubject: "Hoskins Williams Job",
     planFilename: "Hoskins Williams Job.pdf",
     workflowStatus: "Takeoff draft ready",
     takeoffJobStatus: "completed",
@@ -332,6 +344,7 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
   assert.equal(ready.rowAction, "review_takeoff");
   assert.equal(ready.actionLabel, "Review Takeoff");
   assert.equal(ready.defaultEstimateName, "Hoskins Williams Job");
+  assert.equal(ready.quoteNameRequired, false);
   assert.doesNotMatch(ready.defaultEstimateName, /AAMk|Unknown contact/);
   assert.equal(
     backendName({
@@ -341,7 +354,18 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
     }),
     "Amanda Rushton"
   );
-  console.log("ok: presenter default estimate name + ready rowAction");
+  const planOnly = presentQuoteFlowQueueItem({
+    id: "case-plan-only",
+    takeoffJobId: "job-plan",
+    planFilename: "image001.png",
+    selectedPlanFilename: "image001.png",
+    workflowStatus: "Takeoff draft ready",
+    takeoffJobStatus: "completed",
+    takeoffReviewStatus: "needs_review"
+  });
+  assert.equal(planOnly.quoteNameRequired, true);
+  assert.equal(planOnly.defaultEstimateName, QUOTE_NAME_REQUIRED_LABEL);
+  console.log("ok: presenter canonical Quote Name + ready rowAction");
 }
 
 console.log("\nquoteFlowQueue.ui.test.mjs: ok\n");

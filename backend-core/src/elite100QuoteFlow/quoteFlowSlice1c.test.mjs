@@ -38,6 +38,8 @@ function queueRow(overrides = {}) {
     studioEstimateId: null,
     customerName: "Buyer Co",
     projectName: "Kitchen",
+    quoteName: "Kitchen",
+    requestSubject: "Kitchen",
     workflowStatus: "Takeoff draft ready",
     takeoffJobStatus: "completed",
     takeoffReviewStatus: "needs_review",
@@ -252,7 +254,8 @@ function queueRow(overrides = {}) {
   const first = await svc.setScope({
     organizationId: ORG,
     takeoffJobId: JOB,
-    confirm: true
+    confirm: true,
+    projectName: "Slice1c Kitchen Quote"
   });
   assert.equal(first.estimateId, `est-${CASE}`);
   assert.equal(first.created, true);
@@ -280,7 +283,8 @@ function queueRow(overrides = {}) {
   const second = await svc.setScope({
     organizationId: ORG,
     takeoffJobId: JOB,
-    confirm: true
+    confirm: true,
+    projectName: "Slice1c Kitchen Quote"
   });
   assert.equal(second.reused, true);
   assert.equal(second.alreadyScoped, true);
@@ -355,7 +359,8 @@ function queueRow(overrides = {}) {
     takeoffReviewStatus: "needs_review"
   });
   assert.equal(objectLabels.customerDisplay, "Dave Untiedt");
-  assert.equal(objectLabels.defaultEstimateName, "plan");
+  assert.equal(objectLabels.defaultEstimateName, "Quote name required");
+  assert.equal(objectLabels.quoteNameRequired, true);
   assert.doesNotMatch(JSON.stringify(objectLabels), /AAMk|Unknown contact — Unknown contact/);
 
   const weak = presentQuoteFlowQueueItem({
@@ -585,7 +590,8 @@ function queueRow(overrides = {}) {
   const res = await svc.setScope({
     organizationId: ORG,
     takeoffJobId: approvedJob,
-    confirm: true
+    confirm: true,
+    projectName: "Approved Takeoff Quote"
   });
   assert.equal(res.ok, true);
   assert.equal(res.message, "Scope is set for this estimate.");
@@ -785,7 +791,8 @@ function queueRow(overrides = {}) {
       svc.setScope({
         organizationId: ORG,
         takeoffJobId: emptyJob,
-        confirm: true
+        confirm: true,
+        projectName: "Empty Measurements Quote"
       }),
     (err) => {
       const msg = String(err?.message || "");
@@ -1348,7 +1355,7 @@ function queueRow(overrides = {}) {
     organizationId: ORG,
     takeoffJobId: realJob,
     confirm: true,
-    projectName: "20260529091846252",
+    projectName: "Open Edge Carry Quote",
     // Live iframe payload shape (finishedEdge inches; stamp adds openEdgeLf)
     takeoffResult: stampedLive
   });
@@ -1435,7 +1442,8 @@ function queueRow(overrides = {}) {
   const res2 = await svc2.setScope({
     organizationId: ORG,
     takeoffJobId: savedJob2,
-    confirm: true
+    confirm: true,
+    projectName: "Saved Draft Open Edge Quote"
   });
   assert.equal(res2.ok, true);
   const scoped2 = estimatesByCase2.get(savedCase2);

@@ -17,6 +17,9 @@ export type QuoteFlowQueueItem = {
   subject?: string | null;
   defaultEstimateName?: string | null;
   estimateName?: string | null;
+  quoteName?: string | null;
+  quoteNameUserSet?: boolean;
+  quoteNameRequired?: boolean;
   senderLabel?: string | null;
   sourceMailboxLabel?: string | null;
   planFilename?: string | null;
@@ -111,6 +114,33 @@ export async function fetchQuoteFlowQueueDetail(token: string, takeoffJobId: str
     ok: boolean;
     item: QuoteFlowQueueItem;
     review: Record<string, unknown>;
+  }>;
+}
+
+export async function saveQuoteFlowQuoteName(
+  token: string,
+  takeoffJobId: string,
+  opts: {
+    quoteName?: string;
+    estimateName?: string;
+    projectName?: string;
+    userSet?: boolean;
+  } = {}
+) {
+  return apiPost(
+    `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/quote-name`,
+    token,
+    {
+      quoteName: opts.quoteName || opts.estimateName || opts.projectName || undefined,
+      estimateName: opts.estimateName || opts.quoteName || opts.projectName || undefined,
+      projectName: opts.projectName || opts.quoteName || opts.estimateName || undefined,
+      userSet: opts.userSet !== false
+    }
+  ) as Promise<{
+    ok: boolean;
+    takeoffJobId: string;
+    quoteName: string;
+    quoteNameUserSet?: boolean;
   }>;
 }
 

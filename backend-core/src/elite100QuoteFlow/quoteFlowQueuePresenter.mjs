@@ -6,8 +6,10 @@
 import { formatQuoteFlowPersonLabel } from "./quoteFlowInboxPresenter.mjs";
 import {
   filenameWithoutExtension as packetFilenameWithoutExtension,
+  isMeaningfulQuoteName,
   isOpaquePlanFilename,
   isUsableRequestSubject,
+  isWeakPlanBasename,
   looksLikeAttachmentFilename,
   matchesAnyPlanFilename,
   readQuoteFlowTakeoffSourceMeta,
@@ -17,7 +19,16 @@ import {
 /** Processing / queued rows newer than this are treated as "recent" for archive confirm. */
 export const QUOTE_FLOW_QUEUE_RECENT_PROCESSING_MS = 6 * 60 * 60 * 1000;
 
-export { isOpaquePlanFilename, isUsableRequestSubject, looksLikeAttachmentFilename };
+/** Shown when no durable Quote Name exists yet (never invent from filename). */
+export const QUOTE_NAME_REQUIRED_LABEL = "Quote name required";
+
+export {
+  isMeaningfulQuoteName,
+  isOpaquePlanFilename,
+  isUsableRequestSubject,
+  isWeakPlanBasename,
+  looksLikeAttachmentFilename
+};
 
 /**
  * Stable archive key for a queue row. Prefer takeoff job → intake case → message → fallback.
@@ -153,19 +164,14 @@ export function shortTakeoffJobLabel(jobId) {
 }
 
 /**
- * Default editable Estimate / Job name for Set Scope.
- * Precedence:
- * 1. Explicit estimator-saved scope/estimate name (not a plan filename)
- * 2. Original quote-request / email subject
- * 3. Existing intake/request title (non-filename)
- * 4. Attachment/plan filename only as last-resort fallback
- *
- * A PDF filename must never overwrite a valid email subject.
+ * Canonical Quote Name for queue / review / Set Scope.
+ * Reads durable quoteName (and post-scope projectName). Never invents from plan filename.
  *
  * @param {object} row
  * @param {ReturnType<typeof resolveQueueRowLabels>|null} [labels]
+ * @returns {{ quoteName: string|null, quoteNameRequired: boolean, displayTitle: string }}
  */
-export function resolveDefaultEstimateName(row = {}, labels = null) {
+export function resolveCanonicalQuoteName(row = {}, labels = null) {
   const L = labels || resolveQueueRowLabels(row);
   const planNames = [
     L.selectedPlanFilename,
@@ -178,7 +184,7 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
     row.attachmentName
   ].filter(Boolean);
 
-  const existing = String(
+  const scoped = String(
     row.scopeProjectName ||
       row.estimateProjectName ||
       row.quoteFlowEstimateName ||
@@ -186,87 +192,34 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
       row.scope?.quoteFlowEstimateName ||
       ""
   ).trim();
-  if (
-    existing &&
-    !/not named|not identified|^unknown/i.test(existing) &&
-    !isWeakQueueLabel(existing) &&
-    !looksLikeAttachmentFilename(existing) &&
-    !matchesAnyPlanFilename(existing, planNames)
-  ) {
-    return existing;
+  if (isMeaningfulQuoteName(scoped, planNames)) {
+    return { quoteName: scoped, quoteNameRequired: false, displayTitle: scoped };
   }
 
-  const subject = String(
-    row.requestSubject || row.subject || L.requestSubject || ""
-  ).trim();
-  if (isUsableRequestSubject(subject) && !matchesAnyPlanFilename(subject, planNames)) {
-    return subject;
+  const durable = String(row.quoteName || L.quoteName || "").trim();
+  if (isMeaningfulQuoteName(durable, planNames)) {
+    return { quoteName: durable, quoteNameRequired: false, displayTitle: durable };
   }
 
-  // If a prior bad save stored the plan filename as projectName, recover to subject when present.
-  if (
-    existing &&
-    (looksLikeAttachmentFilename(existing) || matchesAnyPlanFilename(existing, planNames)) &&
-    isUsableRequestSubject(subject)
-  ) {
-    return subject;
+  // Transitional: subject seeds display until stamp/backfill writes quoteName.
+  const subject = String(row.requestSubject || row.subject || L.requestSubject || "").trim();
+  if (isUsableRequestSubject(subject)) {
+    return { quoteName: subject, quoteNameRequired: false, displayTitle: subject };
   }
 
-  const requestTitle = String(row.requestTitle || L.projectDisplay || "").trim();
-  if (
-    requestTitle &&
-    requestTitle !== "Quote request" &&
-    !/not named|not identified/i.test(requestTitle) &&
-    !isWeakQueueLabel(requestTitle) &&
-    !isOpaquePlanFilename(requestTitle) &&
-    !looksLikeAttachmentFilename(requestTitle) &&
-    !matchesAnyPlanFilename(requestTitle, planNames)
-  ) {
-    return requestTitle;
-  }
+  return {
+    quoteName: null,
+    quoteNameRequired: true,
+    displayTitle: QUOTE_NAME_REQUIRED_LABEL
+  };
+}
 
-  if (L.packetMerged && L.packetFilename && !isOpaquePlanFilename(L.packetFilename)) {
-    const packetBase = filenameWithoutExtension(L.packetFilename) || L.packetFilename;
-    if (packetBase && !looksLikeAttachmentFilename(packetBase)) {
-      // packet filename may still be derived from subject; ok as soft fallback below subject
-    }
-  }
-
-  const project = String(L.projectDisplay || "").trim();
-  if (
-    project &&
-    project !== "Quote request" &&
-    !/not named|not identified/i.test(project) &&
-    !isWeakQueueLabel(project) &&
-    !isOpaquePlanFilename(project) &&
-    !looksLikeAttachmentFilename(project) &&
-    !matchesAnyPlanFilename(project, planNames)
-  ) {
-    return project;
-  }
-
-  if (L.packetMerged && L.packetFilename && !isOpaquePlanFilename(L.packetFilename)) {
-    return filenameWithoutExtension(L.packetFilename) || L.packetFilename;
-  }
-
-  const selected = String(L.selectedPlanFilename || L.planFilename || "").trim();
-  if (selected && !isOpaquePlanFilename(selected)) {
-    return filenameWithoutExtension(selected) || selected;
-  }
-
-  if (existing && !isWeakQueueLabel(existing)) return existing;
-
-  const customer = String(L.customerDisplay || L.senderLabel || "").trim();
-  if (customer && !isWeakQueueLabel(customer) && !/^Plan:/i.test(customer)) {
-    return customer;
-  }
-
-  const rawId = String(row.takeoffJobId || row.id || row.intakeCaseId || "").trim();
-  if (rawId && !/^AAMk/i.test(rawId)) {
-    const short = rawId.replace(/-/g, "").slice(0, 8);
-    if (short) return `Quote ${short}`;
-  }
-  return "Untitled quote request";
+/**
+ * @param {object} row
+ * @param {ReturnType<typeof resolveQueueRowLabels>|null} [labels]
+ */
+export function resolveDefaultEstimateName(row = {}, labels = null) {
+  return resolveCanonicalQuoteName(row, labels).displayTitle;
 }
 
 /**
@@ -316,8 +269,13 @@ export function resolveQueueRowLabels(row = {}) {
     sanitizeQueueSourceText(row.requestSubject || row.subject || sourceMeta?.requestSubject, 320) ||
     null;
 
+  const quoteName =
+    sanitizeQueueSourceText(row.quoteName || sourceMeta?.quoteName, 200) || null;
+  const quoteNameUserSet =
+    row.quoteNameUserSet === true || sourceMeta?.quoteNameUserSet === true;
+
   const projectRaw =
-    row.projectName ?? row.projectLabel ?? requestSubject ?? row.requestTitle ?? null;
+    row.projectName ?? row.projectLabel ?? quoteName ?? requestSubject ?? row.requestTitle ?? null;
   let project =
     projectRaw == null || projectRaw === ""
       ? ""
@@ -399,11 +357,9 @@ export function resolveQueueRowLabels(row = {}) {
     null;
 
   const projectDisplay =
+    (quoteName && isMeaningfulQuoteName(quoteName) ? quoteName : null) ||
     (requestSubject && !isOpaquePlanFilename(requestSubject) ? requestSubject : null) ||
     project ||
-    (planFilename && !isOpaquePlanFilename(planFilename)
-      ? filenameWithoutExtension(planFilename) || planFilename
-      : null) ||
     (customer || null) ||
     null;
 
@@ -424,7 +380,9 @@ export function resolveQueueRowLabels(row = {}) {
     packetFiles,
     senderLabel,
     sourceMailboxLabel:
-      sanitizeQueueSourceText(row.sourceMailboxLabel || sourceMeta?.sourceMailboxLabel, 120) || null
+      sanitizeQueueSourceText(row.sourceMailboxLabel || sourceMeta?.sourceMailboxLabel, 120) || null,
+    quoteName,
+    quoteNameUserSet
   };
 }
 
@@ -458,9 +416,10 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
   const group = mapQuoteFlowQueueGroup(status.key);
   const nextAction = mapQuoteFlowQueueNextAction(status.key);
   const labels = resolveQueueRowLabels(row);
-  const defaultEstimateName = resolveDefaultEstimateName(row, labels);
+  const canonical = resolveCanonicalQuoteName(row, labels);
+  const defaultEstimateName = canonical.displayTitle;
   const customerDisplay = labels.customerDisplay || null;
-  const projectDisplay = labels.projectDisplay || defaultEstimateName;
+  const projectDisplay = canonical.quoteName || labels.projectDisplay || defaultEstimateName;
 
   const roomCount =
     opts.roomCount != null
@@ -521,6 +480,9 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
     requestTitle: defaultEstimateName,
     requestSubject: labels.requestSubject,
     subject: labels.requestSubject,
+    quoteName: canonical.quoteName,
+    quoteNameUserSet: labels.quoteNameUserSet === true,
+    quoteNameRequired: canonical.quoteNameRequired === true,
     defaultEstimateName,
     estimateName: defaultEstimateName,
     senderLabel: labels.senderLabel,

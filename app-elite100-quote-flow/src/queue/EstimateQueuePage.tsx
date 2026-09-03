@@ -6,6 +6,9 @@ import {
   filterQueueItems,
   formatQueueTime,
   groupQueueItems,
+  isMeaningfulQuoteName,
+  QUOTE_NAME_REQUIRED_LABEL,
+  resolveCanonicalQuoteName,
   resolveDefaultEstimateName,
   resolveQueueCustomer,
   resolveQueueGroupKey,
@@ -17,6 +20,7 @@ import {
   fetchQuoteFlowQueue,
   fetchQuoteFlowQueueDetail,
   restoreQuoteFlowQueueItem,
+  saveQuoteFlowQuoteName,
   setQuoteFlowManualScope,
   setQuoteFlowScope,
   type QuoteFlowQueueItem
@@ -239,14 +243,25 @@ export default function EstimateQueuePage(props: Props) {
       setEstimateName("");
       return;
     }
-    const next = resolveDefaultEstimateName(item || {});
     if (estimateNameUserEditedRef.current[jobId]) {
       const remembered = estimateNameByJobRef.current[jobId];
-      if (remembered) {
+      if (remembered != null) {
         setEstimateName(remembered);
         return;
       }
     }
+    if (item?.quoteNameUserSet && isMeaningfulQuoteName(item.quoteName || "")) {
+      const durable = String(item.quoteName || "").trim();
+      estimateNameUserEditedRef.current[jobId] = true;
+      estimateNameByJobRef.current[jobId] = durable;
+      setEstimateName(durable);
+      return;
+    }
+    const canonical = resolveCanonicalQuoteName(item || {});
+    const next =
+      canonical.quoteNameRequired || canonical.displayTitle === QUOTE_NAME_REQUIRED_LABEL
+        ? ""
+        : canonical.displayTitle;
     setEstimateName(next);
     estimateNameByJobRef.current[jobId] = next;
   }
@@ -256,6 +271,62 @@ export default function EstimateQueuePage(props: Props) {
     if (selectedJobId) {
       estimateNameByJobRef.current[selectedJobId] = value;
       estimateNameUserEditedRef.current[selectedJobId] = true;
+    }
+  }
+
+  async function persistQuoteNameIfNeeded(opts: { quiet?: boolean } = {}) {
+    const jobId = selectedJobId;
+    if (!jobId || !authToken) return false;
+    const name = String(estimateName || "").trim();
+    if (!isMeaningfulQuoteName(name)) {
+      if (!opts.quiet) {
+        setError(
+          "Enter a meaningful Quote Name before saving. Plan filenames cannot be used as the quote identity."
+        );
+      }
+      return false;
+    }
+    try {
+      const res = await saveQuoteFlowQuoteName(authToken, jobId, {
+        quoteName: name,
+        userSet: true
+      });
+      const saved = String(res.quoteName || name).trim();
+      estimateNameByJobRef.current[jobId] = saved;
+      estimateNameUserEditedRef.current[jobId] = true;
+      setEstimateName(saved);
+      setItems((prev) =>
+        prev.map((row) =>
+          row.takeoffJobId === jobId
+            ? {
+                ...row,
+                quoteName: saved,
+                quoteNameUserSet: true,
+                quoteNameRequired: false,
+                estimateName: saved,
+                defaultEstimateName: saved,
+                requestTitle: saved
+              }
+            : row
+        )
+      );
+      setDetail((prev) =>
+        prev && prev.takeoffJobId === jobId
+          ? {
+              ...prev,
+              quoteName: saved,
+              quoteNameUserSet: true,
+              quoteNameRequired: false,
+              estimateName: saved,
+              defaultEstimateName: saved,
+              requestTitle: saved
+            }
+          : prev
+      );
+      return true;
+    } catch (e) {
+      if (!opts.quiet) setError(errorMessage(e));
+      return false;
     }
   }
 
@@ -463,6 +534,7 @@ export default function EstimateQueuePage(props: Props) {
   function requestReviewSaveDraft() {
     if (!selectedJobId || !takeoffIframeRef.current?.contentWindow) return;
     setReviewSaveBusy(true);
+    void persistQuoteNameIfNeeded({ quiet: true });
     try {
       takeoffIframeRef.current.contentWindow.postMessage(
         { type: QUOTE_FLOW_REQUEST_SAVE_DRAFT, takeoffJobId: selectedJobId },
@@ -555,8 +627,12 @@ export default function EstimateQueuePage(props: Props) {
 
   function resolvedNameForSubmit(): string {
     const typed = String(estimateName || "").trim();
-    if (typed && !/^unknown contact$/i.test(typed)) return typed;
-    return resolveDefaultEstimateName(workspaceItem || {});
+    if (isMeaningfulQuoteName(typed)) return typed;
+    const canonical = resolveCanonicalQuoteName(workspaceItem || {});
+    if (canonical.quoteName && isMeaningfulQuoteName(canonical.quoteName)) {
+      return canonical.quoteName;
+    }
+    return "";
   }
 
   async function runSetScope() {
@@ -566,6 +642,15 @@ export default function EstimateQueuePage(props: Props) {
     setError(null);
     setNotice(null);
     const name = resolvedNameForSubmit();
+    if (!isMeaningfulQuoteName(name)) {
+      setError(
+        "Enter a meaningful Quote Name before setting scope. Plan filenames cannot be used as the quote identity."
+      );
+      inFlightRef.current = false;
+      setSetScopeBusy(false);
+      return;
+    }
+    await persistQuoteNameIfNeeded({ quiet: true });
     const saveDraftFirstMsg = "Save draft first, then Set Scope.";
     try {
       // Prefer live worksheet state from the iframe (dirty edits + openEdgeLf).
@@ -623,6 +708,15 @@ export default function EstimateQueuePage(props: Props) {
     setError(null);
     setNotice(null);
     const name = resolvedNameForSubmit();
+    if (!isMeaningfulQuoteName(name)) {
+      setError(
+        "Enter a meaningful Quote Name before setting scope. Plan filenames cannot be used as the quote identity."
+      );
+      inFlightRef.current = false;
+      setSetScopeBusy(false);
+      return;
+    }
+    await persistQuoteNameIfNeeded({ quiet: true });
     try {
       const res = await setQuoteFlowManualScope(authToken, selectedJobId, {
         confirm: true,
@@ -897,16 +991,30 @@ export default function EstimateQueuePage(props: Props) {
   }
 
   function renderEstimateNameField() {
+    const needsName =
+      !isMeaningfulQuoteName(estimateName) &&
+      (workspaceItem?.quoteNameRequired === true ||
+        resolveCanonicalQuoteName(workspaceItem || {}).quoteNameRequired);
     return (
       <label className="qf-queue__estimate-name" data-testid="qf-queue-estimate-name">
-        <span>Estimate name</span>
+        <span>Quote name</span>
         <input
           type="text"
           value={estimateName}
           onChange={(e) => onEstimateNameChange(e.target.value)}
-          placeholder="Job or estimate name"
+          onBlur={() => {
+            void persistQuoteNameIfNeeded({ quiet: true });
+          }}
+          placeholder="Required — e.g. Smith Residence - Kitchen"
           data-testid="qf-queue-estimate-name-input"
+          aria-invalid={needsName || undefined}
         />
+        {needsName ? (
+          <span className="qf-queue__estimate-name-hint" data-testid="qf-queue-quote-name-required">
+            A Quote Name is required before Set Scope. Plan filenames are not used as the quote
+            identity.
+          </span>
+        ) : null}
       </label>
     );
   }

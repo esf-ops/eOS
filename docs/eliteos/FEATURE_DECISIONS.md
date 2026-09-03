@@ -4780,3 +4780,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | COMPLETED_INSTALLATION_SF definition, historical attribution facts, Account Directory authority, Monday ownership, account-intelligence thresholds, commission policy, identity approvals, Monday writes. |
 | **Impacted** | `salesOpsReadiness.mjs`, `salesOpsPerformanceQuery.mjs`, Sales Ops operating-view/book-intelligence/scoped-account APIs, Sales Ops Head nav/Overview/hero/Accounts/Plan empty states, this doc, SYSTEM_BLUEPRINT. |
 
+---
+
+### 354. Quote Flow canonical Quote Name (pre–Set Scope durable identity) (2026-09-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-03 · `main` |
+| **Decision** | Separate **email subject** (immutable intake metadata), **Quote Name** (canonical human-facing opportunity identity), and **plan/attachment filename** (source-document metadata). Pre–Set Scope Quote Name is durable on `quote_takeoff_jobs.metadata.quoteFlow.quoteName` (+ `quoteNameUserSet` / `quoteNameSource`). Email start-takeoff stamps Quote Name from usable subject. Estimator edits persist via `POST …/queue/:takeoffJobId/quote-name` (Save Draft / blur) and Set Scope. Queue headings read Quote Name directly — never invent from plan filename (`image001`, `1803_001`, etc.). Set Scope requires a meaningful Quote Name and writes `scope.projectName` + `scope.quoteFlowEstimateName`. No new SQL column; JSON metadata only. Safe backfill from subject when Quote Name empty and not user-set. |
+| **Why** | Precedence-only UI patches still left Estimate Queue showing plan basenames when subject was missing from the derived path or Lab jobs had no Quote Name. |
+| **Impacted** | `quoteFlowQueueSourceMeta`, presenter, setScope, Quote Flow routes/API, EstimateQueuePage, queueGrouping, tests, optional backfill SQL, this doc. |
+| **Protected / unchanged** | AI takeoff math, pricing, Digital Estimate publish, attachment filenames, original email subjects, quote-number generation. |
+| **Revisit trigger** | Dedicated `quote_name` column if JSON metadata becomes overloaded across products. |
+

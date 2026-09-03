@@ -96,6 +96,40 @@ export function isUsableRequestSubject(value) {
   return true;
 }
 
+export const QUOTE_NAME_REQUIRED_LABEL = "Quote name required";
+
+/**
+ * @param {string|null|undefined} name
+ */
+export function isWeakPlanBasename(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return true;
+  const base = filenameWithoutExtension(raw);
+  if (!base) return true;
+  if (isOpaquePlanFilename(raw)) return true;
+  if (/^(image|img|scan|drawing|photo|screenshot|file|document|attachment|pic|dsc)[\d_\-]*$/i.test(base)) {
+    return true;
+  }
+  if (/^\d{2,5}_\d{2,5}$/.test(base)) return true;
+  if (/^(untitled|new document)$/i.test(base)) return true;
+  return false;
+}
+
+/**
+ * @param {string|null|undefined} value
+ * @param {Array<string|null|undefined>} [planNames]
+ */
+export function isMeaningfulQuoteName(value, planNames = []) {
+  void planNames;
+  const s = asString(value);
+  if (!s) return false;
+  if (s === "(no subject)" || /^quote name required$/i.test(s)) return false;
+  if (/not named|not identified|^unknown$/i.test(s)) return false;
+  if (looksLikeAttachmentFilename(s)) return false;
+  if (isWeakPlanBasename(s)) return false;
+  return true;
+}
+
 /**
  * @param {object} item
  */
@@ -199,12 +233,11 @@ export function filterQueueItems(items, filter = "all_active", search = "") {
 }
 
 /**
- * Editable Estimate / Job name default.
- * Precedence: explicit saved name → email subject → request title → plan filename fallback.
- * PDF filenames never overwrite a valid request subject.
+ * Canonical Quote Name — durable quoteName / scoped projectName / subject seed.
+ * Never invent from plan filename.
  * @param {object} item
  */
-export function resolveDefaultEstimateName(item) {
+export function resolveCanonicalQuoteName(item) {
   const planNames = [
     item?.selectedPlanFilename,
     item?.takeoffPlanFilename,
@@ -214,95 +247,45 @@ export function resolveDefaultEstimateName(item) {
     ...(Array.isArray(item?.packetFiles) ? item.packetFiles.map((f) => f?.filename) : [])
   ].filter(Boolean);
 
-  const explicitSaved = asString(
+  const scoped = asString(
     item?.scopeProjectName ||
       item?.estimateProjectName ||
       item?.quoteFlowEstimateName ||
       item?.scope?.projectName ||
       item?.scope?.quoteFlowEstimateName
   );
-  if (
-    explicitSaved &&
-    !isWeakLabel(explicitSaved) &&
-    !looksLikeAttachmentFilename(explicitSaved) &&
-    !matchesAnyPlanFilename(explicitSaved, planNames) &&
-    !isOpaquePlanFilename(explicitSaved)
-  ) {
-    return explicitSaved;
+  if (isMeaningfulQuoteName(scoped, planNames)) {
+    return { quoteName: scoped, quoteNameRequired: false, displayTitle: scoped };
+  }
+
+  const durable = asString(item?.quoteName);
+  if (isMeaningfulQuoteName(durable, planNames)) {
+    return { quoteName: durable, quoteNameRequired: false, displayTitle: durable };
   }
 
   const subject = asString(item?.requestSubject || item?.subject);
-  if (isUsableRequestSubject(subject) && !matchesAnyPlanFilename(subject, planNames)) {
-    return subject;
+  if (isUsableRequestSubject(subject)) {
+    return { quoteName: subject, quoteNameRequired: false, displayTitle: subject };
   }
 
-  // Recover when API estimateName was previously set to the plan filename.
-  if (
-    (looksLikeAttachmentFilename(explicitSaved) ||
-      matchesAnyPlanFilename(explicitSaved, planNames)) &&
-    isUsableRequestSubject(subject)
-  ) {
-    return subject;
+  if (item?.quoteNameRequired === true) {
+    return { quoteName: null, quoteNameRequired: true, displayTitle: QUOTE_NAME_REQUIRED_LABEL };
   }
 
-  const fromApi = asString(item?.estimateName || item?.defaultEstimateName || item?.requestTitle);
-  if (
-    fromApi &&
-    !isWeakLabel(fromApi) &&
-    !/^AAMk/i.test(fromApi) &&
-    !/unknown contact/i.test(fromApi) &&
-    !isOpaquePlanFilename(fromApi) &&
-    !looksLikeAttachmentFilename(fromApi) &&
-    !matchesAnyPlanFilename(fromApi, planNames)
-  ) {
-    return fromApi;
-  }
-
-  if (
-    (looksLikeAttachmentFilename(fromApi) || matchesAnyPlanFilename(fromApi, planNames)) &&
-    isUsableRequestSubject(subject)
-  ) {
-    return subject;
-  }
-
-  if (item?.packetMerged && item?.packetFilename && !isOpaquePlanFilename(item.packetFilename)) {
-    return filenameWithoutExtension(item.packetFilename) || asString(item.packetFilename);
-  }
-
-  const project = asString(item?.projectDisplay || item?.projectName);
-  if (
-    project &&
-    !isWeakLabel(project) &&
-    !/not named|not identified/i.test(project) &&
-    !isOpaquePlanFilename(project) &&
-    !looksLikeAttachmentFilename(project) &&
-    !matchesAnyPlanFilename(project, planNames)
-  ) {
-    return project;
-  }
-
-  const selected = asString(item?.selectedPlanFilename || item?.takeoffPlanFilename || item?.planFilename);
-  if (selected && !isOpaquePlanFilename(selected) && !/^AAMk/i.test(selected)) {
-    return filenameWithoutExtension(selected) || selected;
-  }
-
-  if (explicitSaved && !isWeakLabel(explicitSaved)) return explicitSaved;
-
-  const customer = resolveQueueCustomer(item, { allowUntitled: false });
-  if (customer && !isWeakLabel(customer) && !/^Plan:/i.test(customer)) return customer;
-
-  const rawId = asString(item?.takeoffJobId || item?.intakeCaseId);
-  if (rawId && !/^AAMk/i.test(rawId)) {
-    const short = rawId.replace(/-/g, "").slice(0, 8);
-    if (short) return `Quote ${short}`;
-  }
-  return "Untitled quote request";
+  return {
+    quoteName: null,
+    quoteNameRequired: true,
+    displayTitle: QUOTE_NAME_REQUIRED_LABEL
+  };
 }
 
 /**
  * @param {object} item
- * @param {{ allowUntitled?: boolean }} [opts]
  */
+export function resolveDefaultEstimateName(item) {
+  return resolveCanonicalQuoteName(item).displayTitle;
+}
+
 export function resolveQueueCustomer(item, opts = {}) {
   const candidates = [
     item?.customerDisplay,

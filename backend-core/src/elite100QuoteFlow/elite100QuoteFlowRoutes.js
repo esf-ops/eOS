@@ -742,6 +742,46 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   });
 
   app.post(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/quote-name",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowSetScopeService.updateQuoteName({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
+          quoteName:
+            body.quoteName != null
+              ? String(body.quoteName)
+              : body.estimateName != null
+                ? String(body.estimateName)
+                : body.projectName != null
+                  ? String(body.projectName)
+                  : null,
+          userSet: body.userSet !== false
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.quote_name",
+            userId: req.user?.id ?? null,
+            takeoffJobId: result.takeoffJobId ?? null,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] quote-name save failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to save Quote Name.");
+      }
+    }
+  );
+
+  app.post(
     "/api/elite100-quote-flow/queue/:takeoffJobId/set-scope",
     ...staffStack,
     setScopeJsonParser,

@@ -39,6 +39,98 @@ export function looksLikeAttachmentFilename(name) {
 }
 
 /**
+ * Generic/scanner basenames that must never become a canonical Quote Name.
+ * @param {string|null|undefined} name
+ */
+export function isWeakPlanBasename(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return true;
+  const base = filenameWithoutExtension(raw);
+  if (!base) return true;
+  if (isOpaquePlanFilename(raw)) return true;
+  if (/^(image|img|scan|drawing|photo|screenshot|file|document|attachment|pic|dsc)[\d_\-]*$/i.test(base)) {
+    return true;
+  }
+  // Shop scanner patterns like 1803_001
+  if (/^\d{2,5}_\d{2,5}$/.test(base)) return true;
+  if (/^(untitled|new document)$/i.test(base)) return true;
+  return false;
+}
+
+/**
+ * Meaningful human-facing Quote Name (not plan/file identity).
+ * Rejects extensions and weak scanner basenames (image001, 1803_001).
+ * A name may legitimately match a plan stem (e.g. job title used as filename).
+ * @param {string|null|undefined} value
+ * @param {Array<string|null|undefined>} [planNames]
+ */
+export function isMeaningfulQuoteName(value, planNames = []) {
+  void planNames;
+  const s = sanitizeQueueSourceText(value, 200);
+  if (!s) return false;
+  if (s === "(no subject)") return false;
+  if (/^quote name required$/i.test(s)) return false;
+  if (/not named|not identified|^unknown$/i.test(s)) return false;
+  if (looksLikeAttachmentFilename(s)) return false;
+  if (isWeakPlanBasename(s)) return false;
+  return true;
+}
+
+/**
+ * Establish initial canonical Quote Name from email subject (never from filename).
+ * @param {{
+ *   requestSubject?: string|null,
+ *   quoteName?: string|null,
+ *   quoteNameUserSet?: boolean,
+ *   selectedPlanFilename?: string|null,
+ *   packetFiles?: Array<{filename?: string|null}>
+ * }} input
+ */
+export function establishInitialQuoteName(input = {}) {
+  const planNames = [
+    input.selectedPlanFilename,
+    ...(Array.isArray(input.packetFiles) ? input.packetFiles.map((f) => f?.filename) : [])
+  ].filter(Boolean);
+
+  if (input.quoteNameUserSet === true && isMeaningfulQuoteName(input.quoteName, planNames)) {
+    return {
+      quoteName: sanitizeQueueSourceText(input.quoteName, 200),
+      quoteNameUserSet: true,
+      quoteNameSource: "user"
+    };
+  }
+
+  if (isMeaningfulQuoteName(input.quoteName, planNames)) {
+    return {
+      quoteName: sanitizeQueueSourceText(input.quoteName, 200),
+      quoteNameUserSet: input.quoteNameUserSet === true,
+      quoteNameSource:
+        input.quoteNameUserSet === true
+          ? "user"
+          : isUsableRequestSubject(input.requestSubject) &&
+              sanitizeQueueSourceText(input.quoteName, 200) ===
+                sanitizeQueueSourceText(input.requestSubject, 200)
+            ? "email_subject"
+            : "existing"
+    };
+  }
+
+  if (isUsableRequestSubject(input.requestSubject)) {
+    return {
+      quoteName: sanitizeQueueSourceText(input.requestSubject, 200),
+      quoteNameUserSet: false,
+      quoteNameSource: "email_subject"
+    };
+  }
+
+  return {
+    quoteName: null,
+    quoteNameUserSet: false,
+    quoteNameSource: null
+  };
+}
+
+/**
  * @param {string|null|undefined} name
  * @param {Array<string|null|undefined>} planNames
  */
@@ -118,6 +210,9 @@ export function sanitizeQueueSourceText(value, max = 240) {
  * Build metadata blob stored on quote_takeoff_jobs.metadata.quoteFlow.
  * @param {{
  *   requestSubject?: string|null,
+ *   quoteName?: string|null,
+ *   quoteNameUserSet?: boolean,
+ *   quoteNameSource?: string|null,
  *   senderLabel?: string|null,
  *   customerLabel?: string|null,
  *   selectedPlanFilename?: string|null,
@@ -150,10 +245,23 @@ export function buildQuoteFlowTakeoffSourceMeta(input = {}) {
     null;
   const packetFilename = sanitizeQueueSourceText(input.packetFilename, 180);
 
+  const requestSubject = isUsableRequestSubject(input.requestSubject)
+    ? sanitizeQueueSourceText(input.requestSubject, 320)
+    : null;
+
+  const established = establishInitialQuoteName({
+    requestSubject,
+    quoteName: input.quoteName,
+    quoteNameUserSet: input.quoteNameUserSet === true,
+    selectedPlanFilename,
+    packetFiles
+  });
+
   return {
-    requestSubject: isUsableRequestSubject(input.requestSubject)
-      ? sanitizeQueueSourceText(input.requestSubject, 320)
-      : null,
+    requestSubject,
+    quoteName: established.quoteName,
+    quoteNameUserSet: established.quoteNameUserSet === true,
+    quoteNameSource: established.quoteNameSource,
     senderLabel: sanitizeQueueSourceText(input.senderLabel, 160),
     customerLabel: sanitizeQueueSourceText(input.customerLabel, 160),
     selectedPlanFilename,
@@ -196,6 +304,7 @@ export function readQuoteFlowTakeoffSourceMeta(takeoffJob) {
 
 /**
  * Merge quoteFlow source onto existing job metadata (shallow).
+ * Preserves canonical Quote Name and email subject across attachment/AI reruns.
  * @param {object|null|undefined} existingMetadata
  * @param {ReturnType<typeof buildQuoteFlowTakeoffSourceMeta>} quoteFlow
  */
@@ -206,12 +315,48 @@ export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
     base.quoteFlow && typeof base.quoteFlow === "object" ? { ...base.quoteFlow } : {};
   const next = quoteFlow && typeof quoteFlow === "object" ? { ...quoteFlow } : {};
 
+  const planNames = [
+    next.selectedPlanFilename,
+    prev.selectedPlanFilename,
+    ...(Array.isArray(next.packetFiles) ? next.packetFiles.map((f) => f?.filename) : []),
+    ...(Array.isArray(prev.packetFiles) ? prev.packetFiles.map((f) => f?.filename) : [])
+  ].filter(Boolean);
+
   // Never wipe / replace a good request subject with null or a plan filename.
   if (
     isUsableRequestSubject(prev.requestSubject) &&
     !isUsableRequestSubject(next.requestSubject)
   ) {
     next.requestSubject = sanitizeQueueSourceText(prev.requestSubject, 320);
+  }
+
+  const prevUserSet = prev.quoteNameUserSet === true;
+  const prevMeaningful = isMeaningfulQuoteName(prev.quoteName, planNames);
+  const nextMeaningful = isMeaningfulQuoteName(next.quoteName, planNames);
+
+  if (prevUserSet && prevMeaningful) {
+    // Estimator-owned name wins forever over stamp/AI/attachment merges.
+    next.quoteName = sanitizeQueueSourceText(prev.quoteName, 200);
+    next.quoteNameUserSet = true;
+    next.quoteNameSource = "user";
+  } else if (prevMeaningful && !nextMeaningful) {
+    next.quoteName = sanitizeQueueSourceText(prev.quoteName, 200);
+    next.quoteNameUserSet = prevUserSet === true;
+    next.quoteNameSource = prev.quoteNameSource || "existing";
+  } else if (!nextMeaningful) {
+    const established = establishInitialQuoteName({
+      requestSubject: next.requestSubject || prev.requestSubject,
+      quoteName: null,
+      quoteNameUserSet: false,
+      selectedPlanFilename: next.selectedPlanFilename || prev.selectedPlanFilename,
+      packetFiles: next.packetFiles || prev.packetFiles
+    });
+    next.quoteName = established.quoteName;
+    next.quoteNameUserSet = false;
+    next.quoteNameSource = established.quoteNameSource;
+  } else if (next.quoteNameUserSet !== true) {
+    next.quoteNameUserSet = false;
+    next.quoteNameSource = next.quoteNameSource || "email_subject";
   }
 
   return {
@@ -221,6 +366,65 @@ export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
       ...next
     }
   };
+}
+
+/**
+ * Persist only the canonical Quote Name (estimator Save Draft / rename).
+ * @param {{
+ *   getSupabase?: Function|null,
+ *   organizationId: string,
+ *   takeoffJobId: string,
+ *   quoteName: string,
+ *   userSet?: boolean
+ * }} args
+ */
+export async function persistQuoteFlowQuoteName(args) {
+  const organizationId = String(args.organizationId || "").trim();
+  const takeoffJobId = String(args.takeoffJobId || "").trim();
+  const getSupabase = args.getSupabase;
+  if (!organizationId || !takeoffJobId || typeof getSupabase !== "function") {
+    return { ok: false, reason: "missing_args" };
+  }
+  const name = sanitizeQueueSourceText(args.quoteName, 200);
+  if (!isMeaningfulQuoteName(name)) {
+    return { ok: false, reason: "quote_name_required" };
+  }
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, reason: "no_supabase" };
+  try {
+    const { data: row, error: readErr } = await supabase
+      .from("quote_takeoff_jobs")
+      .select("id,metadata")
+      .eq("organization_id", organizationId)
+      .eq("id", takeoffJobId)
+      .maybeSingle();
+    if (readErr || !row?.id) return { ok: false, reason: "job_not_found" };
+    const base =
+      row.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
+    const prev = base.quoteFlow && typeof base.quoteFlow === "object" ? { ...base.quoteFlow } : {};
+    const nextMeta = {
+      ...base,
+      quoteFlow: {
+        ...prev,
+        quoteName: name,
+        quoteNameUserSet: args.userSet !== false,
+        quoteNameSource: args.userSet === false ? prev.quoteNameSource || "email_subject" : "user"
+      }
+    };
+    const { error: writeErr } = await supabase
+      .from("quote_takeoff_jobs")
+      .update({ metadata: nextMeta })
+      .eq("organization_id", organizationId)
+      .eq("id", takeoffJobId);
+    if (writeErr) return { ok: false, reason: "write_failed" };
+    return {
+      ok: true,
+      quoteName: name,
+      quoteNameUserSet: args.userSet !== false
+    };
+  } catch {
+    return { ok: false, reason: "exception" };
+  }
 }
 
 /**

@@ -16,6 +16,8 @@ const MESSAGES = {
   import_failed:
     "AI Takeoff could not import this file. Try another plan attachment.",
   import_confirm_required: "Confirm Start AI Takeoff to continue.",
+  quote_name_required:
+    "Enter a meaningful Quote Name before setting scope. Plan filenames cannot be used as the quote identity.",
   set_scope_confirm_required: "Confirm Set Scope to continue.",
   already_scoped: "Scope is already set. Open in Estimates.",
   takeoff_not_allowed: "Scope is already set. Open in Estimates.",
@@ -75,6 +77,7 @@ export function createQuoteFlowError(code, opts = {}) {
           ? 503
           : safe.code === "takeoff_not_ready" ||
               safe.code === "scope_invalid" ||
+              safe.code === "quote_name_required" ||
               safe.code === "pricing_invalid" ||
               safe.code === "pricing_calculate_failed" ||
               safe.code === "review_not_ready" ||

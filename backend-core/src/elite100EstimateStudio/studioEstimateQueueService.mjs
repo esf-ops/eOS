@@ -539,6 +539,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       ).trim() || null;
 
     const qfSubject = String(quoteFlowSource?.requestSubject || "").trim() || null;
+    const qfQuoteName = String(quoteFlowSource?.quoteName || "").trim() || null;
+    const qfQuoteNameUserSet = quoteFlowSource?.quoteNameUserSet === true;
     const qfSender = String(quoteFlowSource?.senderLabel || "").trim() || null;
     const qfCustomer = String(quoteFlowSource?.customerLabel || "").trim() || null;
     const qfSelectedPlan = String(quoteFlowSource?.selectedPlanFilename || "").trim() || null;
@@ -562,6 +564,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       estimateOrigin: estimateOrigin || (isManualStaff ? "manual_staff" : null),
       subject: qfSubject,
       requestSubject: qfSubject,
+      quoteName: qfQuoteName,
+      quoteNameUserSet: qfQuoteNameUserSet,
       senderLabel: isManualStaff
         ? "Manual estimate"
         : qfSender ||

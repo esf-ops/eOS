@@ -20,6 +20,10 @@ import {
   sortQuoteFlowQueueItems
 } from "./quoteFlowQueuePresenter.mjs";
 import {
+  isMeaningfulQuoteName,
+  persistQuoteFlowQuoteName
+} from "./quoteFlowQueueSourceMeta.mjs";
+import {
   createMemoryQuoteFlowQueueStateStore,
   createQuoteFlowQueueStateStore
 } from "./quoteFlowQueueStateStore.mjs";
@@ -339,8 +343,60 @@ export function createQuoteFlowSetScopeService(deps) {
     const name = String(value || "").trim();
     if (!name) return null;
     if (/^unknown contact$/i.test(name)) return null;
+    if (/^quote name required$/i.test(name)) return null;
     if (name.length > 200) return name.slice(0, 200);
     return name;
+  }
+
+  function requireMeaningfulQuoteName(value) {
+    const name = normalizeDisplayName(value);
+    if (!isMeaningfulQuoteName(name)) {
+      throw createQuoteFlowError("quote_name_required", { statusCode: 422 });
+    }
+    return name;
+  }
+
+  /**
+   * Persist canonical Quote Name on the takeoff job (Save Draft / rename).
+   */
+  async function updateQuoteName({
+    organizationId,
+    takeoffJobId,
+    actorUserId = null,
+    quoteName = null,
+    estimateName = null,
+    projectName = null,
+    userSet = true
+  }) {
+    void actorUserId;
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const name = requireMeaningfulQuoteName(quoteName || estimateName || projectName);
+    const persisted = await persistQuoteFlowQuoteName({
+      getSupabase,
+      organizationId,
+      takeoffJobId: jobId,
+      quoteName: name,
+      userSet: userSet !== false
+    });
+    if (!persisted?.ok) {
+      if (persisted?.reason === "job_not_found") {
+        throw createQuoteFlowError("takeoff_not_found");
+      }
+      if (persisted?.reason === "quote_name_required") {
+        throw createQuoteFlowError("quote_name_required", { statusCode: 422 });
+      }
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to save Quote Name right now.",
+        statusCode: 503
+      });
+    }
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      quoteName: name,
+      quoteNameUserSet: userSet !== false
+    };
   }
 
   /**
@@ -651,11 +707,19 @@ export function createQuoteFlowSetScopeService(deps) {
     }
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
-    const displayName = normalizeDisplayName(projectName || estimateName);
+    const displayName = requireMeaningfulQuoteName(projectName || estimateName);
 
     const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
     const intakeCaseId = String(caseRow.id);
+
+    await persistQuoteFlowQuoteName({
+      getSupabase,
+      organizationId,
+      takeoffJobId: jobId,
+      quoteName: displayName,
+      userSet: true
+    }).catch(() => ({ ok: false }));
 
     const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (prior.scoped && prior.estimate?.id) {
@@ -791,11 +855,19 @@ export function createQuoteFlowSetScopeService(deps) {
     }
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
-    const displayName = normalizeDisplayName(projectName || estimateName);
+    const displayName = requireMeaningfulQuoteName(projectName || estimateName);
 
     const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
     const intakeCaseId = String(caseRow.id);
+
+    await persistQuoteFlowQuoteName({
+      getSupabase,
+      organizationId,
+      takeoffJobId: jobId,
+      quoteName: displayName,
+      userSet: true
+    }).catch(() => ({ ok: false }));
 
     const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (prior.scoped && prior.estimate?.id) {
@@ -896,6 +968,7 @@ export function createQuoteFlowSetScopeService(deps) {
     getQueueDetail,
     setScope,
     setManualScope,
+    updateQuoteName,
     archiveQueueItem,
     restoreQueueItem
   };

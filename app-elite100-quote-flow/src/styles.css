@@ -1036,6 +1036,12 @@ body {
   border-color: rgba(163, 19, 47, 0.4);
 }
 
+.qf-queue__estimate-name-hint {
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: #8a3b2a;
+}
+
 .qf-queue__frame-wrap {
   margin-top: 12px;
   border: 1px solid var(--eos-line);
