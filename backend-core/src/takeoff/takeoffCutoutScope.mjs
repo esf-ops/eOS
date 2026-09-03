@@ -19,6 +19,11 @@ import {
   attachDraftPieceGeometry,
   EDGE_GEOMETRY_SOURCES
 } from "./takeoffPieceGeometryAuthority.mjs";
+import {
+  applyCookingApplianceToRun,
+  cookingApplianceFromLegacyCutoutKey,
+  normalizeCookingAppliance
+} from "./takeoffCookingAppliance.mjs";
 
 /** Physical cutout types an estimator can confirm on a run. */
 export const TAKEOFF_CUTOUT_TYPES = Object.freeze([
@@ -54,8 +59,7 @@ const LEGACY_KEY_MAP = new Map([
   ["cooktop", "cooktop"],
   ["cook_top", "cooktop"],
   ["cook", "cooktop"],
-  ["range", "cooktop"],
-  ["stove", "cooktop"],
+  // range/stove intentionally NOT mapped to cooktop — see cookingApplianceFromLegacyCutoutKey
   ["outlet", "electrical_outlet"],
   ["outlets", "electrical_outlet"],
   ["electrical", "electrical_outlet"],
@@ -109,17 +113,41 @@ export function isStructuredCutoutArray(value) {
  * @returns {{ cutouts: Array<{type:string,quantity:number,source:string,note?:string}>, changed: boolean }}
  */
 export function normalizeRunCutouts(value) {
-  if (value == null || value === "") return { cutouts: [], changed: value != null };
+  if (value == null || value === "") {
+    return { cutouts: [], changed: value != null, cookingApplianceHint: null };
+  }
 
   /** @type {Array<{type:string,quantity:number,source:string,note?:string}>} */
   let entries = [];
   let changed = false;
+  /** @type {object|null} */
+  let cookingApplianceHint = null;
+
+  const absorbLegacyApplianceKey = (rawKey) => {
+    const hint = cookingApplianceFromLegacyCutoutKey(rawKey);
+    if (!hint) return false;
+    // Prefer explicit freestanding/slide-in over unknown when multiple legacy keys appear.
+    if (
+      !cookingApplianceHint ||
+      cookingApplianceHint.type === "unknown_cooking_appliance" ||
+      hint.type === "freestanding_range" ||
+      hint.type === "slide_in_range"
+    ) {
+      cookingApplianceHint = hint;
+    }
+    changed = true;
+    return hint.type !== "cooktop";
+  };
 
   if (isStructuredCutoutArray(value)) {
     for (const e of value) {
       const quantity = intQty(e.quantity);
       if (quantity <= 0) {
         changed = true;
+        continue;
+      }
+      const rawType = String(e.type || "");
+      if (absorbLegacyApplianceKey(rawType) && rawType.toLowerCase() !== "cooktop") {
         continue;
       }
       const type = TYPE_SET.has(e.type) ? e.type : null;
@@ -131,7 +159,15 @@ export function normalizeRunCutouts(value) {
           ...(e.note ? { note: String(e.note) } : {})
         });
         if (e.quantity !== quantity || !e.source) changed = true;
-      } else {
+        if (type === "cooktop" && !cookingApplianceHint) {
+          cookingApplianceHint = {
+            type: "cooktop",
+            confidence: "medium",
+            reviewRequired: false,
+            source: e.source || "ai_suggested"
+          };
+        }
+      } else if (!absorbLegacyApplianceKey(rawType)) {
         entries.push({ type: "other", quantity, source: "legacy", note: String(e.type) });
         changed = true;
       }
@@ -139,6 +175,7 @@ export function normalizeRunCutouts(value) {
   } else if (typeof value === "object" && !Array.isArray(value)) {
     changed = true;
     for (const [k, v] of Object.entries(value)) {
+      if (absorbLegacyApplianceKey(k) && String(k).toLowerCase() !== "cooktop") continue;
       const entry = legacyKeyToEntry(k, v);
       if (entry) entries.push(entry);
     }
@@ -147,11 +184,12 @@ export function normalizeRunCutouts(value) {
     for (const part of value.split(",")) {
       const [k, v] = part.split(":").map((s) => s.trim());
       if (!k) continue;
+      if (absorbLegacyApplianceKey(k) && k.toLowerCase() !== "cooktop") continue;
       const entry = legacyKeyToEntry(k, v ?? 1);
       if (entry) entries.push(entry);
     }
   } else {
-    return { cutouts: [], changed: true };
+    return { cutouts: [], changed: true, cookingApplianceHint: null };
   }
 
   // Merge duplicates by type+note so quantities never double.
@@ -166,7 +204,7 @@ export function normalizeRunCutouts(value) {
       merged.set(key, { ...e });
     }
   }
-  return { cutouts: [...merged.values()], changed };
+  return { cutouts: [...merged.values()], changed, cookingApplianceHint };
 }
 
 /**
@@ -188,11 +226,27 @@ export function normalizeTakeoffCutoutScope(takeoff) {
     if (run.cutouts == null) {
       run.cutouts = [];
       changed = true;
-      return run;
     }
     const result = normalizeRunCutouts(run.cutouts);
     if (result.changed || !isStructuredCutoutArray(run.cutouts)) {
       run.cutouts = result.cutouts;
+      changed = true;
+    }
+    const existingAppliance = normalizeCookingAppliance(run.cookingAppliance);
+    if (existingAppliance.changed) {
+      run.cookingAppliance = existingAppliance.appliance;
+      changed = true;
+    }
+    if (!run.cookingAppliance && result.cookingApplianceHint) {
+      const applied = applyCookingApplianceToRun(run, result.cookingApplianceHint.type, {
+        confidence: result.cookingApplianceHint.confidence,
+        source: result.cookingApplianceHint.source || "legacy",
+        note: result.cookingApplianceHint.note,
+        widthIn: result.cookingApplianceHint.widthIn
+      });
+      run.cookingAppliance = applied.cookingAppliance;
+      run.cutouts = applied.cutouts;
+      run.applianceGap = applied.applianceGap;
       changed = true;
     }
     return run;

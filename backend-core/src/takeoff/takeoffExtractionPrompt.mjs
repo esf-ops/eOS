@@ -219,10 +219,17 @@ BACKSPLASH — READ CAREFULLY (eligibility, not height)
 
 CUTOUTS AND EXCLUSIONS — CRITICAL RULE
 • Sink cutouts, cooktop cutouts, and faucet holes are FABRICATION OPERATIONS, not material exclusions.
-• When a run clearly shows a physical opening, record it on that run as structured cutouts:
+• COOKING APPLIANCES ARE NOT ALL COOKTOPS:
+  - cooktop: countertop stays continuous; one piece may span the appliance; add cutouts type "cooktop".
+  - freestanding_range / slide_in_range: countertop is INTERRUPTED. Create SEPARATE countertop pieces on each side of the appliance opening. Do NOT create a cooktop cutout. Do NOT invent continuous stone across the range gap. Do NOT invent a range width if the plan does not dimension it — set requiresEstimatorReview and cookingAppliance.reviewRequired = true.
+  - unknown_cooking_appliance: when the plan is ambiguous between cooktop vs range — do NOT default to cooktop. Set run.cookingAppliance = { "type": "unknown_cooking_appliance", "confidence": "low", "reviewRequired": true, "source": "ai_suggested" } and flag estimator review.
+• Record cookingAppliance on the relevant run(s):
+  run.cookingAppliance = { "type": "cooktop"|"freestanding_range"|"slide_in_range"|"unknown_cooking_appliance", "confidence": "high"|"medium"|"low", "reviewRequired": <boolean>, "source": "ai_suggested", "widthIn": <number|null> }
+• When a run clearly shows a physical OPENING in continuous stone (undermount cooktop), record structured cutouts:
   run.cutouts = [{ "type": <one of "kitchen_sink" | "vanity_bar_sink" | "cooktop" | "electrical_outlet" | "pop_up_outlet" | "other">, "quantity": <integer>, "source": "ai_suggested" }]
   For "other", include a short "note" describing the opening. Do NOT use freeform strings.
   Your cutout suggestion is not final; the estimator confirms per run before approval.
+• NEVER map a free-standing or slide-in range to cutouts type "cooktop".
 • Do NOT add sink/cooktop/faucet cutouts to area.exclusions[].
 • Record them in area.notes[] or area.cutouts[] (if that field is present) for reference only.
 • Do NOT subtract sink/cooktop/cutout area from material square footage.
@@ -287,6 +294,11 @@ CUTOUTS — NEVER IN EXCLUSIONS
 DUPLICATE / INFERRED PIECES — GEOMETRY EVIDENCE REQUIRED
 • Do NOT duplicate a piece because of a text label like "2 STOVE", "TWO RANGES", or similar.
   Unless two distinct pieces are visibly drawn and dimensioned on the plan, use only one.
+• Free-standing / slide-in RANGE openings: when left and right countertop sections are visibly separate
+  (or the plan shows a cabinet opening for a range with stone on both sides), emit TWO runs with the
+  appliance gap between them — never one continuous run with a cooktop cutout.
+• Do NOT invent a range width. If the gap width is not labeled, leave widthIn null, set reviewRequired,
+  and still split pieces only when both side lengths are evidenced.
 • If you cannot determine from the plan whether there is one or two pieces: set requiresEstimatorReview = true
   on the affected run, note the ambiguity in assemblyNotes, and use one piece.
 • Do NOT write "assumed duplicate", "assumed two pieces", or "two identical" without explicit geometry.

@@ -7,6 +7,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import CustomerRequestedSelectionsPanel, {
   type RequestedSelectionItem
 } from "./CustomerRequestedSelectionsPanel";
+import StartingConfigurationPanel, {
+  type StartingConfiguration
+} from "./StartingConfigurationPanel";
 import {
   approveAndBuildEstimate,
   generateAiTakeoffDraft,
@@ -64,6 +67,17 @@ import {
   TAKEOFF_CUTOUT_TYPES,
   toggleCutoutEntry
 } from "@takeoff-core/takeoffCutoutScope.mjs";
+import {
+  COOKING_APPLIANCE_TYPES,
+  cookingApplianceNeedsReview,
+  collectCookingApplianceReviewIssues
+} from "@takeoff-core/takeoffCookingAppliance.mjs";
+import {
+  convertCookingApplianceType,
+  insertApplianceGap,
+  mergePieces,
+  splitPieceAtLength
+} from "@takeoff-core/takeoffPieceSegmentation.mjs";
 import {
   flattenPieces,
   patchRun,
@@ -279,6 +293,16 @@ export default function ConsolidatedTakeoffReview() {
 
   const [requestedSelections, setRequestedSelections] = useState<RequestedSelectionItem[]>([]);
   const [selectionBusyId, setSelectionBusyId] = useState<string | null>(null);
+  const [startingConfiguration, setStartingConfiguration] = useState<StartingConfiguration | null>(
+    null
+  );
+  const [startingBusy, setStartingBusy] = useState(false);
+  const correctionEventsRef = useRef<Array<Record<string, unknown>>>([]);
+
+  const pushCorrectionEvent = useCallback((event: Record<string, unknown> | null | undefined) => {
+    if (!event || typeof event !== "object") return;
+    correctionEventsRef.current = [...correctionEventsRef.current, event].slice(-80);
+  }, []);
 
   const urlWorkspace = useMemo(() => {
     try {
@@ -612,6 +636,10 @@ export default function ConsolidatedTakeoffReview() {
     } else {
       setRequestedSelections([]);
     }
+    const startCfg = job?.quoteFlowStartingConfiguration;
+    if (startCfg && typeof startCfg === "object") {
+      setStartingConfiguration(startCfg as StartingConfiguration);
+    }
 
     const dirty =
       saveStatusRef.current === "dirty" || saveStatusRef.current === "saving";
@@ -915,8 +943,10 @@ export default function ConsolidatedTakeoffReview() {
         saveCorrection: (body) =>
           saveTakeoffCorrection(authToken, takeoffJobId, {
             ...body,
-            // Quote Flow unscoped review: reopen approved takeoff instead of hard-blocking.
-            reopenIfApproved: quoteFlowSetScope === true
+            reopenIfApproved: quoteFlowSetScope === true,
+            correctionTelemetry: {
+              events: correctionEventsRef.current.slice(-80)
+            }
           }),
         takeoffResult: snapshot,
         baseResultId: latestResultIdRef.current,
@@ -928,6 +958,7 @@ export default function ConsolidatedTakeoffReview() {
         canonicalExcludedRunIds: canonicalExcludedRef.current,
         skipIfUnchanged: false
       });
+      correctionEventsRef.current = [];
       const adopted = reconcileSuccessfulTakeoffSave({
         response,
         healDraft: healTakeoffDraft,
@@ -1648,14 +1679,57 @@ export default function ConsolidatedTakeoffReview() {
         `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/requested-selections`,
         authToken,
         { selectionId, action }
-      )) as { requestedSelections?: { items?: RequestedSelectionItem[] } };
+      )) as {
+        requestedSelections?: { items?: RequestedSelectionItem[] };
+        startingConfiguration?: StartingConfiguration;
+      };
       if (Array.isArray(res?.requestedSelections?.items)) {
         setRequestedSelections(res.requestedSelections.items);
+      }
+      if (res?.startingConfiguration) {
+        setStartingConfiguration(res.startingConfiguration);
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Unable to update selection");
     } finally {
       setSelectionBusyId(null);
+    }
+  }
+
+  async function saveStartingConfigurationPatch(patch: {
+    quote?: StartingConfiguration["quote"];
+    addOns?: Record<string, number>;
+  }) {
+    if (!authToken || !takeoffJobId || isReadonly) return;
+    setStartingBusy(true);
+    try {
+      const res = (await labApiPost(
+        `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/starting-configuration`,
+        authToken,
+        { patch }
+      )) as { startingConfiguration?: StartingConfiguration };
+      if (res?.startingConfiguration) setStartingConfiguration(res.startingConfiguration);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Unable to save starting configuration");
+    } finally {
+      setStartingBusy(false);
+    }
+  }
+
+  async function reseedStartingConfiguration() {
+    if (!authToken || !takeoffJobId || isReadonly) return;
+    setStartingBusy(true);
+    try {
+      const res = (await labApiPost(
+        `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/starting-configuration`,
+        authToken,
+        { reseedFromConfirmed: true }
+      )) as { startingConfiguration?: StartingConfiguration };
+      if (res?.startingConfiguration) setStartingConfiguration(res.startingConfiguration);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Unable to reseed starting configuration");
+    } finally {
+      setStartingBusy(false);
     }
   }
 
@@ -1985,6 +2059,16 @@ export default function ConsolidatedTakeoffReview() {
                 onConfirm={(id) => void updateRequestedSelectionAction(id, "confirm")}
                 onReject={(id) => void updateRequestedSelectionAction(id, "reject")}
                 onUnresolve={(id) => void updateRequestedSelectionAction(id, "unresolve")}
+              />
+            ) : null}
+
+            {quoteFlowSetScope && startingConfiguration && startingConfiguration.status !== "empty" ? (
+              <StartingConfigurationPanel
+                config={startingConfiguration}
+                readonly={isReadonly}
+                busy={startingBusy}
+                onSave={(patch) => void saveStartingConfigurationPatch(patch)}
+                onReseed={() => void reseedStartingConfiguration()}
               />
             ) : null}
 
@@ -2333,6 +2417,84 @@ export default function ConsolidatedTakeoffReview() {
                             {row.cutoutsSummary}
                           </summary>
                           <div className="ctr-cutouts-menu" data-testid="ctr-cutouts-menu">
+                            <div className="ctr-appliance-block" data-testid="ctr-cooking-appliance">
+                              <label className="ctr-appliance-label">
+                                Cooking appliance
+                                <select
+                                  disabled={rowLocked}
+                                  data-testid="ctr-cooking-appliance-type"
+                                  value={row.cookingAppliance?.type || ""}
+                                  onChange={(e) => {
+                                    const nextType = e.target.value || "not_applicable";
+                                    const converted = convertCookingApplianceType(
+                                      draft,
+                                      row.roomId,
+                                      row.runId,
+                                      nextType,
+                                      { source: "estimator_confirmed", confidence: "high" }
+                                    );
+                                    pushCorrectionEvent(converted.event);
+                                    updateDraft(
+                                      markRunEstimatorOwned(
+                                        converted.takeoff,
+                                        row.roomId,
+                                        row.runId
+                                      )
+                                    );
+                                    if (converted.needsSegmentation) {
+                                      const left = window.prompt(
+                                        "Range interrupts the run. Enter left piece length (in):",
+                                        String(Math.floor((Number(row.lengthIn) || 0) / 2))
+                                      );
+                                      const gap = window.prompt(
+                                        "Enter range/appliance gap width (in) — required, do not invent:",
+                                        row.cookingAppliance?.widthIn
+                                          ? String(row.cookingAppliance.widthIn)
+                                          : "30"
+                                      );
+                                      if (left && gap && Number(left) > 0 && Number(gap) > 0) {
+                                        try {
+                                          const inserted = insertApplianceGap(
+                                            converted.takeoff,
+                                            row.roomId,
+                                            row.runId,
+                                            {
+                                              leftLengthIn: Number(left),
+                                              gapWidthIn: Number(gap),
+                                              applianceType: nextType
+                                            }
+                                          );
+                                          pushCorrectionEvent(inserted.event);
+                                          updateDraft(inserted.takeoff);
+                                        } catch (err) {
+                                          setLoadError(
+                                            err instanceof Error
+                                              ? err.message
+                                              : "Unable to insert appliance gap"
+                                          );
+                                        }
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <option value="">—</option>
+                                  {COOKING_APPLIANCE_TYPES.map((t) => (
+                                    <option key={t.type} value={t.type}>
+                                      {t.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              {cookingApplianceNeedsReview(row.cookingAppliance) ||
+                              collectCookingApplianceReviewIssues({
+                                cookingAppliance: row.cookingAppliance,
+                                cutouts: row.cutouts
+                              }).length > 0 ? (
+                                <p className="ctr-appliance-review" data-testid="ctr-appliance-review">
+                                  Cooking appliance detected · Type needs confirmation
+                                </p>
+                              ) : null}
+                            </div>
                             {TAKEOFF_CUTOUT_TYPES.map(
                               (opt: { type: string; label: string }) => {
                                 const entry = row.cutouts.find(
@@ -2510,15 +2672,116 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-actions">
                         {!isReadonly ? (
-                        <button
-                          type="button"
-                          className="ctr-btn-secondary ctr-remove"
-                          data-testid="ctr-remove-piece"
-                          aria-label={`Remove piece ${row.pieceName}`}
-                          onClick={() => handleRemovePiece(row.roomId, row.runId)}
-                        >
-                          Remove piece
-                        </button>
+                          <div className="ctr-piece-actions">
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary"
+                              data-testid="ctr-split-piece"
+                              aria-label={`Split piece ${row.pieceName}`}
+                              onClick={() => {
+                                const left = window.prompt(
+                                  "Split at length (in) from left:",
+                                  String(Math.floor((Number(row.lengthIn) || 0) / 2))
+                                );
+                                if (!(Number(left) > 0)) return;
+                                try {
+                                  const split = splitPieceAtLength(
+                                    draft,
+                                    row.roomId,
+                                    row.runId,
+                                    Number(left)
+                                  );
+                                  pushCorrectionEvent(split.event);
+                                  updateDraft(split.takeoff);
+                                } catch (err) {
+                                  setLoadError(
+                                    err instanceof Error ? err.message : "Unable to split piece"
+                                  );
+                                }
+                              }}
+                            >
+                              Split
+                            </button>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary"
+                              data-testid="ctr-insert-appliance-gap"
+                              aria-label={`Insert appliance gap on ${row.pieceName}`}
+                              onClick={() => {
+                                const left = window.prompt(
+                                  "Left piece length (in):",
+                                  String(Math.floor((Number(row.lengthIn) || 0) / 3))
+                                );
+                                const gap = window.prompt(
+                                  "Appliance gap width (in) — required from plan:",
+                                  "30"
+                                );
+                                const type =
+                                  window.prompt(
+                                    "Appliance type (freestanding_range | slide_in_range):",
+                                    "freestanding_range"
+                                  ) || "freestanding_range";
+                                if (!(Number(left) > 0) || !(Number(gap) > 0)) return;
+                                try {
+                                  const inserted = insertApplianceGap(draft, row.roomId, row.runId, {
+                                    leftLengthIn: Number(left),
+                                    gapWidthIn: Number(gap),
+                                    applianceType: type
+                                  });
+                                  pushCorrectionEvent(inserted.event);
+                                  updateDraft(inserted.takeoff);
+                                } catch (err) {
+                                  setLoadError(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "Unable to insert appliance gap"
+                                  );
+                                }
+                              }}
+                            >
+                              Insert gap
+                            </button>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary"
+                              data-testid="ctr-merge-next-piece"
+                              aria-label={`Merge ${row.pieceName} with next piece`}
+                              onClick={() => {
+                                const section = roomSections.find((s) => s.id === row.roomId);
+                                const idx = section?.pieces?.findIndex((r) => r.runId === row.runId) ?? -1;
+                                const next = idx >= 0 ? section?.pieces?.[idx + 1] : null;
+                                if (!next) {
+                                  setLoadError("No adjacent piece below to merge.");
+                                  return;
+                                }
+                                try {
+                                  const merged = mergePieces(
+                                    draft,
+                                    row.roomId,
+                                    row.runId,
+                                    next.runId
+                                  );
+                                  pushCorrectionEvent(merged.event);
+                                  updateDraft(merged.takeoff);
+                                } catch (err) {
+                                  setLoadError(
+                                    err instanceof Error ? err.message : "Unable to merge pieces"
+                                  );
+                                }
+                              }}
+                            >
+                              Merge next
+                            </button>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary ctr-remove"
+                              data-testid="ctr-remove-piece"
+                              aria-label={`Remove piece ${row.pieceName}`}
+                              onClick={() => handleRemovePiece(row.roomId, row.runId)}
+                            >
+                              Remove piece
+                            </button>
+                          </div>
                         ) : null}
                       </td>
                     </tr>

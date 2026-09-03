@@ -5301,3 +5301,85 @@ body.ctr-split-dragging img {
   background: transparent;
   border: 1px solid #c9d2e0;
 }
+
+.ctr-starting-config {
+  margin: 8px 0 12px;
+  border: 1px solid #d5dce8;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+.ctr-starting-config__toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+.ctr-starting-config__body {
+  padding: 0 12px 12px;
+  border-top: 1px solid #e2e8f2;
+}
+.ctr-starting-config__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.ctr-starting-config__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+.ctr-starting-config__check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  margin-top: 18px;
+}
+.ctr-starting-config__rooms,
+.ctr-starting-config__warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+}
+.ctr-starting-config__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ctr-appliance-block {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e2e8f2;
+}
+.ctr-appliance-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+.ctr-appliance-review {
+  margin: 6px 0 0;
+  color: #8a5a12;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.ctr-piece-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+.ctr-piece-actions .ctr-btn-secondary {
+  font-size: 0.74rem;
+  padding: 3px 6px;
+}

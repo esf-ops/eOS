@@ -836,6 +836,59 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/starting-configuration",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowSetScopeService.getStartingConfiguration({
+          organizationId,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || ""))
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] starting-configuration get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load starting configuration.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/starting-configuration",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowSetScopeService.updateStartingConfiguration({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
+          patch: body.patch && typeof body.patch === "object" ? body.patch : body,
+          reseedFromConfirmed: body.reseedFromConfirmed === true
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.starting_configuration",
+            userId: req.user?.id ?? null,
+            takeoffJobId: result.takeoffJobId ?? null,
+            reseed: body.reseedFromConfirmed === true,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] starting-configuration update failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to update starting configuration.");
+      }
+    }
+  );
+
   app.post(
     "/api/elite100-quote-flow/queue/:takeoffJobId/set-scope",
     ...staffStack,

@@ -757,6 +757,11 @@ export async function getTakeoffWorkspace({
       typeof jobRow.metadata.quoteFlow.requestedSelections === "object"
         ? jobRow.metadata.quoteFlow.requestedSelections
         : null,
+    quoteFlowStartingConfiguration:
+      jobRow.metadata?.quoteFlow?.startingConfiguration &&
+      typeof jobRow.metadata.quoteFlow.startingConfiguration === "object"
+        ? jobRow.metadata.quoteFlow.startingConfiguration
+        : null,
     quoteName:
       typeof jobRow.metadata?.quoteFlow?.quoteName === "string"
         ? jobRow.metadata.quoteFlow.quoteName
@@ -1135,6 +1140,7 @@ export async function saveTakeoffCorrection({
   aiHandling = null,
   clientMutationRevision = null,
   reopenIfApproved = false,
+  correctionTelemetry = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1358,6 +1364,14 @@ export async function saveTakeoffCorrection({
       errorCount: summary.errorCount,
       warningCount: summary.warningCount,
     },
+    // Plan-source + field-level correction ops for later analysis (no dashboard in this slice).
+    planSource:
+      correctionTelemetry?.planSource && typeof correctionTelemetry.planSource === "object"
+        ? correctionTelemetry.planSource
+        : null,
+    events: Array.isArray(correctionTelemetry?.events)
+      ? correctionTelemetry.events.slice(0, 100)
+      : [],
   };
 
   const existingRaw =

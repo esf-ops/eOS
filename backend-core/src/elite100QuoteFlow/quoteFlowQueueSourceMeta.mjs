@@ -273,6 +273,10 @@ export function buildQuoteFlowTakeoffSourceMeta(input = {}) {
       input.requestedSelections && typeof input.requestedSelections === "object"
         ? input.requestedSelections
         : null,
+    startingConfiguration:
+      input.startingConfiguration && typeof input.startingConfiguration === "object"
+        ? input.startingConfiguration
+        : null,
     senderLabel: sanitizeQueueSourceText(input.senderLabel, 160),
     customerLabel: sanitizeQueueSourceText(input.customerLabel, 160),
     selectedPlanFilename,
@@ -381,7 +385,11 @@ export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
     quoteFlow: {
       ...prev,
       ...next,
-      requestedSelections: mergeRequestedSelectionsSafe(prev.requestedSelections, next.requestedSelections)
+      requestedSelections: mergeRequestedSelectionsSafe(prev.requestedSelections, next.requestedSelections),
+      startingConfiguration: mergeStartingConfigurationMeta(
+        prev.startingConfiguration,
+        next.startingConfiguration
+      )
     }
   };
 }
@@ -413,6 +421,21 @@ function mergeRequestedSelectionsSafe(prevSel, nextSel) {
     return { ...prev, ...next, items: merged.slice(0, 80) };
   } catch {
     return nextSel || prevSel || null;
+  }
+}
+
+function mergeStartingConfigurationMeta(prevCfg, nextCfg) {
+  try {
+    const prev = prevCfg && typeof prevCfg === "object" ? prevCfg : null;
+    const next = nextCfg && typeof nextCfg === "object" ? nextCfg : null;
+    if (!prev) return next;
+    if (!next) return prev;
+    if (prev.userSet === true) return prev;
+    if (next.userSet === true) return next;
+    if (prev.seededAt && !next.seededAt) return prev;
+    return { ...prev, ...next };
+  } catch {
+    return nextCfg || prevCfg || null;
   }
 }
 

@@ -245,6 +245,10 @@ export async function saveTakeoffCorrection(
     clientMutationRevision?: number;
     /** Quote Flow: reopen approved takeoff automatically before saving edits. */
     reopenIfApproved?: boolean;
+    correctionTelemetry?: {
+      planSource?: Record<string, unknown> | null;
+      events?: Array<Record<string, unknown>>;
+    } | null;
   },
   init: Pick<RequestInit, "signal"> = {}
 ): Promise<SaveTakeoffCorrectionResponse> {

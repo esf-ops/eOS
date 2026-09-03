@@ -4805,5 +4805,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Deferred** | LLM structured extraction (v1 is deterministic), full fixture SKU catalog beyond governed sink/edge/add-on keys, Digital Estimate customer interactive selections, brand/manufacturer-only matching without catalog color. |
 | **Revisit trigger** | Dedicated table if selection history/audit outgrows job metadata JSON; fuller Graph body fetch if inbox `bodyPreview` truncates too aggressively. |
 
+### 356. AI Takeoff cooking-appliance segmentation + Starting Configuration (2026-09-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-03 · `main` |
+| **Decision** | (A) Distinguish `cooktop` / `freestanding_range` / `slide_in_range` / `unknown_cooking_appliance` on takeoff runs. Cooktop = continuous stone + cooktop cutout. Free-standing/slide-in = interrupted stone, **no** cooktop cutout, separate pieces beside an estimator-confirmed gap — never invent range width. Unknown never defaults to cooktop. Estimator gets Split / Merge next / Insert gap / Convert appliance type. Correction events + plan-source class persist on `_corrections` for later analysis (no dashboard). (B) Introduce estimator **Starting Configuration** on `metadata.quoteFlow.startingConfiguration`, seeded from confirmed customer requests but estimator-owned. Set Scope applies Starting Configuration into official scope (not raw AI/unconfirmed requests). Distinct from future Allowed Customer Choices. |
+| **Why** | Ranges were collapsing to cooktop cutouts on continuous pieces; estimators re-entered commercial starting values after confirming email requests. |
+| **Impacted** | `takeoffCookingAppliance`, `takeoffPieceSegmentation`, cutout normalize/prompt, Review worksheet, correction telemetry, `quoteFlowStartingConfiguration`, Set Scope, routes, Review panels, tests, this doc. |
+| **Protected / unchanged** | Quote Name, pricing rates/authority, Digital Estimate UI, Graph, Moraware/QB/Monday, quote numbers. |
+| **Deferred** | Analytics dashboard for plan-source vs correction rates; LLM appliance vision; full Allowed Choices system; richer non-prompt segmentation UX. |
+
 ---
 

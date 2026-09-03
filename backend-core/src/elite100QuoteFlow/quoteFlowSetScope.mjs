@@ -24,11 +24,17 @@ import {
   persistQuoteFlowQuoteName
 } from "./quoteFlowQueueSourceMeta.mjs";
 import {
-  applyConfirmedSelectionsToScope,
   applyEstimatorSelectionAction,
   addManualRequestedSelection,
   summarizeRequestedSelections
 } from "./quoteFlowRequestedSelections.mjs";
+import {
+  applyStartingConfigurationToScope,
+  patchStartingConfiguration,
+  resolveStartingConfigurationForSetScope,
+  seedStartingConfigurationFromConfirmed,
+  summarizeStartingConfiguration
+} from "./quoteFlowStartingConfiguration.mjs";
 import {
   createMemoryQuoteFlowQueueStateStore,
   createQuoteFlowQueueStateStore
@@ -482,27 +488,35 @@ export function createQuoteFlowSetScopeService(deps) {
     }
   }
 
-  async function writeJobRequestedSelections(organizationId, takeoffJobId, requestedSelections) {
+  async function writeJobQuoteFlowFields(organizationId, takeoffJobId, fields) {
     if (typeof getSupabase !== "function") return { ok: false };
     const supabase = getSupabase();
-    if (!supabase) return { ok: false };
-    const { data: row } = await supabase
-      .from("quote_takeoff_jobs")
-      .select("id,metadata")
-      .eq("organization_id", organizationId)
-      .eq("id", takeoffJobId)
-      .maybeSingle();
-    if (!row?.id) return { ok: false, reason: "job_not_found" };
-    const meta = row.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
-    const qf = meta.quoteFlow && typeof meta.quoteFlow === "object" ? { ...meta.quoteFlow } : {};
-    meta.quoteFlow = { ...qf, requestedSelections };
-    const { error } = await supabase
-      .from("quote_takeoff_jobs")
-      .update({ metadata: meta })
-      .eq("organization_id", organizationId)
-      .eq("id", takeoffJobId);
-    if (error) return { ok: false, reason: "write_failed" };
-    return { ok: true, requestedSelections };
+    if (!supabase || typeof supabase.from !== "function") return { ok: false };
+    try {
+      const { data: row } = await supabase
+        .from("quote_takeoff_jobs")
+        .select("id,metadata")
+        .eq("organization_id", organizationId)
+        .eq("id", takeoffJobId)
+        .maybeSingle();
+      if (!row?.id) return { ok: false, reason: "job_not_found" };
+      const meta = row.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
+      const qf = meta.quoteFlow && typeof meta.quoteFlow === "object" ? { ...meta.quoteFlow } : {};
+      meta.quoteFlow = { ...qf, ...fields };
+      const { error } = await supabase
+        .from("quote_takeoff_jobs")
+        .update({ metadata: meta })
+        .eq("organization_id", organizationId)
+        .eq("id", takeoffJobId);
+      if (error) return { ok: false, reason: "write_failed" };
+      return { ok: true, quoteFlow: meta.quoteFlow };
+    } catch {
+      return { ok: false, reason: "write_failed" };
+    }
+  }
+
+  async function writeJobRequestedSelections(organizationId, takeoffJobId, requestedSelections) {
+    return writeJobQuoteFlowFields(organizationId, takeoffJobId, { requestedSelections });
   }
 
   async function getRequestedSelections({ organizationId, takeoffJobId }) {
@@ -510,11 +524,14 @@ export function createQuoteFlowSetScopeService(deps) {
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
     const qf = await readJobQuoteFlowMeta(organizationId, jobId);
     const requestedSelections = qf?.requestedSelections || { items: [] };
+    const startingConfiguration = qf?.startingConfiguration || null;
     return {
       ok: true,
       takeoffJobId: jobId,
       requestedSelections,
-      summary: summarizeRequestedSelections(requestedSelections)
+      startingConfiguration,
+      summary: summarizeRequestedSelections(requestedSelections),
+      startingSummary: summarizeStartingConfiguration(startingConfiguration)
     };
   }
 
@@ -541,7 +558,17 @@ export function createQuoteFlowSetScopeService(deps) {
         patch
       });
     }
-    const written = await writeJobRequestedSelections(organizationId, jobId, next);
+    // Reseed starting configuration from confirmed requests unless estimator already customized it.
+    let startingConfiguration = qf.startingConfiguration || null;
+    if (!(startingConfiguration && startingConfiguration.userSet === true)) {
+      startingConfiguration = seedStartingConfigurationFromConfirmed(next, {
+        roomsFromTakeoff: []
+      });
+    }
+    const written = await writeJobQuoteFlowFields(organizationId, jobId, {
+      requestedSelections: next,
+      startingConfiguration
+    });
     if (!written.ok) {
       throw createQuoteFlowError("takeoff_unavailable", {
         message: "Unable to save requested selections.",
@@ -552,11 +579,64 @@ export function createQuoteFlowSetScopeService(deps) {
       ok: true,
       takeoffJobId: jobId,
       requestedSelections: next,
-      summary: summarizeRequestedSelections(next)
+      startingConfiguration,
+      summary: summarizeRequestedSelections(next),
+      startingSummary: summarizeStartingConfiguration(startingConfiguration)
     };
   }
 
-  async function applyConfirmedSelectionsOntoEstimate({
+  async function getStartingConfiguration({ organizationId, takeoffJobId }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = await readJobQuoteFlowMeta(organizationId, jobId);
+    let startingConfiguration = qf?.startingConfiguration || null;
+    if (!startingConfiguration || startingConfiguration.status === "empty") {
+      startingConfiguration = seedStartingConfigurationFromConfirmed(qf?.requestedSelections, {
+        roomsFromTakeoff: []
+      });
+    }
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      startingConfiguration,
+      summary: summarizeStartingConfiguration(startingConfiguration)
+    };
+  }
+
+  async function updateStartingConfiguration({
+    organizationId,
+    takeoffJobId,
+    actorUserId = null,
+    patch = null,
+    reseedFromConfirmed = false
+  }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = (await readJobQuoteFlowMeta(organizationId, jobId)) || {};
+    let next;
+    if (reseedFromConfirmed) {
+      next = seedStartingConfigurationFromConfirmed(qf.requestedSelections, { roomsFromTakeoff: [] });
+    } else {
+      next = patchStartingConfiguration(qf.startingConfiguration, patch || {}, actorUserId);
+    }
+    const written = await writeJobQuoteFlowFields(organizationId, jobId, {
+      startingConfiguration: next
+    });
+    if (!written.ok) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to save starting configuration.",
+        statusCode: 503
+      });
+    }
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      startingConfiguration: next,
+      summary: summarizeStartingConfiguration(next)
+    };
+  }
+
+  async function applyStartingConfigurationOntoEstimate({
     organizationId,
     takeoffJobId,
     actorUserId,
@@ -564,14 +644,35 @@ export function createQuoteFlowSetScopeService(deps) {
   }) {
     if (!estimate?.id || !studioEstimateService?.updateScope) return estimate;
     const qf = await readJobQuoteFlowMeta(organizationId, takeoffJobId);
-    const requested = qf?.requestedSelections || null;
-    const confirmed = Array.isArray(requested?.items)
-      ? requested.items.filter((i) => i?.status === "confirmed")
-      : [];
-    if (!confirmed.length) return estimate;
-    const nextScope = applyConfirmedSelectionsToScope(estimate.scope || {}, requested, {
-      roomsFromTakeoff: Array.isArray(estimate.scope?.rooms) ? estimate.scope.rooms : []
+    const roomsFromTakeoff = Array.isArray(estimate.scope?.rooms) ? estimate.scope.rooms : [];
+    let starting = resolveStartingConfigurationForSetScope({
+      existingStartingConfiguration: qf?.startingConfiguration,
+      requestedSelections: qf?.requestedSelections,
+      roomsFromTakeoff
     });
+    // Persist resolved starting config so reload/Save Draft paths stay consistent.
+    if (
+      starting &&
+      (!qf?.startingConfiguration || qf.startingConfiguration.status === "empty")
+    ) {
+      await writeJobQuoteFlowFields(organizationId, takeoffJobId, {
+        startingConfiguration: starting
+      });
+    }
+    if (!starting || starting.status === "empty") return estimate;
+
+    const nextScope = applyStartingConfigurationToScope(estimate.scope || {}, starting, {
+      roomsFromTakeoff
+    });
+    // Keep audit of which confirmed requests existed at promote time (non-authoritative).
+    if (Array.isArray(qf?.requestedSelections?.items)) {
+      nextScope.customerRequestedSelections = {
+        version: qf.requestedSelections.extractionVersion || "qf_requested_selections_v1",
+        appliedAt: new Date().toISOString(),
+        note: "Starting Configuration is authoritative for estimate init; requestedSelections remain the request ledger.",
+        items: qf.requestedSelections.items.filter((i) => i?.status === "confirmed")
+      };
+    }
     try {
       const updated = await studioEstimateService.updateScope({
         organizationId,
@@ -583,6 +684,11 @@ export function createQuoteFlowSetScopeService(deps) {
     } catch {
       return { ...estimate, scope: nextScope };
     }
+  }
+
+  /** @deprecated Prefer applyStartingConfigurationOntoEstimate */
+  async function applyConfirmedSelectionsOntoEstimate(args) {
+    return applyStartingConfigurationOntoEstimate(args);
   }
 
   function isAlreadyApprovedError(e) {
@@ -1118,6 +1224,10 @@ export function createQuoteFlowSetScopeService(deps) {
     updateQuoteName,
     getRequestedSelections,
     updateRequestedSelection,
+    getStartingConfiguration,
+    updateStartingConfiguration,
+    applyStartingConfigurationOntoEstimate,
+    applyConfirmedSelectionsOntoEstimate,
     archiveQueueItem,
     restoreQueueItem
   };

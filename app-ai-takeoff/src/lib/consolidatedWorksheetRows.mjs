@@ -80,6 +80,8 @@ export function flattenPieces(result, excludedRunIds) {
           included: !excludedRunIds.has(run.id),
           cutouts,
           cutoutsSummary: summarizeRunCutouts(cutouts),
+          cookingAppliance: run.cookingAppliance || null,
+          adjacentApplianceGap: run.adjacentApplianceGap || null,
           sideSplashLeftEligible: run.sideSplashLeftEligible === true,
           sideSplashRightEligible: run.sideSplashRightEligible === true,
           note: String(run.notes?.[0] ?? run.note ?? ""),
