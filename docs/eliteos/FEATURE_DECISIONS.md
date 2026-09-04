@@ -4853,7 +4853,7 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | Field | Value |
 |-------|--------|
 | **Date / branch** | 2026-09-04 · `main` |
-| **Decision** | Set Scope represents exactly what the estimator sees in Review Takeoff. When the worksheet is dirty (or the modal reports unsaved changes), Quote Flow **must** Save Draft successfully before creating/updating official scope. If the live iframe payload cannot be read or save fails, Set Scope **refuses** with a clear error and leaves editor state intact — it must never silently continue from an older persisted draft. Backend afterEnsure remaps piece geometry, backsplash inclusion/SF, open-edge LF, and cutouts from the reviewed takeoff onto official rooms. |
+| **Decision** | Set Scope represents exactly what the estimator sees in Review Takeoff. Quote Flow asks the embedded Review Takeoff iframe to **Save Draft**, waits for an explicit success ack (or fails closed on save failure / timeout), then creates/updates official scope from that **newly persisted** draft. Set Scope must never silently continue from an older persisted draft when save/ack fails. Backend afterEnsure remaps piece geometry, backsplash inclusion/SF, open-edge LF, and cutouts from the reviewed takeoff onto official rooms. |
 | **Why** | Production lost backsplash SF and open-edge LF when estimators clicked Set Scope with Unsaved changes; afterEnsure previously remapped open-edge only. |
 | **Impacted** | `EstimateQueuePage` Set Scope, takeoff postMessage save bridge, `quoteFlowSetScope` / `quoteFlowBacksplash`, Official Scope summaries. |
 | **Protected / unchanged** | Pricing rates, takeoff algorithms, Account Directory, Digital Estimate Allowed Choices. |
@@ -4867,6 +4867,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | Official Estimate only exposed basis + price group; estimators needed an obvious place for starting commercial selections that later become Digital Estimate “currently includes”. |
 | **Impacted** | `OfficialPricingPanel`, Estimates section tabs, `quoteFlowPricing` patch/get `startingSelections`. |
 | **Protected / unchanged** | Pricing Admin catalogs/rates, Direct vs Wholesale books, Scope physical editor, DE customer portal. |
+
+### 362. Set Scope postMessage allowlist must include production Takeoff origin (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Quote Flow’s `buildAllowedTakeoffMessageOrigins` / `isAllowedTakeoffMessageOrigin` must read Vite `import.meta.env.VITE_HEAD_URL_AI_TAKEOFF` (same as iframe `src`), not only an empty `env` argument. Production messages from `https://takeoff.eliteosfab.com` must be accepted. Set Scope uses the save-ack transaction (Saving takeoff… → Setting scope…); UX errors name the real failure (iframe missing / save timeout / save failed), not “keep Review Takeoff open” when it is already open. Child `TAKEOFF_REVIEW_DRAFT_SAVE_FAILED` uses the same wildcard parent targetOrigin as DRAFT_SAVED. No stale-draft fallback. |
+| **Why** | Build `7e50b515` required a live worksheet payload, but the parent allowlist collapsed to localhost when callers omitted env — parent ignored all Takeoff postMessages, timed out, and blocked Set Scope even though Save Draft worked. |
+| **Impacted** | `takeoffPostMessageOrigins.mjs`, `EstimateQueuePage`, `takeoffReviewReadyContract`, Quote Flow + Takeoff heads. |
+| **Protected / unchanged** | Brain Set Scope remappers, takeoff correction persistence, pricing. |
 
 ---
 

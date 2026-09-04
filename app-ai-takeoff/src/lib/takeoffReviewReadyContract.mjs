@@ -218,10 +218,14 @@ export function postTakeoffParentMessage(type, payload, opts = {}) {
     if (typeof window === "undefined" || !window.parent || window.parent === window) return false;
     // Quote Flow Set Scope / dirty / saved signals must reach the embedding parent.
     // Parent validates event.origin against the Takeoff allowlist.
+    // Quote Flow parent validates event.origin against the Takeoff allowlist.
+    // Use "*" for Set Scope / dirty / save ack signals so a missing parent-origin
+    // config cannot drop the handshake (parent still rejects foreign origins).
     let origin =
       type === QUOTE_FLOW_SET_SCOPE_PAYLOAD ||
       type === TAKEOFF_REVIEW_DIRTY ||
-      type === TAKEOFF_REVIEW_DRAFT_SAVED
+      type === TAKEOFF_REVIEW_DRAFT_SAVED ||
+      type === TAKEOFF_REVIEW_DRAFT_SAVE_FAILED
         ? "*"
         : resolveTakeoffParentOrigin({ localReview: opts.localReview });
     if (!origin) return false;

@@ -901,7 +901,16 @@ export default function ConsolidatedTakeoffReview() {
    * Readonly mode never mutates.
    */
   const persistDraft = useCallback(async () => {
-    if (urlWorkspace.mode === "readonly") return;
+    if (urlWorkspace.mode === "readonly") {
+      if (quoteFlowSetScope) {
+        postTakeoffParentMessage(
+          TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+          { error: "Review Takeoff is read-only and cannot save." },
+          { takeoffJobId }
+        );
+      }
+      return;
+    }
     if (localReview) {
       setSaveStatus("saving");
       await new Promise((r) => setTimeout(r, 120));
@@ -932,9 +941,44 @@ export default function ConsolidatedTakeoffReview() {
       );
       return;
     }
-    if (!authToken || !takeoffJobId || !draftRef.current) return;
-    if (saveInFlightRef.current) return;
-    if (saveStatus === "conflict") return;
+    if (!authToken || !takeoffJobId || !draftRef.current) {
+      if (quoteFlowSetScope) {
+        postTakeoffParentMessage(
+          TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+          {
+            error:
+              "Review Takeoff worksheet is not ready to save yet. Keep it open until measurements load, then try Set Scope again."
+          },
+          { takeoffJobId }
+        );
+      }
+      return;
+    }
+    if (saveInFlightRef.current) {
+      if (quoteFlowSetScope) {
+        postTakeoffParentMessage(
+          TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+          {
+            error: "A Takeoff save is already in progress. Wait a moment, then try Set Scope again."
+          },
+          { takeoffJobId }
+        );
+      }
+      return;
+    }
+    if (saveStatus === "conflict") {
+      if (quoteFlowSetScope) {
+        postTakeoffParentMessage(
+          TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+          {
+            error:
+              "The Takeoff draft changed while you were editing. Keep your edits and retry Set Scope."
+          },
+          { takeoffJobId }
+        );
+      }
+      return;
+    }
     const dirty = isTakeoffWorksheetDirty({
       localDraft: draftRef.current,
       canonicalDraft: canonicalDraftRef.current,
@@ -956,6 +1000,7 @@ export default function ConsolidatedTakeoffReview() {
             pieceCount: summary.pieceCount,
             savedState: "saved",
             alreadyClean: true,
+            resultId: latestResultIdRef.current || null,
             waterfalls: summary.waterfalls
           },
           { takeoffJobId }
@@ -1045,6 +1090,7 @@ export default function ConsolidatedTakeoffReview() {
           roomCount: savedSummary.roomCount,
           pieceCount: savedSummary.pieceCount,
           savedState: "saved",
+          resultId: adopted.resultId || null,
           waterfalls: savedSummary.waterfalls
         },
         { takeoffJobId }

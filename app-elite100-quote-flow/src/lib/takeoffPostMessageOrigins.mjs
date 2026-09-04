@@ -17,11 +17,13 @@ export const TAKEOFF_REVIEW_DRAFT_SAVE_FAILED = "TAKEOFF_REVIEW_DRAFT_SAVE_FAILE
 export const QUOTE_FLOW_REQUEST_SAVE_DRAFT = "eliteos-quote-flow-request-save-draft";
 /** Confirm copy when closing a dirty Review Takeoff workspace. */
 export const REVIEW_DISCARD_CONFIRM = "Discard unsaved review changes?";
-/** Set Scope when live worksheet could not be read or saved. */
+
 export const SET_SCOPE_SAVE_REQUIRED_ERROR =
-  "Could not save Review Takeoff edits. Fix the save error, then Set Scope again. Visible edits were not discarded.";
-export const SET_SCOPE_PAYLOAD_REQUIRED_ERROR =
-  "Could not read the current Review Takeoff worksheet. Keep Review Takeoff open and try Set Scope again.";
+  "Could not save the current Review Takeoff worksheet. Your edits are still on screen — fix the save error, then try Set Scope again.";
+export const SET_SCOPE_SAVE_TIMEOUT_ERROR =
+  "Timed out waiting for Review Takeoff to save. Keep Review Takeoff open and try Set Scope again.";
+export const SET_SCOPE_IFRAME_REQUIRED_ERROR =
+  "Review Takeoff is not available. Open Review Takeoff, then try Set Scope again.";
 
 export const LOCAL_TAKEOFF_ORIGINS = Object.freeze([
   "http://localhost:5186",
@@ -38,28 +40,63 @@ export function originFromUrl(raw) {
   }
 }
 
-export function aiTakeoffHeadUrl(env) {
-  const fromEnv =
+/**
+ * Resolve Vite / override env for Takeoff head URL.
+ * IMPORTANT: access `import.meta.env.VITE_*` as static member expressions so Vite
+ * inlines production values. Do not only spread `import.meta.env`.
+ */
+function resolveTakeoffHeadUrlRaw(env = {}) {
+  const fromArg =
     env && typeof env === "object" ? String(env.VITE_HEAD_URL_AI_TAKEOFF ?? "").trim() : "";
   let fromMeta = "";
   try {
     fromMeta = String(
-      (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_HEAD_URL_AI_TAKEOFF) ||
+      (typeof import.meta !== "undefined" &&
+        import.meta.env &&
+        import.meta.env.VITE_HEAD_URL_AI_TAKEOFF) ||
         ""
     ).trim();
   } catch {
     fromMeta = "";
   }
-  const raw = fromEnv || fromMeta;
+  return fromArg || fromMeta;
+}
+
+function resolveExtraAllowedOriginsRaw(env = {}) {
+  const fromArg =
+    env && typeof env === "object"
+      ? String(env.VITE_TAKEOFF_POSTMESSAGE_ALLOWED_ORIGINS ?? "").trim()
+      : "";
+  let fromMeta = "";
+  try {
+    fromMeta = String(
+      (typeof import.meta !== "undefined" &&
+        import.meta.env &&
+        import.meta.env.VITE_TAKEOFF_POSTMESSAGE_ALLOWED_ORIGINS) ||
+        ""
+    ).trim();
+  } catch {
+    fromMeta = "";
+  }
+  return fromArg || fromMeta;
+}
+
+export function aiTakeoffHeadUrl(env) {
+  const raw = resolveTakeoffHeadUrlRaw(env);
   return raw.replace(/\/+$/, "") || "http://localhost:5186";
 }
 
+/**
+ * Allowed origins for messages FROM the Takeoff iframe TO Quote Flow.
+ * Must include production takeoff.eliteosfab.com via VITE_HEAD_URL_AI_TAKEOFF.
+ */
 export function buildAllowedTakeoffMessageOrigins(env = {}) {
   const set = new Set();
-  const head = originFromUrl(env.VITE_HEAD_URL_AI_TAKEOFF) || originFromUrl("http://localhost:5186");
+  const head =
+    originFromUrl(resolveTakeoffHeadUrlRaw(env)) || originFromUrl("http://localhost:5186");
   if (head) set.add(head);
   for (const o of LOCAL_TAKEOFF_ORIGINS) set.add(o);
-  const extra = String(env.VITE_TAKEOFF_POSTMESSAGE_ALLOWED_ORIGINS ?? "").trim();
+  const extra = resolveExtraAllowedOriginsRaw(env);
   if (extra) {
     for (const part of extra.split(",")) {
       const o = originFromUrl(part.trim());
@@ -95,10 +132,12 @@ export function isValidQuoteFlowSetScopePayload(data, expectedTakeoffJobId) {
 /**
  * Ask the embedded Takeoff review iframe for the current reviewed measurements.
  * Resolves with { takeoffResult, reviewState, dirty } or null on timeout/unavailable.
+ * Prefer requestSaveDraftFromIframe + backend Set Scope for the production transaction.
  */
 export function requestSetScopePayloadFromIframe(iframe, takeoffJobId, opts = {}) {
   const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 8000;
   const jobId = String(takeoffJobId || "").trim();
+  const env = opts.env;
   if (!iframe?.contentWindow || !jobId) {
     return Promise.resolve(null);
   }
@@ -112,10 +151,15 @@ export function requestSetScopePayloadFromIframe(iframe, takeoffJobId, opts = {}
       resolve(value);
     };
     function onMessage(event) {
-      if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
+      if (!isAllowedTakeoffMessageOrigin(event.origin, env)) return;
       if (!isValidQuoteFlowSetScopePayload(event.data, jobId)) return;
       if (event.data.error) {
-        finish(null);
+        finish({
+          takeoffResult: null,
+          reviewState: null,
+          dirty: false,
+          error: String(event.data.error)
+        });
         return;
       }
       finish({
@@ -139,13 +183,18 @@ export function requestSetScopePayloadFromIframe(iframe, takeoffJobId, opts = {}
 
 /**
  * Ask the embedded Review Takeoff iframe to Save Draft and wait for confirmation.
- * Resolves { ok: true } | { ok: false, error }.
+ * Resolves { ok: true, alreadyClean?, resultId? } | { ok: false, error, reason }.
  */
 export function requestSaveDraftFromIframe(iframe, takeoffJobId, opts = {}) {
   const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 20000;
   const jobId = String(takeoffJobId || "").trim();
+  const env = opts.env;
   if (!iframe?.contentWindow || !jobId) {
-    return Promise.resolve({ ok: false, error: SET_SCOPE_PAYLOAD_REQUIRED_ERROR });
+    return Promise.resolve({
+      ok: false,
+      reason: "iframe_missing",
+      error: SET_SCOPE_IFRAME_REQUIRED_ERROR
+    });
   }
   return new Promise((resolve) => {
     let settled = false;
@@ -157,24 +206,35 @@ export function requestSaveDraftFromIframe(iframe, takeoffJobId, opts = {}) {
       resolve(value);
     };
     function onMessage(event) {
-      if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
+      if (!isAllowedTakeoffMessageOrigin(event.origin, env)) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (String(data.takeoffJobId || "") !== jobId) return;
       if (data.type === TAKEOFF_REVIEW_DRAFT_SAVED) {
-        finish({ ok: true });
+        finish({
+          ok: true,
+          alreadyClean: data.alreadyClean === true,
+          resultId: data.resultId || null,
+          savedState: data.savedState || "saved"
+        });
         return;
       }
       if (data.type === TAKEOFF_REVIEW_DRAFT_SAVE_FAILED) {
         finish({
           ok: false,
+          reason: "save_failed",
           error: String(data.error || SET_SCOPE_SAVE_REQUIRED_ERROR)
         });
       }
     }
     window.addEventListener("message", onMessage);
     const timer = window.setTimeout(
-      () => finish({ ok: false, error: SET_SCOPE_SAVE_REQUIRED_ERROR }),
+      () =>
+        finish({
+          ok: false,
+          reason: "timeout",
+          error: SET_SCOPE_SAVE_TIMEOUT_ERROR
+        }),
       timeoutMs
     );
     try {
@@ -183,7 +243,11 @@ export function requestSaveDraftFromIframe(iframe, takeoffJobId, opts = {}) {
         "*"
       );
     } catch {
-      finish({ ok: false, error: SET_SCOPE_SAVE_REQUIRED_ERROR });
+      finish({
+        ok: false,
+        reason: "post_failed",
+        error: SET_SCOPE_IFRAME_REQUIRED_ERROR
+      });
     }
   });
 }

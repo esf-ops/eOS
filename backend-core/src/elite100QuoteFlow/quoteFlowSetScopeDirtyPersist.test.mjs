@@ -108,9 +108,9 @@ console.log("\nquoteFlowSetScopeDirtyPersist.test.mjs\n");
     "utf8"
   );
   assert.match(queue, /requestSaveDraftFromIframe/);
-  assert.match(queue, /needsPersist/);
-  assert.match(queue, /SET_SCOPE_SAVE_REQUIRED_ERROR|SET_SCOPE_PAYLOAD_REQUIRED_ERROR/);
-  assert.match(queue, /takeoffResult: payload\.takeoffResult/);
+  assert.match(queue, /SET_SCOPE_SAVE_REQUIRED_ERROR|SET_SCOPE_IFRAME_REQUIRED_ERROR/);
+  assert.match(queue, /Saving takeoff…/);
+  assert.doesNotMatch(queue, /takeoffResult:\s*payload\.takeoffResult/);
   assert.doesNotMatch(queue, /If postMessage times out \/ fails, still call Set Scope/);
   assert.doesNotMatch(queue, /payload\?\.takeoffResult \|\| undefined/);
   console.log("ok: Set Scope persists dirty draft before creating official scope");

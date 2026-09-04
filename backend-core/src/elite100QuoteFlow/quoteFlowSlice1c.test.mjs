@@ -1459,18 +1459,18 @@ function queueRow(overrides = {}) {
   assert.match(ui, /Review Takeoff/);
   assert.match(ui, /Create Manual Scope/);
   assert.match(ui, /Set Scope/);
-  assert.match(ui, /requestSetScopePayloadFromIframe/);
   assert.match(ui, /requestSaveDraftFromIframe/);
-  assert.match(ui, /Save draft first, then Set Scope/);
+  assert.match(ui, /Saving takeoff…/);
+  assert.match(ui, /Setting scope…/);
+  assert.match(ui, /Review Takeoff has no usable saved measurements/);
   assert.match(ui, /Review measurements\. Save draft if needed, then Set Scope from the Quote Flow/);
-  assert.match(ui, /takeoffResult: payload\.takeoffResult/);
-  assert.match(ui, /needsPersist|SET_SCOPE_SAVE_REQUIRED_ERROR/);
+  assert.doesNotMatch(ui, /takeoffResult:\s*payload\.takeoffResult/);
   assert.match(ui, /quoteFlowSetScope/);
   assert.match(ui, /Open in Estimates/);
   assert.match(ui, /filter:\s*["']active["']/);
   assert.match(ui, /qf-queue-manual-builder|OfficialScopeEditor/);
   assert.match(ui, /do not refetch takeoff detail|Do not refetch takeoff detail/);
-  assert.match(ui, /if \(!payload\?\.takeoffResult\)/);
+  assert.doesNotMatch(ui, /if \(!payload\?\.takeoffResult\)/);
   assert.doesNotMatch(ui, /payload\?\.takeoffResult \|\| undefined/);
   assert.doesNotMatch(ui, /If postMessage times out \/ fails, still call Set Scope/);
   assert.doesNotMatch(ui, /isValidQuoteFlowTriggerSetScope|QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
@@ -1523,6 +1523,8 @@ function queueRow(overrides = {}) {
     "utf8"
   );
   assert.match(origins, /requestSetScopePayloadFromIframe/);
+  assert.match(origins, /requestSaveDraftFromIframe/);
+  assert.match(origins, /import\.meta\.env\.VITE_HEAD_URL_AI_TAKEOFF/);
   assert.doesNotMatch(origins, /QUOTE_FLOW_TRIGGER_SET_SCOPE|isValidQuoteFlowTriggerSetScope/);
   console.log("ok: header Set Scope only; Save Draft restored; openEdgeLf payload contract");
 }

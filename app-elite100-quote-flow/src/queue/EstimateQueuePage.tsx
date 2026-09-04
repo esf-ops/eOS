@@ -30,12 +30,11 @@ import {
   isAllowedTakeoffMessageOrigin,
   isValidTakeoffApprovedMessage,
   requestSaveDraftFromIframe,
-  requestSetScopePayloadFromIframe,
   TAKEOFF_REVIEW_DIRTY,
   TAKEOFF_REVIEW_DRAFT_SAVED,
   QUOTE_FLOW_REQUEST_SAVE_DRAFT,
   REVIEW_DISCARD_CONFIRM,
-  SET_SCOPE_PAYLOAD_REQUIRED_ERROR,
+  SET_SCOPE_IFRAME_REQUIRED_ERROR,
   SET_SCOPE_SAVE_REQUIRED_ERROR
 } from "../lib/takeoffPostMessageOrigins.mjs";
 
@@ -183,6 +182,8 @@ export default function EstimateQueuePage(props: Props) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [setScopeBusy, setSetScopeBusy] = useState(false);
+  /** "saving" | "setting" while Set Scope transaction is active — drives button copy. */
+  const [setScopePhase, setSetScopePhase] = useState<"idle" | "saving" | "setting">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [estimateId, setEstimateId] = useState<string | null>(null);
@@ -642,8 +643,9 @@ export default function EstimateQueuePage(props: Props) {
     if (!selectedJobId || inFlightRef.current || setScopeBusy) return;
     inFlightRef.current = true;
     setSetScopeBusy(true);
+    setSetScopePhase("saving");
     setError(null);
-    setNotice(null);
+    setNotice("Saving takeoff…");
     const name = resolvedNameForSubmit();
     if (!isMeaningfulQuoteName(name)) {
       setError(
@@ -651,56 +653,41 @@ export default function EstimateQueuePage(props: Props) {
       );
       inFlightRef.current = false;
       setSetScopeBusy(false);
+      setSetScopePhase("idle");
+      setNotice(null);
       return;
     }
     await persistQuoteNameIfNeeded({ quiet: true });
-    const saveDraftFirstMsg = "Save draft first, then Set Scope.";
     try {
-      // Set Scope must represent exactly what the estimator sees in Review Takeoff.
-      // Prefer live worksheet payload; when dirty, persist first and refuse on save failure.
-      let payload = await requestSetScopePayloadFromIframe(
-        takeoffIframeRef.current,
-        selectedJobId,
-        { timeoutMs: 8000 }
-      );
-
-      if (!payload?.takeoffResult) {
-        setError(SET_SCOPE_PAYLOAD_REQUIRED_ERROR);
+      // Transaction: parent asks child to persist the visible worksheet → wait for
+      // explicit save ack → backend Set Scope from that newly persisted draft.
+      // Never transport a live payload as the sole authority, and never fall back
+      // to an older draft when save/ack fails.
+      if (!takeoffIframeRef.current?.contentWindow) {
+        setError(SET_SCOPE_IFRAME_REQUIRED_ERROR);
+        setNotice(null);
         return;
       }
 
-      const needsPersist =
-        payload.dirty === true || reviewDirtyRef.current === true;
-
-      if (needsPersist) {
-        const saved = await requestSaveDraftFromIframe(
-          takeoffIframeRef.current,
-          selectedJobId,
-          { timeoutMs: 20000 }
-        );
-        if (!saved?.ok) {
-          setError(saved?.error || SET_SCOPE_SAVE_REQUIRED_ERROR);
-          return;
-        }
-        setReviewDirty(false);
-        // Re-read worksheet after save so Set Scope uses the confirmed editor state.
-        payload = await requestSetScopePayloadFromIframe(
-          takeoffIframeRef.current,
-          selectedJobId,
-          { timeoutMs: 8000 }
-        );
-        if (!payload?.takeoffResult) {
-          setError(SET_SCOPE_PAYLOAD_REQUIRED_ERROR);
-          return;
-        }
+      const saved = await requestSaveDraftFromIframe(
+        takeoffIframeRef.current,
+        selectedJobId,
+        { timeoutMs: 20000 }
+      );
+      if (!saved?.ok) {
+        setError(saved?.error || SET_SCOPE_SAVE_REQUIRED_ERROR);
+        setNotice(null);
+        return;
       }
+      setReviewDirty(false);
 
+      setSetScopePhase("setting");
+      setNotice("Setting scope…");
       const res = await setQuoteFlowScope(authToken, selectedJobId, {
         confirm: true,
         projectName: name,
-        estimateName: name,
-        takeoffResult: payload.takeoffResult,
-        reviewState: payload.reviewState || undefined
+        estimateName: name
+        // No takeoffResult: Brain loads the draft we just saved (authoritative).
       });
       applyScopeSuccess({ ...res, projectName: res.projectName || name });
       await loadList("refresh");
@@ -718,19 +705,23 @@ export default function EstimateQueuePage(props: Props) {
         await loadList("refresh");
         return;
       }
-      // Only after backend confirms no live payload and no saved/approved review.
       if (
         /No saved result|takeoff_not_ready|Review measurements before setting scope|No usable measurements|takeoff_already_approved|Approved Takeoff measurements cannot be changed|Edit Measurements/i.test(
           msg
         )
       ) {
-        setError(saveDraftFirstMsg);
+        setError(
+          "Review Takeoff has no usable saved measurements yet. Keep Review Takeoff open, confirm the worksheet loaded, then try Set Scope again."
+        );
+        setNotice(null);
         return;
       }
       setError(msg);
+      setNotice(null);
     } finally {
       inFlightRef.current = false;
       setSetScopeBusy(false);
+      setSetScopePhase("idle");
     }
   }
 
@@ -1520,7 +1511,9 @@ export default function EstimateQueuePage(props: Props) {
                     aria-label="Set Scope"
                   >
                     {setScopeBusy
-                      ? "Setting scope…"
+                      ? setScopePhase === "saving"
+                        ? "Saving takeoff…"
+                        : "Setting scope…"
                       : workspaceItem?.alreadyScoped
                         ? "Scope is set"
                         : "Set Scope"}
