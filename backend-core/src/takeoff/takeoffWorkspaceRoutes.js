@@ -55,6 +55,10 @@ import { resumeExayardTakeoff } from "./exayardTakeoffResume.mjs";
 import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import {
+  attachRequestTimingHeader,
+  createRequestStageTimer
+} from "../lib/requestStageTimer.mjs";
+import {
   TAKEOFF_BETA_LABEL,
   TAKEOFF_ISSUE_CATEGORIES,
   buildTakeoffBetaQaSummary,
@@ -173,10 +177,17 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   //   { ok: true, takeoffJobId, reviewStatus, startedAt, hasSavedResult, isWorkspace, file: {...} }
   //
   app.get("/api/takeoff-jobs/:id", requireAuth(), guardHead, async (req, res) => {
+    const wantPerf =
+      String(req.query?.perf ?? "") === "1" ||
+      String(process.env.ELITEOS_REQUEST_TIMING || "") === "1";
+    const timer = createRequestStageTimer("GET /api/takeoff-jobs/:id", {
+      enabled: wantPerf
+    });
     try {
       const supabase = getSupabase();
 
       const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      timer.mark("auth_org");
       if (!orgCtx.organizationId) {
         return res.status(503).json({ ok: false, error: "Organization context not available" });
       }
@@ -186,10 +197,15 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         supabase,
         organizationId: orgCtx.organizationId,
         takeoffJobId,
+        _timing: timer,
       });
+      timer.mark("serialize");
+      const timing = timer.finish();
+      attachRequestTimingHeader(res, timing);
 
       return res.json({ ok: true, ...result });
     } catch (e) {
+      timer.finish();
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
@@ -460,10 +476,17 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   //     importPlanJson, file: {...} }
   //
   app.get("/api/takeoff-jobs/:id/results/latest", requireAuth(), guardHead, async (req, res) => {
+    const wantPerf =
+      String(req.query?.perf ?? "") === "1" ||
+      String(process.env.ELITEOS_REQUEST_TIMING || "") === "1";
+    const timer = createRequestStageTimer("GET /api/takeoff-jobs/:id/results/latest", {
+      enabled: wantPerf
+    });
     try {
       const supabase = getSupabase();
 
       const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      timer.mark("auth_org");
       if (!orgCtx.organizationId) {
         return res.status(503).json({ ok: false, error: "Organization context not available" });
       }
@@ -473,10 +496,15 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         supabase,
         organizationId: orgCtx.organizationId,
         takeoffJobId,
+        _timing: timer,
       });
+      timer.mark("serialize");
+      const timing = timer.finish();
+      attachRequestTimingHeader(res, timing);
 
       return res.json({ ok: true, ...result });
     } catch (e) {
+      timer.finish();
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });

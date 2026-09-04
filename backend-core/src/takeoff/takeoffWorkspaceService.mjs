@@ -318,12 +318,11 @@ export async function assertPhysicalTakeoffResult(
  * Pass job.result_summary so correction fallback wins when result-row insert was blocked.
  * @returns {Promise<Record<string, unknown> | null>}
  */
-async function loadLatestResultRow(
-  supabase,
-  organizationId,
-  takeoffJobId,
-  jobResultSummary = null
-) {
+/**
+ * Load recent result rows for authoritative selection (newest-first, capped).
+ * @returns {Promise<object[]>}
+ */
+async function loadRecentResultRows(supabase, organizationId, takeoffJobId) {
   const { data: rows, error } = await supabase
     .from("quote_takeoff_results")
     .select(RESULT_DETAIL_SELECT_COLS)
@@ -337,7 +336,20 @@ async function loadLatestResultRow(
       statusCode: 503,
     });
   }
-  return selectAuthoritativeTakeoffResult(rows || [], {
+  return rows || [];
+}
+
+async function loadLatestResultRow(
+  supabase,
+  organizationId,
+  takeoffJobId,
+  jobResultSummary = null,
+  preloadedRows = null
+) {
+  const rows = Array.isArray(preloadedRows)
+    ? preloadedRows
+    : await loadRecentResultRows(supabase, organizationId, takeoffJobId);
+  return selectAuthoritativeTakeoffResult(rows, {
     jobResultSummary
   }).row;
 }
@@ -614,6 +626,7 @@ export async function getTakeoffWorkspace({
   supabase,
   organizationId,
   takeoffJobId,
+  _timing = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -623,30 +636,28 @@ export async function getTakeoffWorkspace({
   }
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  _timing?.mark?.("job_lookup");
 
   // ── Legacy v4 fallback ──────────────────────────────────────────────────────
   if (!jobRow) {
     return await _legacyV4GetWorkspace(supabase, organizationId, takeoffJobId);
   }
 
-  // Load the linked file metadata.
-  let fileRow = null;
-  if (jobRow.quote_file_id) {
-    const { data: fileRows } = await supabase
-      .from("quote_files")
-      .select(FILE_SELECT_COLS)
-      .eq("id", jobRow.quote_file_id)
-      .limit(1);
-    fileRow = fileRows?.[0] ?? null;
-  }
+  // Parallel: file metadata + recent results (removes prior sequential triple:
+  // file → id-count → full latest load).
+  const filePromise = jobRow.quote_file_id
+    ? supabase
+        .from("quote_files")
+        .select(FILE_SELECT_COLS)
+        .eq("id", jobRow.quote_file_id)
+        .limit(1)
+        .then(({ data }) => data?.[0] ?? null)
+    : Promise.resolve(null);
+  const resultsPromise = loadRecentResultRows(supabase, organizationId, takeoffJobId);
+  const [fileRow, resultRows] = await Promise.all([filePromise, resultsPromise]);
+  _timing?.mark?.("file_and_results");
 
-  const { data: resultIdRows } = await supabase
-    .from("quote_takeoff_results")
-    .select("id")
-    .eq("takeoff_job_id", takeoffJobId)
-    .eq("organization_id", organizationId);
-
-  const resultCount = resultIdRows?.length ?? 0;
+  const resultCount = resultRows.length;
   const hasJobSummary = jobHasResultSummary(jobRow);
   const hasSavedResult = Boolean(resultCount > 0 || hasJobSummary);
 
@@ -654,9 +665,11 @@ export async function getTakeoffWorkspace({
     supabase,
     organizationId,
     takeoffJobId,
-    jobRow.result_summary
+    jobRow.result_summary,
+    resultRows
   );
   const latestResult = latestRow ? buildLatestResultMeta(latestRow) : null;
+  _timing?.mark?.("select_authoritative");
 
   let canApprove = false;
   let approvalBlockers = null;
@@ -720,6 +733,7 @@ export async function getTakeoffWorkspace({
       }
     }
   }
+  _timing?.mark?.("can_approve");
 
   const approval = extractApprovalFields(jobRow, latestRow);
 
@@ -2377,6 +2391,7 @@ export async function getLatestTakeoffResult({
   supabase,
   organizationId,
   takeoffJobId,
+  _timing = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -2386,27 +2401,42 @@ export async function getLatestTakeoffResult({
   }
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  _timing?.mark?.("job_lookup");
 
   // ── Legacy v4 fallback ──────────────────────────────────────────────────────
   if (!jobRow) {
     return await _legacyV4GetLatestResult(supabase, organizationId, takeoffJobId);
   }
 
-  // Try quote_takeoff_results — confirmed estimator work wins over newer AI drafts.
-  const { data: resultRows } = await supabase
+  // Parallel: result rows + file metadata (independent after job ownership check).
+  const resultsPromise = supabase
     .from("quote_takeoff_results")
     .select(
       "id,organization_id,schema_version,normalized_takeoff_json," +
-      "computed_measurements_json,validation_diagnostics_json," +
-      "import_plan_json,review_status,created_at,raw_ai_result_json"
+        "computed_measurements_json,validation_diagnostics_json," +
+        "import_plan_json,review_status,created_at,raw_ai_result_json"
     )
     .eq("takeoff_job_id", takeoffJobId)
     .order("created_at", { ascending: false })
-    .limit(40);
+    .limit(40)
+    .then(({ data }) => data || []);
+
+  const filePromise = jobRow.quote_file_id
+    ? supabase
+        .from("quote_files")
+        .select(FILE_SELECT_COLS)
+        .eq("id", jobRow.quote_file_id)
+        .limit(1)
+        .then(({ data }) => data?.[0] ?? null)
+    : Promise.resolve(null);
+
+  const [resultRows, fileRow] = await Promise.all([resultsPromise, filePromise]);
+  _timing?.mark?.("results_and_file");
 
   let savedResult = selectAuthoritativeTakeoffResult(resultRows || [], {
     jobResultSummary: jobRow.result_summary
   }).row;
+  _timing?.mark?.("select_authoritative");
 
   // Fall back to job.result_summary if selector returned empty (no rows / no summary JSON).
   if (!savedResult) {
@@ -2441,17 +2471,7 @@ export async function getLatestTakeoffResult({
   } catch {
     freshComputed = savedResult.computed_measurements_json;
   }
-
-  // Load file metadata.
-  let fileRow = null;
-  if (jobRow.quote_file_id) {
-    const { data: fileRows } = await supabase
-      .from("quote_files")
-      .select(FILE_SELECT_COLS)
-      .eq("id", jobRow.quote_file_id)
-      .limit(1);
-    fileRow = fileRows?.[0] ?? null;
-  }
+  _timing?.mark?.("recompute");
 
   const rawJson = savedResult.raw_ai_result_json ?? null;
   const dimensionEvidence =
@@ -2464,6 +2484,7 @@ export async function getLatestTakeoffResult({
   const pendingAiPreview = pending.pendingAiAvailable
     ? summarizeAiFindingsPreview(pending.pendingAiDraft)
     : { rooms: [] };
+  _timing?.mark?.("pending_ai");
 
   const summaryRev = Number(jobRow.result_summary?.clientMutationRevision ?? 0);
   const rowRev = Number(rawJson?._meta?.clientMutationRevision ?? 0);

@@ -4888,5 +4888,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `ConsolidatedTakeoffReview`, `TakeoffPlanPreviewPanel`, plan URL cache helper, perf marks helper. |
 | **Protected / unchanged** | Set Scope save-ack contract, takeoff math, Pricing & Selections, AD product rules. |
 
+### 364. Review Takeoff Brain/API latency pass (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Backend-only latency pass: (1) `GET /api/takeoff-jobs/:id` parallelizes file + results and removes the separate result-id count query; (2) `GET …/results/latest` parallelizes results + file; (3) Set Scope resolves intake case via `quote_intake_takeoff_links` / `studio_estimates` instead of listing the full Estimate Queue; (4) request-scoped takeoff-result cache for open-edge remapping; (5) reuse getOrCreate estimate instead of a second alreadyScoped reload; (6) optional `?perf=1` / `ELITEOS_REQUEST_TIMING=1` stage timings via `X-Eliteos-Perf`. No cross-request mutable caches. No takeoff math / Set Scope semantics / auth changes. |
+| **Why** | After frontend parallelize, cold open was gated by ~1.5–3s Brain GETs; Set Scope ~8s included a full queue list (~68 cases + joins) just to map takeoffJobId → intakeCaseId. |
+| **Impacted** | `takeoffWorkspaceService`, `takeoffWorkspaceRoutes`, `quoteFlowSetScope`, `elite100QuoteFlowRoutes`, `requestStageTimer`. |
+| **Protected / unchanged** | Save-ack frontend transaction, geometry remappers, Starting Configuration / AD product rules, pricing. |
+| **Deferred** | Cross-request takeoff DTO cache; stripping unused response fields (needs field-usage audit); skipping freeze/approve when already approved after save-ack; indexing `quote_intake_takeoff_links(takeoff_job_id)` (seq scan is fine at current org scale). |
+
 ---
 

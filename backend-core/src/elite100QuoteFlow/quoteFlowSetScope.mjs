@@ -61,6 +61,7 @@ import {
   createQuoteFlowQueueStateStore
 } from "./quoteFlowQueueStateStore.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
+import { createRequestStageTimer } from "../lib/requestStageTimer.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -278,6 +279,94 @@ export function createQuoteFlowSetScopeService(deps) {
     const jobId = String(takeoffJobId || "").trim();
     const cases = await loadQueueCases(organizationId, actorUserId);
     return cases.find((c) => String(c.takeoffJobId || "") === jobId) || null;
+  }
+
+  /**
+   * Resolve intake case id for a takeoff job without listing the full Estimate Queue.
+   * Direct link/estimate lookup first; queue scan is fallback only.
+   * @returns {Promise<{ id: string } | null>}
+   */
+  async function resolveIntakeCaseForTakeoffJob(organizationId, takeoffJobId, actorUserId) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) return null;
+    const supabase = getSupabase?.();
+    if (supabase?.from) {
+      try {
+        const { data: links } = await supabase
+          .from("quote_intake_takeoff_links")
+          .select("intake_case_id")
+          .eq("organization_id", organizationId)
+          .eq("takeoff_job_id", jobId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const linkCaseId = links?.[0]?.intake_case_id;
+        if (linkCaseId) return { id: String(linkCaseId) };
+      } catch {
+        // fall through
+      }
+      try {
+        const { data: estimates } = await supabase
+          .from("studio_estimates")
+          .select("intake_case_id")
+          .eq("organization_id", organizationId)
+          .eq("takeoff_job_id", jobId)
+          .is("superseded_at", null)
+          .order("updated_at", { ascending: false })
+          .limit(1);
+        const estCaseId = estimates?.[0]?.intake_case_id;
+        if (estCaseId) return { id: String(estCaseId) };
+      } catch {
+        // fall through
+      }
+    }
+    return findCaseForTakeoffJob(organizationId, jobId, actorUserId);
+  }
+
+  /**
+   * Request-scoped latest takeoff loader (dedupes getLatestTakeoffResult within Set Scope).
+   */
+  function createTakeoffResultCache() {
+    /** @type {Map<string, Promise<object|null>>} */
+    const cache = new Map();
+    return {
+      /**
+       * @param {string} organizationId
+       * @param {string} takeoffJobId
+       * @param {object|null|undefined} clientTakeoffResult
+       */
+      async resolve(organizationId, takeoffJobId, clientTakeoffResult) {
+        if (hasClientTakeoffPayload(clientTakeoffResult)) {
+          return stampOpenEdgeLfOnTakeoffResult(clientTakeoffResult);
+        }
+        const key = `${organizationId}:${takeoffJobId}`;
+        if (!cache.has(key)) {
+          cache.set(
+            key,
+            (async () => {
+              const supabase = getSupabase?.();
+              if (!supabase || typeof getLatestTakeoffResult !== "function") return null;
+              try {
+                const latest = await getLatestTakeoffResult({
+                  supabase,
+                  organizationId,
+                  takeoffJobId
+                });
+                const draft =
+                  latest?.normalizedTakeoffJson ||
+                  latest?.takeoffResult ||
+                  latest?.normalized_takeoff_json ||
+                  null;
+                if (!hasClientTakeoffPayload(draft)) return null;
+                return stampOpenEdgeLfOnTakeoffResult(draft);
+              } catch {
+                return null;
+              }
+            })()
+          );
+        }
+        return cache.get(key);
+      }
+    };
   }
 
   async function getQueueDetail({ organizationId, takeoffJobId, actorUserId = null }) {
@@ -985,7 +1074,10 @@ export function createQuoteFlowSetScopeService(deps) {
    * (when the Quote Flow parent could not collect a live iframe payload).
    * Returns stamped takeoffResult or null.
    */
-  async function loadSavedReviewedTakeoffResult(organizationId, takeoffJobId) {
+  async function loadSavedReviewedTakeoffResult(organizationId, takeoffJobId, takeoffCache = null) {
+    if (takeoffCache) {
+      return takeoffCache.resolve(organizationId, takeoffJobId, null);
+    }
     const supabase = getSupabase?.();
     if (!supabase || typeof getLatestTakeoffResult !== "function") return null;
     try {
@@ -1010,11 +1102,16 @@ export function createQuoteFlowSetScopeService(deps) {
    * Resolve takeoffResult used for openEdgeLf carry-forward after official scope import.
    * Prefers live client payload; otherwise latest saved reviewed draft.
    */
-  async function resolveTakeoffResultForOpenEdge(organizationId, takeoffJobId, clientTakeoffResult) {
+  async function resolveTakeoffResultForOpenEdge(
+    organizationId,
+    takeoffJobId,
+    clientTakeoffResult,
+    takeoffCache = null
+  ) {
     if (hasClientTakeoffPayload(clientTakeoffResult)) {
       return stampOpenEdgeLfOnTakeoffResult(clientTakeoffResult);
     }
-    return loadSavedReviewedTakeoffResult(organizationId, takeoffJobId);
+    return loadSavedReviewedTakeoffResult(organizationId, takeoffJobId, takeoffCache);
   }
 
   /**
@@ -1028,7 +1125,8 @@ export function createQuoteFlowSetScopeService(deps) {
     takeoffJobId,
     actorUserId,
     estimate,
-    takeoffResult = null
+    takeoffResult = null,
+    takeoffCache = null
   }) {
     if (!estimate?.id) return estimate;
     const priorRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
@@ -1037,7 +1135,8 @@ export function createQuoteFlowSetScopeService(deps) {
     const edgeSource = await resolveTakeoffResultForOpenEdge(
       organizationId,
       takeoffJobId,
-      takeoffResult
+      takeoffResult,
+      takeoffCache
     );
     const withGeometry = applyTakeoffPieceGeometryToOfficialRooms(priorRooms, edgeSource);
     const withBacksplash = applyTakeoffBacksplashToOfficialRooms(withGeometry, edgeSource);
@@ -1209,8 +1308,18 @@ export function createQuoteFlowSetScopeService(deps) {
     takeoffResult = null,
     reviewState = null,
     projectName = null,
-    estimateName = null
+    estimateName = null,
+    _timing = null
   }) {
+    const ownsTimer = !_timing;
+    const timer =
+      _timing ||
+      createRequestStageTimer("POST set-scope", {
+        enabled: String(process.env.ELITEOS_REQUEST_TIMING || "") === "1"
+      });
+    const done = () => {
+      if (ownsTimer) timer.finish();
+    };
     if (confirm !== true && confirm !== "true") {
       throw createQuoteFlowError("set_scope_confirm_required");
     }
@@ -1218,19 +1327,26 @@ export function createQuoteFlowSetScopeService(deps) {
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
     const displayName = requireMeaningfulQuoteName(projectName || estimateName);
 
-    const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
+    const caseRow = await resolveIntakeCaseForTakeoffJob(organizationId, jobId, actorUserId);
+    timer.mark("resolve_intake_case");
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
     const intakeCaseId = String(caseRow.id);
 
-    await persistQuoteFlowQuoteName({
-      getSupabase,
-      organizationId,
-      takeoffJobId: jobId,
-      quoteName: displayName,
-      userSet: true
-    }).catch(() => ({ ok: false }));
+    const takeoffCache = createTakeoffResultCache();
 
-    const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
+    // Quote name write is independent of already-scoped check.
+    const [prior] = await Promise.all([
+      alreadyScopedForCase(organizationId, intakeCaseId),
+      persistQuoteFlowQuoteName({
+        getSupabase,
+        organizationId,
+        takeoffJobId: jobId,
+        quoteName: displayName,
+        userSet: true
+      }).catch(() => ({ ok: false }))
+    ]);
+    timer.mark("prior_scope_and_quote_name");
+
     if (prior.scoped && prior.estimate?.id) {
       const named = displayName
         ? await applyEstimateDisplayName({
@@ -1241,6 +1357,8 @@ export function createQuoteFlowSetScopeService(deps) {
             estimate: prior.estimate
           })
         : prior.estimate;
+      timer.mark("already_scoped_return");
+      done();
       return scopedSuccessPayload({
         estimate: named,
         intakeCaseId,
@@ -1258,6 +1376,7 @@ export function createQuoteFlowSetScopeService(deps) {
       takeoffResult,
       reviewState
     });
+    timer.mark("freeze_reviewed");
 
     if (!studioEstimateService?.getOrCreateForCase || !studioEstimateService?.refreshScopeFromTakeoff) {
       throw createQuoteFlowError("takeoff_unavailable", {
@@ -1272,6 +1391,7 @@ export function createQuoteFlowSetScopeService(deps) {
       takeoffJobId: jobId,
       actorUserId
     });
+    timer.mark("get_or_create");
     const estimateId = ensured?.id || ensured?.estimateId;
     if (!estimateId) {
       throw createQuoteFlowError("takeoff_unavailable", {
@@ -1280,17 +1400,22 @@ export function createQuoteFlowSetScopeService(deps) {
       });
     }
 
-    // Idempotent: if getOrCreate already seeded usable scope, still stamp openEdgeLf
-    // from live/saved takeoff (seed historically wrote 0 / early-return skipped stamp).
-    const afterEnsure = await alreadyScopedForCase(organizationId, intakeCaseId);
-    if (afterEnsure.scoped && afterEnsure.estimate?.id) {
+    // Reuse getOrCreate row when it already carries official scope — avoid a second
+    // getActiveByIntakeCase round-trip (previously alreadyScopedForCase after ensure).
+    const ensuredEstimate = {
+      ...ensured,
+      id: estimateId
+    };
+    if (isOfficialScopeSet(ensuredEstimate)) {
       let estimate = await persistOpenEdgeLfOnEstimate({
         organizationId,
         takeoffJobId: jobId,
         actorUserId,
-        estimate: afterEnsure.estimate,
-        takeoffResult
+        estimate: ensuredEstimate,
+        takeoffResult,
+        takeoffCache
       });
+      timer.mark("persist_physical_facts");
       if (displayName) {
         estimate = await applyEstimateDisplayName({
           organizationId,
@@ -1300,12 +1425,15 @@ export function createQuoteFlowSetScopeService(deps) {
           estimate
         });
       }
+      timer.mark("display_name");
       estimate = await applyConfirmedSelectionsOntoEstimate({
         organizationId,
         takeoffJobId: jobId,
         actorUserId,
         estimate
       });
+      timer.mark("starting_configuration");
+      done();
       return scopedSuccessPayload({
         estimate,
         intakeCaseId,
@@ -1322,6 +1450,7 @@ export function createQuoteFlowSetScopeService(deps) {
       actorUserId,
       force: true
     });
+    timer.mark("refresh_scope");
     let estimate = refreshed?.estimate || refreshed;
     estimate = { ...estimate, id: estimate?.id || estimateId };
 
@@ -1330,8 +1459,10 @@ export function createQuoteFlowSetScopeService(deps) {
       takeoffJobId: jobId,
       actorUserId,
       estimate,
-      takeoffResult
+      takeoffResult,
+      takeoffCache
     });
+    timer.mark("persist_physical_facts");
 
     if (displayName) {
       estimate = await applyEstimateDisplayName({
@@ -1342,6 +1473,7 @@ export function createQuoteFlowSetScopeService(deps) {
         estimate
       });
     }
+    timer.mark("display_name");
 
     estimate = await applyConfirmedSelectionsOntoEstimate({
       organizationId,
@@ -1349,6 +1481,8 @@ export function createQuoteFlowSetScopeService(deps) {
       actorUserId,
       estimate
     });
+    timer.mark("starting_configuration");
+    done();
 
     return scopedSuccessPayload({
       estimate,
@@ -1379,7 +1513,7 @@ export function createQuoteFlowSetScopeService(deps) {
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
     const displayName = requireMeaningfulQuoteName(projectName || estimateName);
 
-    const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
+    const caseRow = await resolveIntakeCaseForTakeoffJob(organizationId, jobId, actorUserId);
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
     const intakeCaseId = String(caseRow.id);
 

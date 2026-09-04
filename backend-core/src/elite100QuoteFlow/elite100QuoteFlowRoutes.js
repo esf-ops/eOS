@@ -30,6 +30,10 @@ import { createQuoteFlowDigitalEstimateService } from "./quoteFlowDigitalEstimat
 import { createQuoteFlowActivityService } from "./quoteFlowActivity.mjs";
 import { createQuoteFlowAcceptedReportService } from "./quoteFlowAcceptedReport.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
+import {
+  attachRequestTimingHeader,
+  createRequestStageTimer
+} from "../lib/requestStageTimer.mjs";
 import { createStudioSecurePlanViewerService } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
 import { normalizeStartTakeoffAttachmentKeys } from "./quoteFlowTakeoffPacket.mjs";
 import { resolveStudioLifecycleRepositoryForRoutes } from "../elite100EstimateStudio/studioLifecycleRepositoryFactory.mjs";
@@ -1036,8 +1040,13 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     setScopeJsonParser,
     async (req, res) => {
       res.set("Cache-Control", "no-store");
+      const wantPerf =
+        String(req.query?.perf ?? "") === "1" ||
+        String(process.env.ELITEOS_REQUEST_TIMING || "") === "1";
+      const timer = createRequestStageTimer("POST set-scope", { enabled: wantPerf });
       try {
         const organizationId = await orgIdFor(req);
+        timer.mark("auth_org");
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const result = await quoteFlowSetScopeService.setScope({
           organizationId,
@@ -1047,7 +1056,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           takeoffResult: body.takeoffResult || null,
           reviewState: body.reviewState || null,
           projectName: body.projectName != null ? String(body.projectName) : null,
-          estimateName: body.estimateName != null ? String(body.estimateName) : null
+          estimateName: body.estimateName != null ? String(body.estimateName) : null,
+          _timing: timer
         });
         console.info(
           "[elite100-quote-flow][audit]",
@@ -1061,8 +1071,10 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
             at: new Date().toISOString()
           })
         );
+        attachRequestTimingHeader(res, timer.finish());
         res.json(result);
       } catch (e) {
+        timer.finish();
         console.error("[elite100-quote-flow] set-scope failed", e?.code || e?.message);
         sendSafeError(res, e, "Unable to set scope from takeoff.");
       }
