@@ -4899,5 +4899,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Save-ack frontend transaction, geometry remappers, Starting Configuration / AD product rules, pricing. |
 | **Deferred** | Cross-request takeoff DTO cache; stripping unused response fields (needs field-usage audit); skipping freeze/approve when already approved after save-ack; indexing `quote_intake_takeoff_links(takeoff_job_id)` (seq scan is fine at current org scale). |
 
+### 365. Set Scope request-scoped takeoff facts reuse (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Within a single Set Scope request, `freezeReviewedMeasurements` / `approveAndBuildEstimate` may return `setScopeFacts` (job id, approved reviewStatus, resultId, normalized takeoff, computed/validation, reviewState). `getOrCreateForCase` → `refreshTakeoffGate` **reuses** those facts when present instead of reloading workspace + latest. Remappers continue to use the request-scoped takeoff cache. Does **not** skip freeze/approve semantics, validation, or remappers. No cross-request cache. Optional `ELITEOS_REQUEST_TIMING=1` stage logs remain for measurement. |
+| **Why** | Production Set Scope stayed ~8–10s after Phase 2; dominant duplicate work was freeze loading job/latest then refreshTakeoffGate loading the same facts again. |
+| **Impacted** | `quoteFlowSetScope.mjs`, `studioEstimateService.mjs`, `takeoffWorkspaceService.mjs` (`approveAndBuildEstimate` marks + `setScopeFacts`). |
+| **Protected / unchanged** | Save-ack frontend transaction, geometry/backsplash/open-edge math, Starting Configuration rules, pricing, auth. |
+
 ---
 
