@@ -137,8 +137,8 @@ assert.doesNotMatch(page, /Customer acceptance|Mark sold/i);
 
 const pricingPanel = readFileSync(join(appRoot, "src/estimates/OfficialPricingPanel.tsx"), "utf8");
 assert.match(pricingPanel, /data-testid="qf-official-pricing-panel"/);
-assert.match(pricingPanel, /Configure pricing for the official scope/);
-assert.match(pricingPanel, /does not rerun AI Takeoff/);
+assert.match(pricingPanel, /Pricing &amp; Selections|Starting Configuration/);
+assert.match(pricingPanel, /qf-pricing-starting-selections|qf-pricing-color-name/);
 assert.match(pricingPanel, /Internal pricing only/);
 assert.match(pricingPanel, /Save pricing draft/);
 assert.match(pricingPanel, /Calculate pricing/);

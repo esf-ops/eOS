@@ -64,10 +64,13 @@ assert.match(queue, /Remove from queue/);
 assert.match(api, /queue\/\$\{encodeURIComponent\(queueItemKey\)\}\/archive/);
 assert.match(api, /queue\/\$\{encodeURIComponent\(queueItemKey\)\}\/restore/);
 assert.match(queue, /projectName:\s*name|estimateName:\s*name/);
-assert.match(queue, /takeoffResult:\s*payload\?\.takeoffResult \|\| undefined/);
-assert.match(queue, /backend uses latest|saved reviewed takeoff/);
-assert.doesNotMatch(queue, /if \(!payload\?\.takeoffResult\)/);
+assert.match(queue, /takeoffResult:\s*payload\.takeoffResult/);
+assert.match(queue, /requestSaveDraftFromIframe|needsPersist/);
+assert.match(queue, /if \(!payload\?\.takeoffResult\)/);
+assert.doesNotMatch(queue, /payload\?\.takeoffResult \|\| undefined/);
+assert.doesNotMatch(queue, /If postMessage times out \/ fails, still call Set Scope/);
 assert.match(queue, /rowAction === "review_takeoff"/);
+
 assert.match(queue, /rowAction === "create_manual_scope"/);
 assert.match(queue, /Needs decision/);
 assert.match(api, /projectName/);

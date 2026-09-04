@@ -16,6 +16,7 @@ import { stampStudioOpeningsOntoPiece } from "./quoteFlowCutouts.mjs";
 import {
   buildStudioV2EditablePricing,
   normalizeStudioV2PricingPatch,
+  normalizeStudioV2MaterialGroup,
   STUDIO_V2_MATERIAL_GROUPS,
   STUDIO_V2_PRICING_BASES
 } from "../elite100EstimateStudio/studioV2Pricing.mjs";
@@ -312,6 +313,87 @@ export function createQuoteFlowPricingService(deps = {}) {
       quoteFlowPricingEdited: true
     };
 
+    // Starting Configuration / Pricing & Selections fields (estimator-owned).
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "colorName")) {
+      nextScope.colorName = String(pricingPayload.colorName || "").trim();
+    }
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "colorTbd")) {
+      nextScope.colorTbd = pricingPayload.colorTbd === true;
+      if (nextScope.colorTbd) nextScope.colorName = "";
+    }
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "edgeProfileToken")) {
+      const token = String(pricingPayload.edgeProfileToken || "").trim();
+      nextScope.edgeProfileToken = token || null;
+      if (token && Array.isArray(nextScope.rooms)) {
+        nextScope.rooms = nextScope.rooms.map((room) => {
+          if (!room || typeof room !== "object") return room;
+          const pieces = Array.isArray(room.pieces)
+            ? room.pieces.map((p) =>
+                p && typeof p === "object"
+                  ? { ...p, edgeProfileToken: p.edgeProfileToken || token }
+                  : p
+              )
+            : [];
+          return { ...room, pieces };
+        });
+      }
+    }
+    if (
+      pricingPayload.addOns &&
+      typeof pricingPayload.addOns === "object" &&
+      Object.prototype.hasOwnProperty.call(pricingPayload.addOns, "tearout")
+    ) {
+      const prior =
+        nextScope.addOns && typeof nextScope.addOns === "object" ? { ...nextScope.addOns } : {};
+      const tear = Number(pricingPayload.addOns.tearout);
+      if (Number.isFinite(tear) && tear > 0) prior.tearout = tear;
+      else delete prior.tearout;
+      nextScope.addOns = prior;
+    }
+    if (Array.isArray(pricingPayload.roomSelections)) {
+      const byId = new Map(
+        pricingPayload.roomSelections
+          .filter((r) => r && typeof r === "object" && String(r.roomId || "").trim())
+          .map((r) => [String(r.roomId).trim(), r])
+      );
+      if (byId.size && Array.isArray(nextScope.rooms)) {
+        nextScope.rooms = nextScope.rooms.map((room) => {
+          if (!room || typeof room !== "object") return room;
+          const patch = byId.get(String(room.id || "").trim());
+          if (!patch) return room;
+          /** @type {Record<string, unknown>} */
+          const next = { ...room };
+          if (Object.prototype.hasOwnProperty.call(patch, "materialGroupOverride")) {
+            const g = normalizeStudioV2MaterialGroup(patch.materialGroupOverride);
+            next.materialGroupOverride = g || null;
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, "colorNameOverride")) {
+            next.colorNameOverride = String(patch.colorNameOverride || "").trim() || null;
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, "colorTbd")) {
+            if (patch.colorTbd === true) {
+              next.colorNameOverride = null;
+            }
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, "edgeProfileToken")) {
+            const token = String(patch.edgeProfileToken || "").trim();
+            if (token && Array.isArray(next.pieces)) {
+              next.pieces = next.pieces.map((p) =>
+                p && typeof p === "object" ? { ...p, edgeProfileToken: token } : p
+              );
+            }
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, "includeBacksplash")) {
+            next.includeBacksplash = patch.includeBacksplash === true;
+            if (!next.includeBacksplash) {
+              next.backsplashSqft = 0;
+            }
+          }
+          return next;
+        });
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(pricingPayload, "customLineItems")) {
       const applied = applyQuoteFlowCustomLineItemsToScope(
         nextScope,
@@ -341,6 +423,48 @@ export function createQuoteFlowPricingService(deps = {}) {
   function presentPricingDraft(row, editablePricing) {
     const customLineItems = readQuoteFlowCustomLineItems(row?.scope || {});
     const customLineSummary = summarizeQuoteFlowCustomLineItems(customLineItems);
+    const scope = row?.scope && typeof row.scope === "object" ? row.scope : {};
+    const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+    const startingSelections = {
+      colorName: scope.colorName || "",
+      colorTbd: scope.colorTbd === true,
+      edgeProfileToken: scope.edgeProfileToken || null,
+      tearout: Number(scope.addOns?.tearout) > 0,
+      seededFromStartingConfiguration: Boolean(scope.quoteFlowStartingConfiguration),
+      rooms: rooms.map((room) => {
+        const pieces = Array.isArray(room?.pieces) ? room.pieces : [];
+        const edgeTokens = [
+          ...new Set(
+            pieces
+              .map((p) => String(p?.edgeProfileToken || "").trim())
+              .filter(Boolean)
+          )
+        ];
+        return {
+          roomId: String(room?.id || ""),
+          roomName: String(room?.name || ""),
+          materialGroupOverride: room?.materialGroupOverride || null,
+          colorNameOverride: room?.colorNameOverride || null,
+          edgeProfileToken: edgeTokens[0] || scope.edgeProfileToken || null,
+          includeBacksplash: room?.includeBacksplash === true,
+          backsplashSqft: Number(room?.backsplashSqft) || 0,
+          hasSinkCutout: pieces.some(
+            (p) =>
+              Number(p?.kitchenSinkCutouts) > 0 ||
+              Number(p?.vanityBarSinkCutouts) > 0 ||
+              (Array.isArray(p?.cutouts) &&
+                p.cutouts.some((c) => /sink/i.test(String(c?.type || ""))))
+          ),
+          hasWaterfallGeometry: pieces.some(
+            (p) =>
+              (Array.isArray(p?.waterfallPanels) && p.waterfallPanels.length > 0) ||
+              (p?.waterfallSegmentLengthsIn &&
+                typeof p.waterfallSegmentLengthsIn === "object" &&
+                Object.keys(p.waterfallSegmentLengthsIn).length > 0)
+          )
+        };
+      })
+    };
     return {
       customLineItems,
       customLineSummary: {
@@ -354,6 +478,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       edgeStatus: presentQuoteFlowEdgeStatus(row?.scope || {}, {
         openEdgeLf: buildScopeSummary(row).openEdgeLf
       }),
+      startingSelections,
       blockers: buildBlockers(row, editablePricing)
     };
   }
@@ -417,6 +542,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineItems: draft.customLineItems,
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
+      startingSelections: draft.startingSelections,
       lastCalculation,
       staleReason,
       pricingStale: Boolean(staleReason),
@@ -514,6 +640,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineItems: draft.customLineItems,
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
+      startingSelections: draft.startingSelections,
       lastCalculation: presentQuoteFlowPricingResult(updated),
       staleReason: String(updated.staleReason || "").trim() || null,
       pricingStale: true,

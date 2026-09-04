@@ -29,11 +29,14 @@ import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
   isValidTakeoffApprovedMessage,
+  requestSaveDraftFromIframe,
   requestSetScopePayloadFromIframe,
   TAKEOFF_REVIEW_DIRTY,
   TAKEOFF_REVIEW_DRAFT_SAVED,
   QUOTE_FLOW_REQUEST_SAVE_DRAFT,
-  REVIEW_DISCARD_CONFIRM
+  REVIEW_DISCARD_CONFIRM,
+  SET_SCOPE_PAYLOAD_REQUIRED_ERROR,
+  SET_SCOPE_SAVE_REQUIRED_ERROR
 } from "../lib/takeoffPostMessageOrigins.mjs";
 
 type Props = {
@@ -653,21 +656,51 @@ export default function EstimateQueuePage(props: Props) {
     await persistQuoteNameIfNeeded({ quiet: true });
     const saveDraftFirstMsg = "Save draft first, then Set Scope.";
     try {
-      // Prefer live worksheet state from the iframe (dirty edits + openEdgeLf).
-      // If postMessage times out / fails, still call Set Scope — backend uses latest
-      // saved reviewed takeoff (Save Draft) or already-approved measurements.
-      const payload = await requestSetScopePayloadFromIframe(
+      // Set Scope must represent exactly what the estimator sees in Review Takeoff.
+      // Prefer live worksheet payload; when dirty, persist first and refuse on save failure.
+      let payload = await requestSetScopePayloadFromIframe(
         takeoffIframeRef.current,
         selectedJobId,
         { timeoutMs: 8000 }
       );
 
+      if (!payload?.takeoffResult) {
+        setError(SET_SCOPE_PAYLOAD_REQUIRED_ERROR);
+        return;
+      }
+
+      const needsPersist =
+        payload.dirty === true || reviewDirtyRef.current === true;
+
+      if (needsPersist) {
+        const saved = await requestSaveDraftFromIframe(
+          takeoffIframeRef.current,
+          selectedJobId,
+          { timeoutMs: 20000 }
+        );
+        if (!saved?.ok) {
+          setError(saved?.error || SET_SCOPE_SAVE_REQUIRED_ERROR);
+          return;
+        }
+        setReviewDirty(false);
+        // Re-read worksheet after save so Set Scope uses the confirmed editor state.
+        payload = await requestSetScopePayloadFromIframe(
+          takeoffIframeRef.current,
+          selectedJobId,
+          { timeoutMs: 8000 }
+        );
+        if (!payload?.takeoffResult) {
+          setError(SET_SCOPE_PAYLOAD_REQUIRED_ERROR);
+          return;
+        }
+      }
+
       const res = await setQuoteFlowScope(authToken, selectedJobId, {
         confirm: true,
         projectName: name,
         estimateName: name,
-        takeoffResult: payload?.takeoffResult || undefined,
-        reviewState: payload?.reviewState || undefined
+        takeoffResult: payload.takeoffResult,
+        reviewState: payload.reviewState || undefined
       });
       applyScopeSuccess({ ...res, projectName: res.projectName || name });
       await loadList("refresh");

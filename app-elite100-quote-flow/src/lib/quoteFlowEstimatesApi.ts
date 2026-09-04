@@ -238,6 +238,24 @@ export type QuoteFlowPricingPayload = {
   customLineItems?: QuoteFlowCustomLineItem[];
   customLineSummary?: QuoteFlowCustomLineSummary;
   edgeStatus?: QuoteFlowEdgeStatus | null;
+  startingSelections?: {
+    colorName?: string;
+    colorTbd?: boolean;
+    edgeProfileToken?: string | null;
+    tearout?: boolean;
+    seededFromStartingConfiguration?: boolean;
+    rooms?: Array<{
+      roomId?: string;
+      roomName?: string;
+      materialGroupOverride?: string | null;
+      colorNameOverride?: string | null;
+      edgeProfileToken?: string | null;
+      includeBacksplash?: boolean;
+      backsplashSqft?: number;
+      hasSinkCutout?: boolean;
+      hasWaterfallGeometry?: boolean;
+    }>;
+  };
   lastCalculation?: QuoteFlowPricingResult | null;
   blockers?: string[];
   calculationNotes?: string[];

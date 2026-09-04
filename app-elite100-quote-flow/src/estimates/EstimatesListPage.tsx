@@ -58,7 +58,7 @@ const SECTIONS: {
   { key: "scope", label: "Scope", placeholder: "", active: true },
   {
     key: "pricing",
-    label: "Pricing",
+    label: "Pricing & Selections",
     placeholder: "",
     active: true
   },

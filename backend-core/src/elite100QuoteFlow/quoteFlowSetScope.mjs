@@ -12,6 +12,10 @@ import {
   stampOpenEdgeLfOnTakeoffResult,
   syncPieceOpeningsIntoOfficialScopeAddOns
 } from "./quoteFlowOpenEdge.mjs";
+import {
+  applyTakeoffBacksplashToOfficialRooms,
+  applyTakeoffPieceGeometryToOfficialRooms
+} from "./quoteFlowBacksplash.mjs";
 import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs";
 import {
   groupQuoteFlowQueueItems,
@@ -1014,9 +1018,10 @@ export function createQuoteFlowSetScopeService(deps) {
   }
 
   /**
-   * Persist canonical openEdgeLf + sink/fabrication cutouts onto official rooms.
+   * Persist reviewed takeoff physical facts onto official rooms:
+   * piece geometry, backsplash, openEdgeLf, cutouts.
    * Must run even when getOrCreate already seeded usable rooms (afterEnsure path) —
-   * that path previously returned early and left openEdgeLf at 0 / dropped cutouts.
+   * that path previously returned early and left openEdgeLf / backsplash stale.
    */
   async function persistOpenEdgeLfOnEstimate({
     organizationId,
@@ -1034,7 +1039,9 @@ export function createQuoteFlowSetScopeService(deps) {
       takeoffJobId,
       takeoffResult
     );
-    const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
+    const withGeometry = applyTakeoffPieceGeometryToOfficialRooms(priorRooms, edgeSource);
+    const withBacksplash = applyTakeoffBacksplashToOfficialRooms(withGeometry, edgeSource);
+    const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(withBacksplash, edgeSource);
     const withCutouts = applyTakeoffCutoutsToOfficialRooms(edgedRooms, edgeSource);
     const withVanity = withCutouts.map((room) => {
       if (!room || typeof room !== "object") return room;

@@ -4848,5 +4848,25 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `ConsolidatedTakeoffReview.tsx`, optional enrichment UI test, this doc. |
 | **Protected / unchanged** | Quote Name validation, takeoff geometry, pricing, AD soft-link product rules. |
 
+### 360. Set Scope must persist visible Review Takeoff edits (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Set Scope represents exactly what the estimator sees in Review Takeoff. When the worksheet is dirty (or the modal reports unsaved changes), Quote Flow **must** Save Draft successfully before creating/updating official scope. If the live iframe payload cannot be read or save fails, Set Scope **refuses** with a clear error and leaves editor state intact — it must never silently continue from an older persisted draft. Backend afterEnsure remaps piece geometry, backsplash inclusion/SF, open-edge LF, and cutouts from the reviewed takeoff onto official rooms. |
+| **Why** | Production lost backsplash SF and open-edge LF when estimators clicked Set Scope with Unsaved changes; afterEnsure previously remapped open-edge only. |
+| **Impacted** | `EstimateQueuePage` Set Scope, takeoff postMessage save bridge, `quoteFlowSetScope` / `quoteFlowBacksplash`, Official Scope summaries. |
+| **Protected / unchanged** | Pricing rates, takeoff algorithms, Account Directory, Digital Estimate Allowed Choices. |
+
+### 361. Official Estimate Pricing & Selections (Starting Configuration) (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Estimates tab **Pricing** is renamed **Pricing & Selections**. Scope remains physical. Pricing & Selections owns pricing basis/group plus estimator Starting Configuration (color / Color TBD, edge profile, tear-out, room material/color/edge/backsplash overrides) persisted on Studio scope. Edge profile ≠ open-edge LF. Sink cutout ≠ supplied sink product. Seeded Starting Configuration / confirmed customer requests surface as editable defaults for the revision. Does **not** build Allowed Customer Choices. |
+| **Why** | Official Estimate only exposed basis + price group; estimators needed an obvious place for starting commercial selections that later become Digital Estimate “currently includes”. |
+| **Impacted** | `OfficialPricingPanel`, Estimates section tabs, `quoteFlowPricing` patch/get `startingSelections`. |
+| **Protected / unchanged** | Pricing Admin catalogs/rates, Direct vs Wholesale books, Scope physical editor, DE customer portal. |
+
 ---
 

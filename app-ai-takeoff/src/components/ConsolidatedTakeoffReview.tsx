@@ -39,6 +39,7 @@ import { buildLocalReviewTakeoffDraft } from "../lib/localReviewTakeoffFixture.m
 import {
   TAKEOFF_REVIEW_READY,
   TAKEOFF_REVIEW_DRAFT_SAVED,
+  TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
   TAKEOFF_REVIEW_DIRTY,
   TAKEOFF_WATERFALL_CHANGED,
   QUOTE_FLOW_REQUEST_SET_SCOPE,
@@ -943,6 +944,23 @@ export default function ConsolidatedTakeoffReview() {
     if (!dirty) {
       setSaveStatus("saved");
       window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      if (quoteFlowSetScope) {
+        const summary = summarizeTakeoffDraftForReady(draftRef.current);
+        postTakeoffParentMessage(
+          TAKEOFF_REVIEW_DRAFT_SAVED,
+          {
+            revisionNumber:
+              Number(new URLSearchParams(window.location.search).get("revisionNumber")) || 1,
+            mode: "editable",
+            roomCount: summary.roomCount,
+            pieceCount: summary.pieceCount,
+            savedState: "saved",
+            alreadyClean: true,
+            waterfalls: summary.waterfalls
+          },
+          { takeoffJobId }
+        );
+      }
       return;
     }
     saveInFlightRef.current = true;
@@ -981,6 +999,15 @@ export default function ConsolidatedTakeoffReview() {
       if (!adopted.resultId) {
         setSaveStatus("error");
         setSaveError("The Takeoff draft could not be saved. Your edits remain on this screen.");
+        if (quoteFlowSetScope) {
+          postTakeoffParentMessage(
+            TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+            {
+              error: "The Takeoff draft could not be saved. Your edits remain on this screen."
+            },
+            { takeoffJobId }
+          );
+        }
         return;
       }
       latestResultIdRef.current = adopted.resultId;
@@ -1030,9 +1057,26 @@ export default function ConsolidatedTakeoffReview() {
         setSaveError("The Takeoff draft changed while you were editing.");
         setDisplayStatus("Needs estimator review");
         setJobReviewStatus("needs_review");
+        if (quoteFlowSetScope) {
+          postTakeoffParentMessage(
+            TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+            {
+              error: "The Takeoff draft changed while you were editing. Keep your edits and retry Set Scope."
+            },
+            { takeoffJobId }
+          );
+        }
       } else {
+        const msg = e instanceof LabApiError ? e.message : "Save failed";
         setSaveStatus("error");
-        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        setSaveError(msg);
+        if (quoteFlowSetScope) {
+          postTakeoffParentMessage(
+            TAKEOFF_REVIEW_DRAFT_SAVE_FAILED,
+            { error: msg },
+            { takeoffJobId }
+          );
+        }
       }
     } finally {
       saveInFlightRef.current = false;

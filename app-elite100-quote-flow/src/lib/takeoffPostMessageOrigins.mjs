@@ -11,10 +11,17 @@ export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payloa
 export const TAKEOFF_REVIEW_DIRTY = "eliteos-takeoff-review-dirty";
 /** iframe → parent: draft saved successfully. */
 export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
+/** iframe → parent: Save Draft failed — Set Scope must not continue. */
+export const TAKEOFF_REVIEW_DRAFT_SAVE_FAILED = "TAKEOFF_REVIEW_DRAFT_SAVE_FAILED";
 /** Parent → iframe: trigger Save draft from Quote Flow sticky actions. */
 export const QUOTE_FLOW_REQUEST_SAVE_DRAFT = "eliteos-quote-flow-request-save-draft";
 /** Confirm copy when closing a dirty Review Takeoff workspace. */
 export const REVIEW_DISCARD_CONFIRM = "Discard unsaved review changes?";
+/** Set Scope when live worksheet could not be read or saved. */
+export const SET_SCOPE_SAVE_REQUIRED_ERROR =
+  "Could not save Review Takeoff edits. Fix the save error, then Set Scope again. Visible edits were not discarded.";
+export const SET_SCOPE_PAYLOAD_REQUIRED_ERROR =
+  "Could not read the current Review Takeoff worksheet. Keep Review Takeoff open and try Set Scope again.";
 
 export const LOCAL_TAKEOFF_ORIGINS = Object.freeze([
   "http://localhost:5186",
@@ -126,6 +133,57 @@ export function requestSetScopePayloadFromIframe(iframe, takeoffJobId, opts = {}
       );
     } catch {
       finish(null);
+    }
+  });
+}
+
+/**
+ * Ask the embedded Review Takeoff iframe to Save Draft and wait for confirmation.
+ * Resolves { ok: true } | { ok: false, error }.
+ */
+export function requestSaveDraftFromIframe(iframe, takeoffJobId, opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 20000;
+  const jobId = String(takeoffJobId || "").trim();
+  if (!iframe?.contentWindow || !jobId) {
+    return Promise.resolve({ ok: false, error: SET_SCOPE_PAYLOAD_REQUIRED_ERROR });
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timer);
+      resolve(value);
+    };
+    function onMessage(event) {
+      if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (String(data.takeoffJobId || "") !== jobId) return;
+      if (data.type === TAKEOFF_REVIEW_DRAFT_SAVED) {
+        finish({ ok: true });
+        return;
+      }
+      if (data.type === TAKEOFF_REVIEW_DRAFT_SAVE_FAILED) {
+        finish({
+          ok: false,
+          error: String(data.error || SET_SCOPE_SAVE_REQUIRED_ERROR)
+        });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    const timer = window.setTimeout(
+      () => finish({ ok: false, error: SET_SCOPE_SAVE_REQUIRED_ERROR }),
+      timeoutMs
+    );
+    try {
+      iframe.contentWindow.postMessage(
+        { type: QUOTE_FLOW_REQUEST_SAVE_DRAFT, takeoffJobId: jobId, forSetScope: true },
+        "*"
+      );
+    } catch {
+      finish({ ok: false, error: SET_SCOPE_SAVE_REQUIRED_ERROR });
     }
   });
 }

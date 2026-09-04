@@ -5,6 +5,7 @@
 
 export const TAKEOFF_REVIEW_READY = "TAKEOFF_REVIEW_READY";
 export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
+export const TAKEOFF_REVIEW_DRAFT_SAVE_FAILED = "TAKEOFF_REVIEW_DRAFT_SAVE_FAILED";
 export const TAKEOFF_WATERFALL_CHANGED = "TAKEOFF_WATERFALL_CHANGED";
 /** iframe → Quote Flow parent: worksheet dirty flag for modal close guards. */
 export const TAKEOFF_REVIEW_DIRTY = "eliteos-takeoff-review-dirty";

@@ -1910,7 +1910,8 @@ body {
 }
 
 .qf-pricing__controls,
-.qf-pricing__result {
+.qf-pricing__result,
+.qf-pricing__selections {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -1920,9 +1921,31 @@ body {
 }
 
 .qf-pricing__controls h3,
-.qf-pricing__result h3 {
+.qf-pricing__result h3,
+.qf-pricing__selections h3 {
   margin: 0;
   font-size: 0.95rem;
+}
+
+.qf-pricing__room-selections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.qf-pricing__room-selections > li {
+  border: 1px solid var(--eos-line, #d8dee8);
+  border-radius: var(--r-sm, 6px);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.qf-pricing__room-selections h4 {
+  margin: 0;
+  font-size: 0.9rem;
 }
 
 .qf-pricing__field {

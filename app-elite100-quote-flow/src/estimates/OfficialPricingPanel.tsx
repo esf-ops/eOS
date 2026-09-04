@@ -44,6 +44,50 @@ const CATEGORY_OPTIONS = [
   { value: "other", label: "Other" }
 ] as const;
 
+const EDGE_OPTIONS = [
+  { token: "edge_eased", label: "Eased" },
+  { token: "edge_large_eased", label: "Large Eased" },
+  { token: "edge_full_bullnose", label: "Full Bullnose" },
+  { token: "edge_large_ogee", label: "Large Ogee" },
+  { token: "edge_bevel", label: "Bevel" },
+  { token: "edge_small_ogee", label: "Small Ogee" },
+  { token: "edge_crescent", label: "Crescent" },
+  { token: "edge_knife", label: "Knife" }
+] as const;
+
+type StartingRoomSelection = {
+  roomId: string;
+  roomName: string;
+  materialGroupOverride: string;
+  colorNameOverride: string;
+  colorTbd: boolean;
+  edgeProfileToken: string;
+  includeBacksplash: boolean;
+  backsplashSqft: number;
+  hasSinkCutout: boolean;
+  hasWaterfallGeometry: boolean;
+};
+
+type StartingSelectionsState = {
+  colorName: string;
+  colorTbd: boolean;
+  edgeProfileToken: string;
+  tearout: boolean;
+  seededFromStartingConfiguration: boolean;
+  rooms: StartingRoomSelection[];
+};
+
+function emptyStartingSelections(): StartingSelectionsState {
+  return {
+    colorName: "",
+    colorTbd: false,
+    edgeProfileToken: "",
+    tearout: false,
+    seededFromStartingConfiguration: false,
+    rooms: []
+  };
+}
+
 type Props = {
   authToken: string;
   estimateId: string;
@@ -157,7 +201,8 @@ function summarizeLocal(lines: QuoteFlowCustomLineItem[]): QuoteFlowCustomLineSu
 
 function pricingFingerprint(
   p: QuoteFlowEditablePricing,
-  lines: QuoteFlowCustomLineItem[]
+  lines: QuoteFlowCustomLineItem[],
+  selections: StartingSelectionsState
 ): string {
   try {
     return JSON.stringify({
@@ -165,6 +210,20 @@ function pricingFingerprint(
       materialGroup: p.materialGroup,
       estimateWideAdjustment: p.estimateWideAdjustment,
       internalMarkupPercent: p.internalMarkupPercent,
+      selections: {
+        colorName: selections.colorName,
+        colorTbd: selections.colorTbd,
+        edgeProfileToken: selections.edgeProfileToken,
+        tearout: selections.tearout,
+        rooms: selections.rooms.map((r) => ({
+          roomId: r.roomId,
+          materialGroupOverride: r.materialGroupOverride,
+          colorNameOverride: r.colorNameOverride,
+          colorTbd: r.colorTbd,
+          edgeProfileToken: r.edgeProfileToken,
+          includeBacksplash: r.includeBacksplash
+        }))
+      },
       customLineItems: lines.map((l) => ({
         id: l.id,
         label: l.label,
@@ -355,8 +414,9 @@ export default function OfficialPricingPanel(props: Props) {
   const [scopeChangedSinceCalculation, setScopeChangedSinceCalculation] = useState(false);
   const [edgeStatus, setEdgeStatus] = useState<QuoteFlowEdgeStatus | null>(null);
   const [serverSummary, setServerSummary] = useState<QuoteFlowCustomLineSummary | null>(null);
+  const [selections, setSelections] = useState<StartingSelectionsState>(emptyStartingSelections());
 
-  const dirty = pricingFingerprint(pricing, customLines) !== savedFp;
+  const dirty = pricingFingerprint(pricing, customLines, selections) !== savedFp;
   const localSummary = useMemo(() => summarizeLocal(customLines), [customLines]);
 
   function applyPayload(payload: QuoteFlowPricingPayload) {
@@ -365,9 +425,32 @@ export default function OfficialPricingPanel(props: Props) {
       ...(payload.editablePricing || {})
     };
     const lines = Array.isArray(payload.customLineItems) ? payload.customLineItems : [];
+    const ss = payload.startingSelections || {};
+    const nextSelections: StartingSelectionsState = {
+      colorName: String(ss.colorName || ""),
+      colorTbd: ss.colorTbd === true,
+      edgeProfileToken: String(ss.edgeProfileToken || ""),
+      tearout: ss.tearout === true,
+      seededFromStartingConfiguration: ss.seededFromStartingConfiguration === true,
+      rooms: Array.isArray(ss.rooms)
+        ? ss.rooms.map((r) => ({
+            roomId: String(r.roomId || ""),
+            roomName: String(r.roomName || r.roomId || "Room"),
+            materialGroupOverride: String(r.materialGroupOverride || ""),
+            colorNameOverride: String(r.colorNameOverride || ""),
+            colorTbd: !r.colorNameOverride && Boolean(r.materialGroupOverride),
+            edgeProfileToken: String(r.edgeProfileToken || ""),
+            includeBacksplash: r.includeBacksplash === true,
+            backsplashSqft: Number(r.backsplashSqft) || 0,
+            hasSinkCutout: r.hasSinkCutout === true,
+            hasWaterfallGeometry: r.hasWaterfallGeometry === true
+          }))
+        : []
+    };
     setPricing(next);
     setCustomLines(lines);
-    setSavedFp(pricingFingerprint(next, lines));
+    setSelections(nextSelections);
+    setSavedFp(pricingFingerprint(next, lines, nextSelections));
     setScopeSummary(payload.scopeSummary || null);
     setLastCalculation(payload.lastCalculation || null);
     setBlockers(Array.isArray(payload.blockers) ? payload.blockers : []);
@@ -435,6 +518,18 @@ export default function OfficialPricingPanel(props: Props) {
       ...(pricing.internalMarkupEditable
         ? { internalMarkupPercent: pricing.internalMarkupPercent }
         : {}),
+      colorName: selections.colorTbd ? "" : selections.colorName,
+      colorTbd: selections.colorTbd,
+      edgeProfileToken: selections.edgeProfileToken || null,
+      addOns: { tearout: selections.tearout ? 1 : 0 },
+      roomSelections: selections.rooms.map((r) => ({
+        roomId: r.roomId,
+        materialGroupOverride: r.materialGroupOverride || null,
+        colorNameOverride: r.colorTbd ? "" : r.colorNameOverride,
+        colorTbd: r.colorTbd,
+        edgeProfileToken: r.edgeProfileToken || null,
+        includeBacksplash: r.includeBacksplash
+      })),
       customLineItems: customLines.map((l, i) => ({
         ...l,
         amount: lineAmount(l),
@@ -506,15 +601,17 @@ export default function OfficialPricingPanel(props: Props) {
   return (
     <section className="qf-pricing" data-testid="qf-official-pricing-panel">
       <header className="qf-pricing__header">
-        <h2 data-testid="qf-pricing-title">Pricing</h2>
+        <h2 data-testid="qf-pricing-title">Pricing &amp; Selections</h2>
         <p className="qf-muted" data-testid="qf-pricing-helper">
-          Configure pricing for the official scope. Pricing uses the saved estimate scope and does not rerun AI Takeoff.
+          Pricing basis/group plus Starting Configuration for this official estimate. Physical
+          scope (dimensions, open edge LF, cutouts) stays on the Scope tab.
         </p>
         <p className="qf-pricing__internal" data-testid="qf-pricing-internal-only">
-          Internal pricing only
+          Internal pricing only — Direct/Wholesale rate books; no public/partner markup.
         </p>
         <p className="qf-muted" data-testid="qf-pricing-review-not-active">
-          After pricing, use Review then Digital Estimate to publish a customer link. Acceptance and sold stay later.
+          Starting Configuration is the baseline for a future Digital Estimate. Allowed Customer
+          Choices are not built yet. After pricing, use Review then Digital Estimate to publish.
         </p>
       </header>
 
@@ -701,6 +798,205 @@ export default function OfficialPricingPanel(props: Props) {
             </>
           ) : null}
         </div>
+      </div>
+
+      <div className="qf-pricing__selections" data-testid="qf-pricing-starting-selections">
+        <h3>Starting Configuration</h3>
+        <p className="qf-muted">
+          What the initial commercial estimate includes. Open/exposed edge LF stays on Scope —
+          edge profile here is the selected treatment/product.
+        </p>
+        {selections.seededFromStartingConfiguration ? (
+          <p className="qf-notice" data-testid="qf-pricing-seeded-banner">
+            Seeded from Starting Configuration / confirmed customer requests — editable for this
+            revision.
+          </p>
+        ) : null}
+        <div className="qf-pricing__controls">
+          <label className="qf-pricing__field">
+            Exact color
+            <input
+              type="text"
+              value={selections.colorTbd ? "" : selections.colorName}
+              disabled={busy || selections.colorTbd}
+              placeholder="Calacatta Fioressa"
+              data-testid="qf-pricing-color-name"
+              onChange={(e) => {
+                setSelections({ ...selections, colorName: e.target.value });
+                setNotice(null);
+              }}
+            />
+          </label>
+          <label className="qf-pricing__check">
+            <input
+              type="checkbox"
+              checked={selections.colorTbd}
+              disabled={busy}
+              data-testid="qf-pricing-color-tbd"
+              onChange={(e) => {
+                setSelections({
+                  ...selections,
+                  colorTbd: e.target.checked,
+                  colorName: e.target.checked ? "" : selections.colorName
+                });
+                setNotice(null);
+              }}
+            />
+            Color TBD
+          </label>
+          <label className="qf-pricing__field">
+            Edge profile
+            <select
+              value={selections.edgeProfileToken}
+              disabled={busy}
+              data-testid="qf-pricing-edge-profile-token"
+              onChange={(e) => {
+                setSelections({ ...selections, edgeProfileToken: e.target.value });
+                setNotice(null);
+              }}
+            >
+              <option value="">—</option>
+              {EDGE_OPTIONS.map((o) => (
+                <option key={o.token} value={o.token}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="qf-pricing__check">
+            <input
+              type="checkbox"
+              checked={selections.tearout}
+              disabled={busy}
+              data-testid="qf-pricing-tearout"
+              onChange={(e) => {
+                setSelections({ ...selections, tearout: e.target.checked });
+                setNotice(null);
+              }}
+            />
+            Include tear-out
+          </label>
+        </div>
+        {selections.rooms.length > 0 ? (
+          <ul className="qf-pricing__room-selections" data-testid="qf-pricing-room-selections">
+            {selections.rooms.map((room) => (
+              <li key={room.roomId} data-testid="qf-pricing-room-selection-row">
+                <h4>{room.roomName || room.roomId}</h4>
+                <div className="qf-pricing__controls">
+                  <label className="qf-pricing__field">
+                    Material group override
+                    <select
+                      value={room.materialGroupOverride}
+                      disabled={busy}
+                      data-testid="qf-pricing-room-material-group"
+                      onChange={(e) => {
+                        setSelections({
+                          ...selections,
+                          rooms: selections.rooms.map((r) =>
+                            r.roomId === room.roomId
+                              ? { ...r, materialGroupOverride: e.target.value }
+                              : r
+                          )
+                        });
+                        setNotice(null);
+                      }}
+                    >
+                      <option value="">Inherit estimate default</option>
+                      {GROUP_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="qf-pricing__field">
+                    Color override
+                    <input
+                      type="text"
+                      value={room.colorTbd ? "" : room.colorNameOverride}
+                      disabled={busy || room.colorTbd}
+                      data-testid="qf-pricing-room-color"
+                      onChange={(e) => {
+                        setSelections({
+                          ...selections,
+                          rooms: selections.rooms.map((r) =>
+                            r.roomId === room.roomId
+                              ? { ...r, colorNameOverride: e.target.value }
+                              : r
+                          )
+                        });
+                        setNotice(null);
+                      }}
+                    />
+                  </label>
+                  <label className="qf-pricing__field">
+                    Room edge profile
+                    <select
+                      value={room.edgeProfileToken}
+                      disabled={busy}
+                      data-testid="qf-pricing-room-edge"
+                      onChange={(e) => {
+                        setSelections({
+                          ...selections,
+                          rooms: selections.rooms.map((r) =>
+                            r.roomId === room.roomId
+                              ? { ...r, edgeProfileToken: e.target.value }
+                              : r
+                          )
+                        });
+                        setNotice(null);
+                      }}
+                    >
+                      <option value="">Inherit estimate default</option>
+                      {EDGE_OPTIONS.map((o) => (
+                        <option key={o.token} value={o.token}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="qf-pricing__check">
+                    <input
+                      type="checkbox"
+                      checked={room.includeBacksplash}
+                      disabled={busy}
+                      data-testid="qf-pricing-room-backsplash"
+                      onChange={(e) => {
+                        setSelections({
+                          ...selections,
+                          rooms: selections.rooms.map((r) =>
+                            r.roomId === room.roomId
+                              ? { ...r, includeBacksplash: e.target.checked }
+                              : r
+                          )
+                        });
+                        setNotice(null);
+                      }}
+                    />
+                    Include backsplash
+                    {room.backsplashSqft > 0
+                      ? ` (${room.backsplashSqft.toFixed(1)} SF from Scope)`
+                      : ""}
+                  </label>
+                  {room.hasSinkCutout ? (
+                    <p className="qf-muted" data-testid="qf-pricing-room-sink-hint">
+                      Sink cutout present on Scope — assign a supplied sink product via custom
+                      lines or add-ons when needed (cutout ≠ supplied sink).
+                    </p>
+                  ) : null}
+                  {room.hasWaterfallGeometry ? (
+                    <p className="qf-muted" data-testid="qf-pricing-room-waterfall-hint">
+                      Waterfall panel geometry exists on Scope — commercial waterfall selection
+                      stays tied to that physical geometry.
+                    </p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="qf-muted">No rooms on official scope yet.</p>
+        )}
       </div>
 
       <div className="qf-pricing__custom-lines" data-testid="qf-pricing-custom-lines">
