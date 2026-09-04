@@ -4838,5 +4838,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowSetScope` AD link update/get, takeoff workspace DTO readers, ConsolidatedTakeoffReview AD post handler, legacy hydration tests, this doc. |
 | **Protected / unchanged** | Quote Name validation, takeoff dimensions, pricing, AD soft-link product semantics, Starting Configuration semantics. |
 
+### 359. Review Takeoff blank body — hooks after authChecked (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | The Account Directory soft-link `useEffect` must be registered **before** the `if (!authChecked) return Loading` gate. Calling a hook after that early return violated Rules of Hooks: after `getSession` flipped `authChecked`, React added a hook and crashed, leaving an empty iframe body while Quote Flow’s modal header still showed Quote Name. Optional enrichment failures (AD, requested selections, Starting Configuration) use local `optionalEnrichmentError` / panel state and must never call global `setLoadError`. |
+| **Why** | Production Review Takeoff stayed blank after the AD refresh 5xx fix because the true failure was a React render crash, not only the AD API. |
+| **Impacted** | `ConsolidatedTakeoffReview.tsx`, optional enrichment UI test, this doc. |
+| **Protected / unchanged** | Quote Name validation, takeoff geometry, pricing, AD soft-link product rules. |
+
 ---
 

@@ -303,6 +303,7 @@ export default function ConsolidatedTakeoffReview() {
   const [accountDirectoryLink, setAccountDirectoryLink] =
     useState<AccountDirectoryLinkState | null>(null);
   const [adLinkBusy, setAdLinkBusy] = useState(false);
+  const [optionalEnrichmentError, setOptionalEnrichmentError] = useState<string | null>(null);
   const adSuggestTriedRef = useRef<string | null>(null);
   const correctionEventsRef = useRef<Array<Record<string, unknown>>>([]);
 
@@ -1664,6 +1665,63 @@ export default function ConsolidatedTakeoffReview() {
     urlWorkspace.mode
   ]);
 
+  const isReadonly =
+    urlWorkspace.mode === "readonly" ||
+    (urlWorkspace.mode === "auto" &&
+      (jobReviewStatus === "approved" || approveStatus === "approved"));
+
+  const postAccountDirectoryLink = useCallback(
+    async (body: Record<string, unknown>) => {
+      if (!authToken || !takeoffJobId || isReadonly) return;
+      setAdLinkBusy(true);
+      try {
+        const res = (await labApiPost(
+          `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/account-directory-link`,
+          authToken,
+          body
+        )) as { accountDirectoryLink?: AccountDirectoryLinkState };
+        if (res?.accountDirectoryLink) setAccountDirectoryLink(res.accountDirectoryLink);
+      } catch {
+        // Account Directory is optional — never blank Review Takeoff / set loadError.
+        setAccountDirectoryLink((prev) => ({
+          ...(prev || { status: "unlinked" }),
+          status: prev?.status === "confirmed" ? "confirmed" : "unlinked",
+          lookupUnavailable: true
+        }));
+      } finally {
+        setAdLinkBusy(false);
+      }
+    },
+    [authToken, takeoffJobId, isReadonly]
+  );
+
+  // Best-effort AD suggestions once per job — never blocks Review Takeoff.
+  // Must stay above authChecked / authToken early returns (Rules of Hooks).
+  useEffect(() => {
+    if (!quoteFlowSetScope || !authToken || !takeoffJobId || isReadonly || localReview) return;
+    if (adSuggestTriedRef.current === takeoffJobId) return;
+    const status = accountDirectoryLink?.status || "unlinked";
+    if (status === "confirmed") {
+      adSuggestTriedRef.current = takeoffJobId;
+      return;
+    }
+    if ((accountDirectoryLink?.suggestions?.length || 0) > 0) {
+      adSuggestTriedRef.current = takeoffJobId;
+      return;
+    }
+    adSuggestTriedRef.current = takeoffJobId;
+    void postAccountDirectoryLink({ action: "refresh_suggestions" });
+  }, [
+    quoteFlowSetScope,
+    authToken,
+    takeoffJobId,
+    isReadonly,
+    localReview,
+    accountDirectoryLink?.status,
+    accountDirectoryLink?.suggestions?.length,
+    postAccountDirectoryLink
+  ]);
+
   const signIn = async (e: React.FormEvent) => {
     e.preventDefault();
     const supabase = getSupabase();
@@ -1700,8 +1758,11 @@ export default function ConsolidatedTakeoffReview() {
       if (res?.startingConfiguration) {
         setStartingConfiguration(res.startingConfiguration);
       }
+      setOptionalEnrichmentError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Unable to update selection");
+      setOptionalEnrichmentError(
+        e instanceof Error ? e.message : "Unable to update customer-requested selection"
+      );
     } finally {
       setSelectionBusyId(null);
     }
@@ -1720,8 +1781,11 @@ export default function ConsolidatedTakeoffReview() {
         { patch }
       )) as { startingConfiguration?: StartingConfiguration };
       if (res?.startingConfiguration) setStartingConfiguration(res.startingConfiguration);
+      setOptionalEnrichmentError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Unable to save starting configuration");
+      setOptionalEnrichmentError(
+        e instanceof Error ? e.message : "Unable to save starting configuration"
+      );
     } finally {
       setStartingBusy(false);
     }
@@ -1737,57 +1801,15 @@ export default function ConsolidatedTakeoffReview() {
         { reseedFromConfirmed: true }
       )) as { startingConfiguration?: StartingConfiguration };
       if (res?.startingConfiguration) setStartingConfiguration(res.startingConfiguration);
+      setOptionalEnrichmentError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Unable to reseed starting configuration");
+      setOptionalEnrichmentError(
+        e instanceof Error ? e.message : "Unable to reseed starting configuration"
+      );
     } finally {
       setStartingBusy(false);
     }
   }
-
-  async function postAccountDirectoryLink(body: Record<string, unknown>) {
-    if (!authToken || !takeoffJobId || isReadonly) return;
-    setAdLinkBusy(true);
-    try {
-      const res = (await labApiPost(
-        `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/account-directory-link`,
-        authToken,
-        body
-      )) as { accountDirectoryLink?: AccountDirectoryLinkState };
-      if (res?.accountDirectoryLink) setAccountDirectoryLink(res.accountDirectoryLink);
-    } catch {
-      // Account Directory is optional — never blank Review Takeoff / set loadError.
-      setAccountDirectoryLink((prev) => ({
-        ...(prev || { status: "unlinked" }),
-        status: prev?.status === "confirmed" ? "confirmed" : "unlinked",
-        lookupUnavailable: true
-      }));
-    } finally {
-      setAdLinkBusy(false);
-    }
-  }
-
-  const isReadonly =
-    urlWorkspace.mode === "readonly" ||
-    (urlWorkspace.mode === "auto" &&
-      (jobReviewStatus === "approved" || approveStatus === "approved"));
-
-  // Best-effort AD suggestions once per job — never blocks Review Takeoff.
-  useEffect(() => {
-    if (!quoteFlowSetScope || !authToken || !takeoffJobId || isReadonly || localReview) return;
-    if (adSuggestTriedRef.current === takeoffJobId) return;
-    const status = accountDirectoryLink?.status || "unlinked";
-    if (status === "confirmed") {
-      adSuggestTriedRef.current = takeoffJobId;
-      return;
-    }
-    if ((accountDirectoryLink?.suggestions?.length || 0) > 0) {
-      adSuggestTriedRef.current = takeoffJobId;
-      return;
-    }
-    adSuggestTriedRef.current = takeoffJobId;
-    void postAccountDirectoryLink({ action: "refresh_suggestions" });
-    // One-shot per job after workspace hydrate; deliberate deps.
-  }, [quoteFlowSetScope, authToken, takeoffJobId, isReadonly, localReview, accountDirectoryLink?.status]);
 
   if (!authToken) {
     return (
@@ -2101,6 +2123,13 @@ export default function ConsolidatedTakeoffReview() {
               Mark the countertop runs that meet a wall or cabinet. Islands and open edges
               should be left off.
             </p>
+
+            {optionalEnrichmentError ? (
+              <p className="ctr-muted" role="status" data-testid="ctr-optional-enrichment-error">
+                Optional enrichment unavailable: {optionalEnrichmentError}. Core takeoff remains
+                editable.
+              </p>
+            ) : null}
 
             {quoteFlowSetScope && requestedSelections.length > 0 ? (
               <CustomerRequestedSelectionsPanel
