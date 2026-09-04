@@ -4828,5 +4828,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Takeoff geometry, appliance segmentation, Customer Requested, Starting Configuration, pricing, Digital Estimate UI, Graph, Moraware, QB writeback, quote numbers. |
 | **Deferred** | Controlled Create Account from Quote Flow; original-vs-forwarder Graph From split beyond body/label heuristics; Quote Library UUID-first grouping redesign; salesperson ownership columns on AD. |
 
+### 358. Quote Flow AD soft-link must not 5xx legacy Review Takeoff (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | `POST …/account-directory-link` with `refresh_suggestions` is best-effort only: never throw on Account Directory lookup failure or metadata write failure. Legacy `quote_takeoff_jobs` without `metadata.quoteFlow` (or without nested AD/starting/selections) must hydrate Review Takeoff with null optional fields. Frontend AD errors must not call `setLoadError` (do not blank or block the worksheet). Workspace DTO readers reject non-object/array nested shapes. |
+| **Why** | Production regression: auto suggestion refresh on Review open could hard-fail and surface as takeoff load failure for filename-only historical jobs (e.g. image001) that lack newer nested quoteFlow metadata. |
+| **Impacted** | `quoteFlowSetScope` AD link update/get, takeoff workspace DTO readers, ConsolidatedTakeoffReview AD post handler, legacy hydration tests, this doc. |
+| **Protected / unchanged** | Quote Name validation, takeoff dimensions, pricing, AD soft-link product semantics, Starting Configuration semantics. |
+
 ---
 

@@ -752,26 +752,48 @@ export async function getTakeoffWorkspace({
     processing: buildProcessingStatus(jobRow),
     errorMessage: jobRow.error_message ?? null,
     // Staff-safe Quote Flow draft selections (no secrets / no raw Graph HTML).
-    quoteFlowRequestedSelections:
-      jobRow.metadata?.quoteFlow?.requestedSelections &&
-      typeof jobRow.metadata.quoteFlow.requestedSelections === "object"
-        ? jobRow.metadata.quoteFlow.requestedSelections
-        : null,
-    quoteFlowStartingConfiguration:
-      jobRow.metadata?.quoteFlow?.startingConfiguration &&
-      typeof jobRow.metadata.quoteFlow.startingConfiguration === "object"
-        ? jobRow.metadata.quoteFlow.startingConfiguration
-        : null,
-    quoteFlowAccountDirectoryLink:
-      jobRow.metadata?.quoteFlow?.accountDirectoryLink &&
-      typeof jobRow.metadata.quoteFlow.accountDirectoryLink === "object"
-        ? jobRow.metadata.quoteFlow.accountDirectoryLink
-        : null,
-    quoteName:
-      typeof jobRow.metadata?.quoteFlow?.quoteName === "string"
-        ? jobRow.metadata.quoteFlow.quoteName
-        : null
+    // Legacy jobs may omit quoteFlow entirely — expose nulls, never throw.
+    quoteFlowRequestedSelections: readQuoteFlowNestedObject(
+      jobRow.metadata,
+      "requestedSelections"
+    ),
+    quoteFlowStartingConfiguration: readQuoteFlowNestedObject(
+      jobRow.metadata,
+      "startingConfiguration"
+    ),
+    quoteFlowAccountDirectoryLink: readQuoteFlowNestedObject(
+      jobRow.metadata,
+      "accountDirectoryLink"
+    ),
+    quoteName: readQuoteFlowQuoteName(jobRow.metadata)
   };
+}
+
+/** Null-safe nested quoteFlow object reader for legacy takeoff jobs. */
+export function readQuoteFlowNestedObject(metadata, key) {
+  try {
+    const qf =
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? metadata.quoteFlow
+        : null;
+    if (!qf || typeof qf !== "object" || Array.isArray(qf)) return null;
+    const value = qf[key];
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readQuoteFlowQuoteName(metadata) {
+  try {
+    const qf =
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? metadata.quoteFlow
+        : null;
+    return typeof qf?.quoteName === "string" ? qf.quoteName : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

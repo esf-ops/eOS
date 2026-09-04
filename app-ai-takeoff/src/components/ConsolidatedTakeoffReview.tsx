@@ -1754,8 +1754,13 @@ export default function ConsolidatedTakeoffReview() {
         body
       )) as { accountDirectoryLink?: AccountDirectoryLinkState };
       if (res?.accountDirectoryLink) setAccountDirectoryLink(res.accountDirectoryLink);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Unable to update Account Directory link");
+    } catch {
+      // Account Directory is optional — never blank Review Takeoff / set loadError.
+      setAccountDirectoryLink((prev) => ({
+        ...(prev || { status: "unlinked" }),
+        status: prev?.status === "confirmed" ? "confirmed" : "unlinked",
+        lookupUnavailable: true
+      }));
     } finally {
       setAdLinkBusy(false);
     }

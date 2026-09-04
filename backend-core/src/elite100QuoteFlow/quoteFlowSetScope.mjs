@@ -506,9 +506,9 @@ export function createQuoteFlowSetScopeService(deps) {
   }
 
   async function writeJobQuoteFlowFields(organizationId, takeoffJobId, fields) {
-    if (typeof getSupabase !== "function") return { ok: false };
+    if (typeof getSupabase !== "function") return { ok: false, reason: "no_supabase" };
     const supabase = getSupabase();
-    if (!supabase || typeof supabase.from !== "function") return { ok: false };
+    if (!supabase || typeof supabase.from !== "function") return { ok: false, reason: "no_supabase" };
     try {
       const { data: row } = await supabase
         .from("quote_takeoff_jobs")
@@ -517,9 +517,15 @@ export function createQuoteFlowSetScopeService(deps) {
         .eq("id", takeoffJobId)
         .maybeSingle();
       if (!row?.id) return { ok: false, reason: "job_not_found" };
-      const meta = row.metadata && typeof row.metadata === "object" ? { ...row.metadata } : {};
-      const qf = meta.quoteFlow && typeof meta.quoteFlow === "object" ? { ...meta.quoteFlow } : {};
-      meta.quoteFlow = { ...qf, ...fields };
+      const meta =
+        row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+          ? { ...row.metadata }
+          : {};
+      const qf =
+        meta.quoteFlow && typeof meta.quoteFlow === "object" && !Array.isArray(meta.quoteFlow)
+          ? { ...meta.quoteFlow }
+          : {};
+      meta.quoteFlow = { ...qf, ...(fields && typeof fields === "object" ? fields : {}) };
       const { error } = await supabase
         .from("quote_takeoff_jobs")
         .update({ metadata: meta })
@@ -747,18 +753,23 @@ export function createQuoteFlowSetScopeService(deps) {
   async function getAccountDirectoryLink({ organizationId, takeoffJobId }) {
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
-    const qf = await readJobQuoteFlowMeta(organizationId, jobId);
-    const link = qf?.accountDirectoryLink || emptyAccountDirectoryLink();
+    // Missing quoteFlow / accountDirectoryLink on legacy jobs → empty unlinked link.
+    const qf = (await readJobQuoteFlowMeta(organizationId, jobId)) || {};
+    const raw = qf.accountDirectoryLink;
+    const link =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw
+        : emptyAccountDirectoryLink();
     return {
       ok: true,
       takeoffJobId: jobId,
       accountDirectoryLink: link,
       summary: summarizeAccountDirectoryLink(link),
       matchHints: resolveQuoteFlowMatchHints({
-        senderLabel: qf?.senderLabel,
-        customerLabel: qf?.customerLabel,
-        requestSubject: qf?.requestSubject,
-        sourceEmailBodyPreview: qf?.sourceEmailBodyPreview
+        senderLabel: qf.senderLabel,
+        customerLabel: qf.customerLabel,
+        requestSubject: qf.requestSubject,
+        sourceEmailBodyPreview: qf.sourceEmailBodyPreview
       })
     };
   }
@@ -780,7 +791,11 @@ export function createQuoteFlowSetScopeService(deps) {
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
     const qf = (await readJobQuoteFlowMeta(organizationId, jobId)) || {};
-    const prev = qf.accountDirectoryLink || emptyAccountDirectoryLink();
+    const prevRaw = qf.accountDirectoryLink;
+    const prev =
+      prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
+        ? prevRaw
+        : emptyAccountDirectoryLink();
     const act = String(action || "").trim();
     let next = prev;
 
@@ -840,7 +855,8 @@ export function createQuoteFlowSetScopeService(deps) {
         quoteSnapshot: patch?.quoteSnapshot || prev.quoteSnapshot
       });
     } else if (act === "refresh_suggestions") {
-      // Best-effort suggest; never fails the estimate path.
+      // Best-effort suggest; never fails Review Takeoff / Set Scope.
+      // Legacy jobs may have no quoteFlow / sender / AD fields — treat as unlinked.
       try {
         const hints = resolveQuoteFlowMatchHints({
           senderLabel: qf.senderLabel,
@@ -887,14 +903,36 @@ export function createQuoteFlowSetScopeService(deps) {
           emailCandidates: hints.customerEmailCandidates,
           nameHint: hints.accountHint || hints.customerHint
         });
-        next = applySuggestionsToLink(prev, suggested);
+        next = applySuggestionsToLink(
+          prev && typeof prev === "object" ? prev : emptyAccountDirectoryLink(),
+          suggested
+        );
       } catch {
         next = {
-          ...prev,
+          ...(prev && typeof prev === "object" ? prev : emptyAccountDirectoryLink()),
           lookupUnavailable: true,
           updatedAt: new Date().toISOString()
         };
       }
+      // Persist best-effort only — write failure must not 5xx Review Takeoff.
+      const written = await writeJobQuoteFlowFields(organizationId, jobId, {
+        accountDirectoryLink: next
+      });
+      if (!written.ok) {
+        next = {
+          ...next,
+          lookupUnavailable: next.lookupUnavailable === true || written.reason === "write_failed",
+          persistDeferred: true,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return {
+        ok: true,
+        takeoffJobId: jobId,
+        accountDirectoryLink: next,
+        summary: summarizeAccountDirectoryLink(next),
+        persisted: Boolean(written?.ok)
+      };
     } else {
       throw createQuoteFlowError("validation_failed", {
         message: "Invalid account-directory link action",
@@ -906,8 +944,10 @@ export function createQuoteFlowSetScopeService(deps) {
       accountDirectoryLink: next
     });
     if (!written.ok) {
-      throw createQuoteFlowError("takeoff_unavailable", {
-        message: "Unable to save Account Directory link.",
+      // Confirmed link / unlink / patch should still surface save failure,
+      // but never claim takeoff itself is unavailable.
+      throw createQuoteFlowError("validation_failed", {
+        message: "Unable to save Account Directory link right now. Estimating can continue unlinked.",
         statusCode: 503
       });
     }
@@ -915,7 +955,8 @@ export function createQuoteFlowSetScopeService(deps) {
       ok: true,
       takeoffJobId: jobId,
       accountDirectoryLink: next,
-      summary: summarizeAccountDirectoryLink(next)
+      summary: summarizeAccountDirectoryLink(next),
+      persisted: true
     };
   }
 
