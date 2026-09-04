@@ -762,6 +762,11 @@ export async function getTakeoffWorkspace({
       typeof jobRow.metadata.quoteFlow.startingConfiguration === "object"
         ? jobRow.metadata.quoteFlow.startingConfiguration
         : null,
+    quoteFlowAccountDirectoryLink:
+      jobRow.metadata?.quoteFlow?.accountDirectoryLink &&
+      typeof jobRow.metadata.quoteFlow.accountDirectoryLink === "object"
+        ? jobRow.metadata.quoteFlow.accountDirectoryLink
+        : null,
     quoteName:
       typeof jobRow.metadata?.quoteFlow?.quoteName === "string"
         ? jobRow.metadata.quoteFlow.quoteName

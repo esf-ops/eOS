@@ -277,6 +277,10 @@ export function buildQuoteFlowTakeoffSourceMeta(input = {}) {
       input.startingConfiguration && typeof input.startingConfiguration === "object"
         ? input.startingConfiguration
         : null,
+    accountDirectoryLink:
+      input.accountDirectoryLink && typeof input.accountDirectoryLink === "object"
+        ? input.accountDirectoryLink
+        : null,
     senderLabel: sanitizeQueueSourceText(input.senderLabel, 160),
     customerLabel: sanitizeQueueSourceText(input.customerLabel, 160),
     selectedPlanFilename,
@@ -389,6 +393,10 @@ export function mergeQuoteFlowTakeoffMetadata(existingMetadata, quoteFlow) {
       startingConfiguration: mergeStartingConfigurationMeta(
         prev.startingConfiguration,
         next.startingConfiguration
+      ),
+      accountDirectoryLink: mergeAccountDirectoryLinkMeta(
+        prev.accountDirectoryLink,
+        next.accountDirectoryLink
       )
     }
   };
@@ -436,6 +444,20 @@ function mergeStartingConfigurationMeta(prevCfg, nextCfg) {
     return { ...prev, ...next };
   } catch {
     return nextCfg || prevCfg || null;
+  }
+}
+
+function mergeAccountDirectoryLinkMeta(prevLink, nextLink) {
+  try {
+    const prev = prevLink && typeof prevLink === "object" ? prevLink : null;
+    const next = nextLink && typeof nextLink === "object" ? nextLink : null;
+    if (!prev) return next;
+    if (!next) return prev;
+    if (prev.status === "confirmed" && prev.userSet === true) return prev;
+    if (next.status === "confirmed" && next.userSet === true) return next;
+    return { ...prev, ...next };
+  } catch {
+    return nextLink || prevLink || null;
   }
 }
 

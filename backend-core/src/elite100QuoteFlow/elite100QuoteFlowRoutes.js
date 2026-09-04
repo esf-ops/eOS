@@ -49,6 +49,17 @@ import { createConfigurationStudioService } from "../digitalEstimate/configurati
 import { isDigitalEstimateConfigurationEnabled } from "../digitalEstimate/configuration/configurationConfig.mjs";
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import { createSupabaseAmendmentRepository } from "../digitalEstimate/configuration/amendmentRepository.mjs";
+import {
+  ACCOUNT_DIRECTORY_CAPABILITIES,
+  permissionsForRole,
+  roleHasCapability
+} from "../accountDirectory/accountDirectoryAuth.mjs";
+import { AccountDirectoryError } from "../accountDirectory/accountDirectoryErrors.mjs";
+import {
+  getAccountDirectoryServiceForEstimate,
+  loadAccountForEstimateSelection,
+  lookupAccountsForEstimate
+} from "../elite100EstimateStudio/studioAccountDirectoryLookup.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 /** Set Scope may include a full reviewed TakeoffResult payload. */
@@ -885,6 +896,136 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       } catch (e) {
         console.error("[elite100-quote-flow] starting-configuration update failed", e?.code || e?.message);
         sendSafeError(res, e, "Unable to update starting configuration.");
+      }
+    }
+  );
+
+  // Account Directory soft-link lookup (Quote Flow head — AD head not required).
+  app.get("/api/elite100-quote-flow/account-directory", ...staffStack, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const organizationId = await orgIdFor(req);
+      const role = req.user?.role ?? req.eosProfile?.role ?? null;
+      const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+      const result = await lookupAccountsForEstimate({
+        service,
+        organizationId,
+        role,
+        search: String(req.query?.q ?? req.query?.search ?? ""),
+        limit: req.query?.limit
+      });
+      res.json({
+        ok: true,
+        ...result,
+        permissions: {
+          canCreateProspect: roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT),
+          ...permissionsForRole(role)
+        }
+      });
+    } catch (e) {
+      if (e instanceof AccountDirectoryError) {
+        return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+      }
+      console.error("[elite100-quote-flow] account-directory search failed", e?.code || e?.message);
+      res.status(Number(e?.statusCode) || 503).json({
+        ok: false,
+        error: "Account Directory lookup unavailable",
+        code: e?.code || "account_directory_unavailable",
+        lookupUnavailable: true
+      });
+    }
+  });
+
+  app.get(
+    "/api/elite100-quote-flow/account-directory/:accountId",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const role = req.user?.role ?? req.eosProfile?.role ?? null;
+        const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+        const loaded = await loadAccountForEstimateSelection({
+          service,
+          organizationId,
+          role,
+          accountId: String(req.params.accountId || "")
+        });
+        res.json({ ok: true, ...loaded });
+      } catch (e) {
+        if (e instanceof AccountDirectoryError) {
+          return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+        }
+        console.error("[elite100-quote-flow] account-directory detail failed", e?.code || e?.message);
+        res.status(Number(e?.statusCode) || 503).json({
+          ok: false,
+          error: "Account Directory lookup unavailable",
+          code: e?.code || "account_directory_unavailable",
+          lookupUnavailable: true
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/account-directory-link",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowSetScopeService.getAccountDirectoryLink({
+          organizationId,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || ""))
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] account-directory-link get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load Account Directory link.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/account-directory-link",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowSetScopeService.updateAccountDirectoryLink({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          role: req.user?.role ?? req.eosProfile?.role ?? null,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
+          action: body.action != null ? String(body.action) : null,
+          patch: body.patch && typeof body.patch === "object" ? body.patch : null,
+          accountId: body.accountId != null ? String(body.accountId) : null,
+          contactId: body.contactId != null ? String(body.contactId) : null,
+          locationId: body.locationId != null ? String(body.locationId) : null,
+          identitySnapshot:
+            body.identitySnapshot && typeof body.identitySnapshot === "object"
+              ? body.identitySnapshot
+              : null,
+          matchConfidence: body.matchConfidence != null ? String(body.matchConfidence) : null,
+          matchReason: body.matchReason != null ? String(body.matchReason) : null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.account_directory_link",
+            userId: req.user?.id ?? null,
+            takeoffJobId: result.takeoffJobId ?? null,
+            linkAction: body.action ?? null,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] account-directory-link update failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to update Account Directory link.");
       }
     }
   );

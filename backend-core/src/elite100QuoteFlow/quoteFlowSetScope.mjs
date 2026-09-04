@@ -36,6 +36,23 @@ import {
   summarizeStartingConfiguration
 } from "./quoteFlowStartingConfiguration.mjs";
 import {
+  applyAccountDirectoryLinkToEstimateScope,
+  applySuggestionsToLink,
+  confirmAccountDirectoryLink,
+  emptyAccountDirectoryLink,
+  patchQuoteIdentitySnapshot,
+  resolveQuoteFlowMatchHints,
+  suggestAccountDirectoryMatches,
+  summarizeAccountDirectoryLink,
+  unlinkAccountDirectoryLink
+} from "./quoteFlowAccountDirectory.mjs";
+import {
+  getAccountDirectoryServiceForEstimate,
+  loadAccountForEstimateSelection,
+  lookupAccountsForEstimate
+} from "../elite100EstimateStudio/studioAccountDirectoryLookup.mjs";
+import { buildCustomerIdentitySnapshot } from "../quotes/customerIdentitySnapshot.mjs";
+import {
   createMemoryQuoteFlowQueueStateStore,
   createQuoteFlowQueueStateStore
 } from "./quoteFlowQueueStateStore.mjs";
@@ -659,9 +676,36 @@ export function createQuoteFlowSetScopeService(deps) {
         startingConfiguration: starting
       });
     }
-    if (!starting || starting.status === "empty") return estimate;
+    if (!starting || starting.status === "empty") {
+      // Still allow AD soft-link alone to initialize identity when no starting config.
+      let identityOnly = applyAccountDirectoryLinkToEstimateScope(
+        estimate.scope || {},
+        qf?.accountDirectoryLink || null
+      );
+      if (identityOnly.accountDirectoryAccountId) {
+        try {
+          const updated = await studioEstimateService.updateScope({
+            organizationId,
+            estimateId: estimate.id,
+            actorUserId,
+            body: {
+              scope: identityOnly,
+              accountDirectoryAccountId: identityOnly.accountDirectoryAccountId,
+              accountDirectoryContactId: identityOnly.accountDirectoryContactId,
+              accountDirectoryLocationId: identityOnly.accountDirectoryLocationId,
+              customerIdentitySnapshot: identityOnly.customerIdentitySnapshot,
+              explicitAccountRelink: true
+            }
+          });
+          return updated?.estimate || updated || { ...estimate, scope: identityOnly };
+        } catch {
+          return { ...estimate, scope: identityOnly };
+        }
+      }
+      return estimate;
+    }
 
-    const nextScope = applyStartingConfigurationToScope(estimate.scope || {}, starting, {
+    let nextScope = applyStartingConfigurationToScope(estimate.scope || {}, starting, {
       roomsFromTakeoff
     });
     // Keep audit of which confirmed requests existed at promote time (non-authoritative).
@@ -673,12 +717,21 @@ export function createQuoteFlowSetScopeService(deps) {
         items: qf.requestedSelections.items.filter((i) => i?.status === "confirmed")
       };
     }
+    // Soft-link Account Directory (optional) — fill-if-empty quote fields + durable IDs.
+    nextScope = applyAccountDirectoryLinkToEstimateScope(nextScope, qf?.accountDirectoryLink || null);
     try {
       const updated = await studioEstimateService.updateScope({
         organizationId,
         estimateId: estimate.id,
         actorUserId,
-        body: { scope: nextScope }
+        body: {
+          scope: nextScope,
+          accountDirectoryAccountId: nextScope.accountDirectoryAccountId ?? null,
+          accountDirectoryContactId: nextScope.accountDirectoryContactId ?? null,
+          accountDirectoryLocationId: nextScope.accountDirectoryLocationId ?? null,
+          customerIdentitySnapshot: nextScope.customerIdentitySnapshot ?? null,
+          explicitAccountRelink: nextScope.accountDirectoryAccountId ? true : false
+        }
       });
       return updated?.estimate || updated || { ...estimate, scope: nextScope };
     } catch {
@@ -689,6 +742,181 @@ export function createQuoteFlowSetScopeService(deps) {
   /** @deprecated Prefer applyStartingConfigurationOntoEstimate */
   async function applyConfirmedSelectionsOntoEstimate(args) {
     return applyStartingConfigurationOntoEstimate(args);
+  }
+
+  async function getAccountDirectoryLink({ organizationId, takeoffJobId }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = await readJobQuoteFlowMeta(organizationId, jobId);
+    const link = qf?.accountDirectoryLink || emptyAccountDirectoryLink();
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      accountDirectoryLink: link,
+      summary: summarizeAccountDirectoryLink(link),
+      matchHints: resolveQuoteFlowMatchHints({
+        senderLabel: qf?.senderLabel,
+        customerLabel: qf?.customerLabel,
+        requestSubject: qf?.requestSubject,
+        sourceEmailBodyPreview: qf?.sourceEmailBodyPreview
+      })
+    };
+  }
+
+  async function updateAccountDirectoryLink({
+    organizationId,
+    takeoffJobId,
+    actorUserId = null,
+    action,
+    patch = null,
+    accountId = null,
+    contactId = null,
+    locationId = null,
+    identitySnapshot = null,
+    matchConfidence = null,
+    matchReason = null,
+    role = null
+  }) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const qf = (await readJobQuoteFlowMeta(organizationId, jobId)) || {};
+    const prev = qf.accountDirectoryLink || emptyAccountDirectoryLink();
+    const act = String(action || "").trim();
+    let next = prev;
+
+    if (act === "unlink") {
+      next = unlinkAccountDirectoryLink(prev, actorUserId);
+    } else if (act === "patch_snapshot") {
+      next = patchQuoteIdentitySnapshot(prev, patch || {}, actorUserId);
+    } else if (act === "reject_suggestion") {
+      next = {
+        ...prev,
+        status: "unlinked",
+        suggestions: [],
+        matchConfidence: null,
+        matchReason: "suggestion_rejected",
+        userSet: true,
+        updatedAt: new Date().toISOString()
+      };
+    } else if (act === "confirm" || act === "link") {
+      let snapshot = identitySnapshot;
+      if (!snapshot && accountId && typeof getSupabase === "function") {
+        try {
+          const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+          const loaded = await loadAccountForEstimateSelection({
+            service,
+            organizationId,
+            role: role || "estimator",
+            accountId
+          });
+          const contact =
+            (contactId && (loaded.contacts || []).find((c) => String(c.id) === String(contactId))) ||
+            loaded.primaryContact ||
+            null;
+          const location =
+            (locationId &&
+              (loaded.locations || []).find((l) => String(l.id) === String(locationId))) ||
+            loaded.primaryLocation ||
+            null;
+          snapshot = buildCustomerIdentitySnapshot({
+            account: loaded.account,
+            contact,
+            location
+          });
+          if (!contactId && contact?.id) contactId = contact.id;
+          if (!locationId && location?.id) locationId = location.id;
+        } catch {
+          snapshot = identitySnapshot;
+        }
+      }
+      next = confirmAccountDirectoryLink(prev, {
+        accountId,
+        contactId,
+        locationId,
+        identitySnapshot: snapshot,
+        matchConfidence: matchConfidence || "manual",
+        matchReason: matchReason || "estimator_confirmed",
+        actorUserId,
+        quoteSnapshot: patch?.quoteSnapshot || prev.quoteSnapshot
+      });
+    } else if (act === "refresh_suggestions") {
+      // Best-effort suggest; never fails the estimate path.
+      try {
+        const hints = resolveQuoteFlowMatchHints({
+          senderLabel: qf.senderLabel,
+          customerLabel: qf.customerLabel,
+          requestSubject: qf.requestSubject,
+          sourceEmailBodyPreview: qf.sourceEmailBodyPreview
+        });
+        const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+        const search =
+          hints.customerEmailCandidates[0] || hints.accountHint || hints.customerHint || "";
+        let accounts = [];
+        if (search) {
+          const listed = await lookupAccountsForEstimate({
+            service,
+            organizationId,
+            role: role || "estimator",
+            search,
+            limit: 12
+          });
+          accounts = listed.items || [];
+          // Enrich with contacts for exact email match when detail available.
+          const enriched = [];
+          for (const item of accounts.slice(0, 6)) {
+            try {
+              const detail = await loadAccountForEstimateSelection({
+                service,
+                organizationId,
+                role: role || "estimator",
+                accountId: item.id
+              });
+              enriched.push({
+                ...item,
+                contacts: detail?.contacts || [],
+                primaryContactId: detail?.selectedContactId || null
+              });
+            } catch {
+              enriched.push(item);
+            }
+          }
+          accounts = enriched;
+        }
+        const suggested = suggestAccountDirectoryMatches({
+          accounts,
+          emailCandidates: hints.customerEmailCandidates,
+          nameHint: hints.accountHint || hints.customerHint
+        });
+        next = applySuggestionsToLink(prev, suggested);
+      } catch {
+        next = {
+          ...prev,
+          lookupUnavailable: true,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    } else {
+      throw createQuoteFlowError("validation_failed", {
+        message: "Invalid account-directory link action",
+        statusCode: 400
+      });
+    }
+
+    const written = await writeJobQuoteFlowFields(organizationId, jobId, {
+      accountDirectoryLink: next
+    });
+    if (!written.ok) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to save Account Directory link.",
+        statusCode: 503
+      });
+    }
+    return {
+      ok: true,
+      takeoffJobId: jobId,
+      accountDirectoryLink: next,
+      summary: summarizeAccountDirectoryLink(next)
+    };
   }
 
   function isAlreadyApprovedError(e) {
@@ -1226,6 +1454,8 @@ export function createQuoteFlowSetScopeService(deps) {
     updateRequestedSelection,
     getStartingConfiguration,
     updateStartingConfiguration,
+    getAccountDirectoryLink,
+    updateAccountDirectoryLink,
     applyStartingConfigurationOntoEstimate,
     applyConfirmedSelectionsOntoEstimate,
     archiveQueueItem,

@@ -10,6 +10,9 @@ import CustomerRequestedSelectionsPanel, {
 import StartingConfigurationPanel, {
   type StartingConfiguration
 } from "./StartingConfigurationPanel";
+import AccountDirectoryLinkPanel, {
+  type AccountDirectoryLinkState
+} from "./AccountDirectoryLinkPanel";
 import {
   approveAndBuildEstimate,
   generateAiTakeoffDraft,
@@ -297,6 +300,10 @@ export default function ConsolidatedTakeoffReview() {
     null
   );
   const [startingBusy, setStartingBusy] = useState(false);
+  const [accountDirectoryLink, setAccountDirectoryLink] =
+    useState<AccountDirectoryLinkState | null>(null);
+  const [adLinkBusy, setAdLinkBusy] = useState(false);
+  const adSuggestTriedRef = useRef<string | null>(null);
   const correctionEventsRef = useRef<Array<Record<string, unknown>>>([]);
 
   const pushCorrectionEvent = useCallback((event: Record<string, unknown> | null | undefined) => {
@@ -639,6 +646,10 @@ export default function ConsolidatedTakeoffReview() {
     const startCfg = job?.quoteFlowStartingConfiguration;
     if (startCfg && typeof startCfg === "object") {
       setStartingConfiguration(startCfg as StartingConfiguration);
+    }
+    const adLink = job?.quoteFlowAccountDirectoryLink;
+    if (adLink && typeof adLink === "object") {
+      setAccountDirectoryLink(adLink as AccountDirectoryLinkState);
     }
 
     const dirty =
@@ -1733,6 +1744,46 @@ export default function ConsolidatedTakeoffReview() {
     }
   }
 
+  async function postAccountDirectoryLink(body: Record<string, unknown>) {
+    if (!authToken || !takeoffJobId || isReadonly) return;
+    setAdLinkBusy(true);
+    try {
+      const res = (await labApiPost(
+        `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/account-directory-link`,
+        authToken,
+        body
+      )) as { accountDirectoryLink?: AccountDirectoryLinkState };
+      if (res?.accountDirectoryLink) setAccountDirectoryLink(res.accountDirectoryLink);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Unable to update Account Directory link");
+    } finally {
+      setAdLinkBusy(false);
+    }
+  }
+
+  const isReadonly =
+    urlWorkspace.mode === "readonly" ||
+    (urlWorkspace.mode === "auto" &&
+      (jobReviewStatus === "approved" || approveStatus === "approved"));
+
+  // Best-effort AD suggestions once per job — never blocks Review Takeoff.
+  useEffect(() => {
+    if (!quoteFlowSetScope || !authToken || !takeoffJobId || isReadonly || localReview) return;
+    if (adSuggestTriedRef.current === takeoffJobId) return;
+    const status = accountDirectoryLink?.status || "unlinked";
+    if (status === "confirmed") {
+      adSuggestTriedRef.current = takeoffJobId;
+      return;
+    }
+    if ((accountDirectoryLink?.suggestions?.length || 0) > 0) {
+      adSuggestTriedRef.current = takeoffJobId;
+      return;
+    }
+    adSuggestTriedRef.current = takeoffJobId;
+    void postAccountDirectoryLink({ action: "refresh_suggestions" });
+    // One-shot per job after workspace hydrate; deliberate deps.
+  }, [quoteFlowSetScope, authToken, takeoffJobId, isReadonly, localReview, accountDirectoryLink?.status]);
+
   if (!authToken) {
     return (
       <div className="ctr-shell">
@@ -1768,11 +1819,6 @@ export default function ConsolidatedTakeoffReview() {
       </div>
     );
   }
-
-  const isReadonly =
-    urlWorkspace.mode === "readonly" ||
-    (urlWorkspace.mode === "auto" &&
-      (jobReviewStatus === "approved" || approveStatus === "approved"));
 
   const readonlyTitle = (() => {
     const rev = urlWorkspace.revisionNumber
@@ -2069,6 +2115,43 @@ export default function ConsolidatedTakeoffReview() {
                 busy={startingBusy}
                 onSave={(patch) => void saveStartingConfigurationPatch(patch)}
                 onReseed={() => void reseedStartingConfiguration()}
+              />
+            ) : null}
+
+            {quoteFlowSetScope ? (
+              <AccountDirectoryLinkPanel
+                link={accountDirectoryLink}
+                readonly={isReadonly}
+                busy={adLinkBusy}
+                onConfirmSuggestion={(accountId, contactId) =>
+                  void postAccountDirectoryLink({
+                    action: "confirm",
+                    accountId,
+                    contactId
+                  })
+                }
+                onRejectSuggestion={() =>
+                  void postAccountDirectoryLink({ action: "reject_suggestion" })
+                }
+                onUnlink={() => void postAccountDirectoryLink({ action: "unlink" })}
+                onLinkAccount={(accountId) =>
+                  void postAccountDirectoryLink({ action: "link", accountId })
+                }
+                onPatchSnapshot={(patch) =>
+                  void postAccountDirectoryLink({ action: "patch_snapshot", patch })
+                }
+                onSearch={async (q) => {
+                  if (!authToken) return [];
+                  try {
+                    const res = (await labApiGet(
+                      `/api/elite100-quote-flow/account-directory?q=${encodeURIComponent(q)}`,
+                      authToken
+                    )) as { items?: Array<{ id: string; displayName?: string | null; primaryContact?: string | null }> };
+                    return Array.isArray(res?.items) ? res.items : [];
+                  } catch {
+                    return [];
+                  }
+                }}
               />
             ) : null}
 

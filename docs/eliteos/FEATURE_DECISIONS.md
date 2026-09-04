@@ -4816,5 +4816,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Quote Name, pricing rates/authority, Digital Estimate UI, Graph, Moraware/QB/Monday, quote numbers. |
 | **Deferred** | Analytics dashboard for plan-source vs correction rates; LLM appliance vision; full Allowed Choices system; richer non-prompt segmentation UX. |
 
+### 357. Quote Flow ↔ Account Directory soft-link (optional) (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Soft-link Quote Flow to Account Directory without hard dependency. Pre–Set Scope durable state on `metadata.quoteFlow.accountDirectoryLink` holds optional `accountId`/`contactId`/`locationId`, match suggestions, quote-specific snapshot (`accountName`, contact, salesperson, branch, project address), and `fieldProvenance` (`account_directory` vs `user_edited`). Exact contact-email matches are **suggested only** — never auto-confirmed. Internal forwarding addresses are excluded from customer email candidates. Set Scope copies confirmed link into existing `studio_estimates` AD columns + frozen `customerIdentitySnapshot` using fill-if-empty for quote display fields. Unlinked quotes remain fully estimable. AD lookup failure returns unavailable and does not block Review/Set Scope. No automatic Create Account. Quote Library continues to use durable `account_directory_account_id` when present while display prefers snapshot. |
+| **Why** | Estimators need optional AD identity for grouping/history without incorrect autofill or blocked quoting. |
+| **Future QB** | Keep QuickBooks customer mapping on Account Directory (`account_directory_external_links` / `ad_qb_customer_facts`). Quote → `account_id` → AD → governed QB ListID — never fuzzy name match at Sales Order time. Do not store ListIDs on quotes. |
+| **Impacted** | `quoteFlowAccountDirectory`, queue meta merge, Set Scope apply, Quote Flow AD lookup + link routes, takeoff workspace DTO, Review Takeoff panel, tests, this doc. |
+| **Protected / unchanged** | Takeoff geometry, appliance segmentation, Customer Requested, Starting Configuration, pricing, Digital Estimate UI, Graph, Moraware, QB writeback, quote numbers. |
+| **Deferred** | Controlled Create Account from Quote Flow; original-vs-forwarder Graph From split beyond body/label heuristics; Quote Library UUID-first grouping redesign; salesperson ownership columns on AD. |
+
 ---
 

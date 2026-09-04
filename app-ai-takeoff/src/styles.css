@@ -5383,3 +5383,70 @@ body.ctr-split-dragging img {
   font-size: 0.74rem;
   padding: 3px 6px;
 }
+
+.ctr-ad-link {
+  margin: 8px 0 12px;
+  border: 1px solid #d5dce8;
+  border-radius: 8px;
+  background: #f8faf8;
+}
+.ctr-ad-link__toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+.ctr-ad-link__body {
+  padding: 0 12px 12px;
+  border-top: 1px solid #e2e8f2;
+  font-size: 0.85rem;
+}
+.ctr-ad-link__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ctr-ad-link__search {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ctr-ad-link__search label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ctr-ad-link__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ctr-ad-link__results button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid #d5dce8;
+  background: #fff;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.ctr-ad-link__conflicts {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #8a5a12;
+}
+.ctr-ad-link__snapshot-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}

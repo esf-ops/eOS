@@ -184,10 +184,12 @@ console.log("ok: flag + head slug");
   assert.match(routesSrc, /assertInternalQuoteOperator/);
   assert.match(routesSrc, /requested-selections/);
   assert.match(routesSrc, /starting-configuration/);
+  assert.match(routesSrc, /account-directory-link/);
+  assert.match(routesSrc, /\/api\/elite100-quote-flow\/account-directory/);
   // Later slices intentionally mount Digital Estimate publish on this file.
   // Still forbid sold/handoff/takeoff-finish wiring here.
   assert.doesNotMatch(routesSrc, /markSold|approveWorkingDraft|takeoff-finish/);
-  console.log("ok: staff stack requires head access; requested-selections + starting-configuration mounted");
+  console.log("ok: staff stack requires head access; selections + AD soft-link mounted");
 }
 
 function chain(data) {
