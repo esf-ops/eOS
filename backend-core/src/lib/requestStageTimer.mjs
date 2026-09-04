@@ -2,6 +2,7 @@
  * Lightweight request-stage timing for Brain performance investigations.
  * No secrets. Enable via ELITEOS_REQUEST_TIMING=1 or opts.enabled.
  * Keep production env unset unless actively measuring (Phase 3 measurement complete).
+ * Prefer Git auto-deploy from the monorepo root (do not CLI-deploy with cwd=backend-core).
  */
 
 /**

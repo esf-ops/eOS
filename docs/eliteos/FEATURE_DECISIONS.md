@@ -4910,5 +4910,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Save-ack frontend transaction, geometry/backsplash/open-edge math, Starting Configuration rules, pricing, auth. |
 | **Measured (Pearson dirty Set Scope, build `7c75a987`)** | Server `totalMs` **4321** (client resource ~5041). Stages: `approve_persist` 952, `persist_physical_facts` 771, `display_name` 483, `starting_configuration` 439, `prior_scope_and_quote_name` 421, `auth_org` 315, `ensure_estimate` 278, `resolve_intake_case` 250, `refresh_takeoff_gate` 192 (post-reuse seed/update), `refresh_gate_reuse_facts` 0. Duplicate workspace/latest rereads removed. Remaining floor is mostly Supabase write/read RTTs — not safe to strip further without semantic risk. `ELITEOS_REQUEST_TIMING` turned off after sample. |
 
+### 366. Vercel Git auto-deploy — Quote Flow project identity + CLI root trap (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Production Quote Flow is Vercel project **`elite100-quote-flow`** (Root Directory `app-elite100-quote-flow`, domain `quoteflow.eliteosfab.com`). Do **not** create or Git-link a second project named `app-elite100-quote-flow`. A duplicate was created 2026-09-04 with Root Directory unset (`.`); its `ignoreCommand` (`node ../scripts/…`) resolved to `/vercel/scripts/…` and builds failed with `vite: command not found`. Git was disconnected from the duplicate. `Canceled` on the canonical project means Ignored Build Step skip (unaffected paths) — not a failure. For **backend-core**, Git auto-deploy from monorepo clone is healthy; Error rows that say `Root Directory "backend-core" does not exist` are **CLI uploads** from inside `backend-core/` (files lack the nested folder). Deploy Brain via Git push touching `backend-core/`, or CLI from the **repo root** with the correct linked project — never `vercel deploy` with cwd=`backend-core` while Root Directory=`backend-core`. |
+| **Why** | Recurring “Git build failed” noise was two different traps: (1) mislinked duplicate Quote Flow project, (2) CLI double-root on Brain — not product regressions. |
+| **Protected / unchanged** | Set Scope, Takeoff, pricing, Account Directory, Starting Configuration, ignore-build policy itself. |
+
 ---
 
