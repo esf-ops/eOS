@@ -4878,5 +4878,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `takeoffPostMessageOrigins.mjs`, `EstimateQueuePage`, `takeoffReviewReadyContract`, Quote Flow + Takeoff heads. |
 | **Protected / unchanged** | Brain Set Scope remappers, takeoff correction persistence, pricing. |
 
+### 363. Review Takeoff safe performance pass (2026-09-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-09-04 · `main` |
+| **Decision** | Conservative open-path improvements only: (1) fetch takeoff job + `results/latest` in parallel via `Promise.allSettled`; (2) defer Account Directory `refresh_suggestions` until after core hydrate; (3) short-lived in-memory signed plan URL cache for reopen; (4) “Loading measurements…” worksheet placeholder while core hydrates. Does **not** change save-ack Set Scope, geometry, pricing, auth, or optional-enrichment failure isolation. Prefetch of queue items deferred. |
+| **Why** | Production timing showed sequential job→latest (~1.5s + ~1.7s) and AD refresh racing the core path. |
+| **Impacted** | `ConsolidatedTakeoffReview`, `TakeoffPlanPreviewPanel`, plan URL cache helper, perf marks helper. |
+| **Protected / unchanged** | Set Scope save-ack contract, takeoff math, Pricing & Selections, AD product rules. |
+
 ---
 

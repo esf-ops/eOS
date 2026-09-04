@@ -52,6 +52,11 @@ import {
   stampOpenEdgeLfOnTakeoffDraft
 } from "../lib/takeoffReviewReadyContract.mjs";
 import {
+  ctrPerfMark,
+  ctrPerfMeasure,
+  publishCtrPerfSnapshot
+} from "../lib/reviewTakeoffPerf.mjs";
+import {
   applyDeletionTombstones,
   ensureUniqueTakeoffIdentity,
   hasEstimatorOwnedGeometry,
@@ -349,6 +354,10 @@ export default function ConsolidatedTakeoffReview() {
   const [displayStatus, setDisplayStatus] = useState("Takeoff processing");
   const [aiPhase, setAiPhase] = useState<AiPhase>("unknown");
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** True while the first core job+latest hydrate is in flight (skeleton only — not a hard gate). */
+  const [coreHydrating, setCoreHydrating] = useState(false);
+  /** Gates optional AD refresh until core workspace has loaded once for this job. */
+  const [coreWorkspaceReady, setCoreWorkspaceReady] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [jobReviewStatus, setJobReviewStatus] = useState<string | null>(null);
@@ -523,10 +532,13 @@ export default function ConsolidatedTakeoffReview() {
       return;
     }
     let alive = true;
+    ctrPerfMark("auth-start");
     void supabase.auth.getSession().then(({ data }: any) => {
       if (!alive) return;
       setAuthToken(data.session?.access_token ?? null);
       setAuthChecked(true);
+      ctrPerfMark("auth-ready");
+      ctrPerfMeasure("auth", "auth-start", "auth-ready");
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e: string, sess: any) => {
       setAuthToken(sess?.access_token ?? null);
@@ -565,6 +577,7 @@ export default function ConsolidatedTakeoffReview() {
     opts?: { forceServer?: boolean; discardLocal?: boolean }
   ) => {
     setLoadError(null);
+    setCoreHydrating(true);
     loadAbortRef.current?.abort();
     const controller = new AbortController();
     loadAbortRef.current = controller;
@@ -576,17 +589,30 @@ export default function ConsolidatedTakeoffReview() {
       localExcludedRunIds: excludedRef.current,
       canonicalExcludedRunIds: canonicalExcludedRef.current
     });
-    const job = (await labApiGet(
-      `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
-      token,
-      { signal: controller.signal }
-    )) as any;
-    const latest = (await labApiGet(
-      `/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`,
-      token,
-      { signal: controller.signal }
-    ).catch(() => null)) as any;
-    if (controller.signal.aborted) return;
+    // Job meta and latest draft are independent reads — fetch in parallel.
+    // (Job DTO does not include full normalizedTakeoffJson; latest is required for geometry.)
+    ctrPerfMark("workspace-start");
+    const [jobSettled, latestSettled] = await Promise.allSettled([
+      labApiGet(`/api/takeoff-jobs/${encodeURIComponent(jobId)}`, token, {
+        signal: controller.signal
+      }),
+      labApiGet(`/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`, token, {
+        signal: controller.signal
+      })
+    ]);
+    if (controller.signal.aborted) {
+      setCoreHydrating(false);
+      return;
+    }
+    if (jobSettled.status !== "fulfilled") {
+      setCoreHydrating(false);
+      throw jobSettled.reason;
+    }
+    const job = jobSettled.value as any;
+    const latest =
+      latestSettled.status === "fulfilled" ? (latestSettled.value as any) : null;
+    ctrPerfMark("workspace-core-ready");
+    ctrPerfMeasure("workspace-core", "workspace-start", "workspace-core-ready");
     // Authoritative estimator draft only — never treat pending AI as this payload.
     const result =
       latest?.normalizedTakeoffJson ||
@@ -751,6 +777,10 @@ export default function ConsolidatedTakeoffReview() {
         status: String(file.status ?? "ready")
       });
     }
+    setCoreHydrating(false);
+    setCoreWorkspaceReady(true);
+    ctrPerfMark("draft-ready");
+    publishCtrPerfSnapshot({ takeoffJobId: jobId });
   }, [hydrateReviewMeta, unionLocalTombstones, applyPendingAiFromLatest]);
 
   const markWorksheetDirty = useCallback(() => {
@@ -1248,7 +1278,9 @@ export default function ConsolidatedTakeoffReview() {
   useEffect(() => {
     if (localReview) return;
     if (!authToken || !takeoffJobId) return;
+    setCoreWorkspaceReady(false);
     void loadWorkspace(authToken, takeoffJobId).catch((e) => {
+      setCoreHydrating(false);
       if (e instanceof DOMException && e.name === "AbortError") return;
       setLoadError(e instanceof LabApiError ? e.message : "Unable to load Takeoff");
     });
@@ -1786,9 +1818,11 @@ export default function ConsolidatedTakeoffReview() {
   );
 
   // Best-effort AD suggestions once per job — never blocks Review Takeoff.
+  // Wait until core job+latest hydrate finishes so AD does not contend with the editable worksheet path.
   // Must stay above authChecked / authToken early returns (Rules of Hooks).
   useEffect(() => {
     if (!quoteFlowSetScope || !authToken || !takeoffJobId || isReadonly || localReview) return;
+    if (!coreWorkspaceReady) return;
     if (adSuggestTriedRef.current === takeoffJobId) return;
     const status = accountDirectoryLink?.status || "unlinked";
     if (status === "confirmed") {
@@ -1800,13 +1834,18 @@ export default function ConsolidatedTakeoffReview() {
       return;
     }
     adSuggestTriedRef.current = takeoffJobId;
-    void postAccountDirectoryLink({ action: "refresh_suggestions" });
+    // Yield so plan signed-URL / first paint can run before optional AD refresh.
+    const timeoutId = window.setTimeout(() => {
+      void postAccountDirectoryLink({ action: "refresh_suggestions" });
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [
     quoteFlowSetScope,
     authToken,
     takeoffJobId,
     isReadonly,
     localReview,
+    coreWorkspaceReady,
     accountDirectoryLink?.status,
     accountDirectoryLink?.suggestions?.length,
     postAccountDirectoryLink
@@ -2301,7 +2340,9 @@ export default function ConsolidatedTakeoffReview() {
                   {roomSections.length === 0 ? (
                     <tr data-testid="ctr-empty-worksheet">
                       <td colSpan={12} className="ctr-muted">
-                        No rooms yet. Add a room, then add a piece to start measuring.
+                        {coreHydrating
+                          ? "Loading measurements…"
+                          : "No rooms yet. Add a room, then add a piece to start measuring."}
                       </td>
                     </tr>
                   ) : null}

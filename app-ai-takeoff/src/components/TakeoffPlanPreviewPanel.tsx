@@ -6,6 +6,10 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { labApiPost, LabApiError } from "../lib/api";
+import {
+  getCachedPlanSignedUrl,
+  setCachedPlanSignedUrl
+} from "../lib/planSignedUrlCache.mjs";
 
 export interface PlanPreviewFileMeta {
   quoteFileId: string;
@@ -94,12 +98,25 @@ export default function TakeoffPlanPreviewPanel({
     setError(null);
     setSignedUrl(null);
 
+    const cached = getCachedPlanSignedUrl(file.quoteFileId);
+    if (cached) {
+      setSignedUrl(cached);
+      setLoading(false);
+      return () => {
+        alive = false;
+      };
+    }
+
     void (async () => {
       try {
-        const res = await labApiPost("/api/quote-files/download-url", token, {
-          quoteFileId: file.quoteFileId,
-        }) as { signedUrl: string };
+        const res = (await labApiPost("/api/quote-files/download-url", token, {
+          quoteFileId: file.quoteFileId
+        })) as { signedUrl: string; expiresAt?: string };
         if (alive) {
+          setCachedPlanSignedUrl(file.quoteFileId, {
+            signedUrl: res.signedUrl,
+            expiresAt: res.expiresAt || null
+          });
           setSignedUrl(res.signedUrl);
           setLoading(false);
         }
@@ -123,12 +140,16 @@ export default function TakeoffPlanPreviewPanel({
     setOpening(true);
     setError(null);
     try {
-      let url = signedUrl;
+      let url = signedUrl || getCachedPlanSignedUrl(file.quoteFileId);
       if (!url) {
-        const res = await labApiPost("/api/quote-files/download-url", token, {
-          quoteFileId: file.quoteFileId,
-        }) as { signedUrl: string };
+        const res = (await labApiPost("/api/quote-files/download-url", token, {
+          quoteFileId: file.quoteFileId
+        })) as { signedUrl: string; expiresAt?: string };
         url = res.signedUrl;
+        setCachedPlanSignedUrl(file.quoteFileId, {
+          signedUrl: res.signedUrl,
+          expiresAt: res.expiresAt || null
+        });
         setSignedUrl(url);
       }
       window.open(url, "_blank", "noopener,noreferrer");
