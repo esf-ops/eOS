@@ -1224,11 +1224,13 @@ export function createQuoteFlowSetScopeService(deps) {
     actorUserId,
     takeoffJobId,
     takeoffResult = null,
-    reviewState = null
+    reviewState = null,
+    _timing = null
   }) {
-    if (typeof approveAndBuildEstimate !== "function" || !getSupabase) return;
+    if (typeof approveAndBuildEstimate !== "function" || !getSupabase) return null;
     const supabase = getSupabase();
     const hasReviewedPayload = hasClientTakeoffPayload(takeoffResult);
+    const mark = (name) => _timing?.mark?.(name);
 
     // Dirty edits on an approved-but-unscoped takeoff: reopen before save/approve.
     if (
@@ -1245,10 +1247,11 @@ export function createQuoteFlowSetScopeService(deps) {
       } catch {
         // Non-fatal — approve path also passes reopenIfApproved.
       }
+      mark("freeze_reopen");
     }
 
     try {
-      await approveAndBuildEstimate({
+      const approved = await approveAndBuildEstimate({
         supabase,
         organizationId,
         userId: actorUserId,
@@ -1258,12 +1261,16 @@ export function createQuoteFlowSetScopeService(deps) {
         confirmAdvisories: true,
         acceptAdvisoryWarnings: true,
         correctionNotes: "Quote Flow Set Scope",
-        reopenIfApproved: hasReviewedPayload === true
+        reopenIfApproved: hasReviewedPayload === true,
+        _timing
       });
+      mark("freeze_approve_build");
+      return approved && typeof approved === "object" ? approved : null;
     } catch (e) {
       if (isAlreadyApprovedError(e) && !hasReviewedPayload) {
         // Approved measurements are ready — continue to official scope import.
-        return;
+        mark("freeze_already_approved");
+        return { alreadyApproved: true };
       }
       if (isAlreadyApprovedError(e) && hasReviewedPayload) {
         // Retry once after explicit reopen when locked approved blocked the save.
@@ -1274,7 +1281,8 @@ export function createQuoteFlowSetScopeService(deps) {
             takeoffJobId,
             userId: actorUserId
           });
-          await approveAndBuildEstimate({
+          mark("freeze_reopen_retry");
+          const approved = await approveAndBuildEstimate({
             supabase,
             organizationId,
             userId: actorUserId,
@@ -1284,14 +1292,17 @@ export function createQuoteFlowSetScopeService(deps) {
             confirmAdvisories: true,
             acceptAdvisoryWarnings: true,
             correctionNotes: "Quote Flow Set Scope (after reopen)",
-            reopenIfApproved: true
+            reopenIfApproved: true,
+            _timing
           });
-          return;
+          mark("freeze_approve_build_retry");
+          return approved && typeof approved === "object" ? approved : null;
         }
       }
       // Never surface the Studio "Edit Measurements" hard blocker on this path.
       if (isAlreadyApprovedError(e)) {
-        return;
+        mark("freeze_already_approved");
+        return { alreadyApproved: true };
       }
       throw createQuoteFlowError("takeoff_not_ready", {
         message: e?.message || "Review measurements before setting scope.",
@@ -1369,14 +1380,40 @@ export function createQuoteFlowSetScopeService(deps) {
       });
     }
 
-    await freezeReviewedMeasurements({
+    const freezeResult = await freezeReviewedMeasurements({
       organizationId,
       actorUserId,
       takeoffJobId: jobId,
       takeoffResult,
-      reviewState
+      reviewState,
+      _timing: timer
     });
     timer.mark("freeze_reviewed");
+    let setScopeFacts =
+      freezeResult?.setScopeFacts && typeof freezeResult.setScopeFacts === "object"
+        ? freezeResult.setScopeFacts
+        : null;
+
+    // Prime request-scoped takeoff cache from freeze facts (or one latest load).
+    if (setScopeFacts?.normalizedTakeoffJson) {
+      await takeoffCache.resolve(organizationId, jobId, setScopeFacts.normalizedTakeoffJson);
+    } else {
+      const draft = await takeoffCache.resolve(organizationId, jobId, takeoffResult);
+      if (draft && !setScopeFacts) {
+        setScopeFacts = {
+          takeoffJobId: jobId,
+          reviewStatus: "approved",
+          resultId: freezeResult?.approvedResultId || null,
+          normalizedTakeoffJson: draft,
+          computedMeasurementsJson: null,
+          validationDiagnosticsJson: null,
+          reviewState: reviewState || null,
+          approvedAt: null,
+          approvedByUserId: actorUserId
+        };
+      }
+    }
+    timer.mark("prime_takeoff_facts");
 
     if (!studioEstimateService?.getOrCreateForCase || !studioEstimateService?.refreshScopeFromTakeoff) {
       throw createQuoteFlowError("takeoff_unavailable", {
@@ -1389,7 +1426,9 @@ export function createQuoteFlowSetScopeService(deps) {
       organizationId,
       intakeCaseId,
       takeoffJobId: jobId,
-      actorUserId
+      actorUserId,
+      setScopeFacts,
+      _timing: timer
     });
     timer.mark("get_or_create");
     const estimateId = ensured?.id || ensured?.estimateId;

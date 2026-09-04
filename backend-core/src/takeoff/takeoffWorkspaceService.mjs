@@ -2080,7 +2080,8 @@ export async function approveAndBuildEstimate({
   acceptAdvisoryWarnings = false,
   confirmAdvisories = undefined,
   correctionNotes = null,
-  reopenIfApproved = false
+  reopenIfApproved = false,
+  _timing = null
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -2093,8 +2094,10 @@ export async function approveAndBuildEstimate({
     confirmAdvisories,
     acceptAdvisoryWarnings
   });
+  const mark = (name) => _timing?.mark?.(name);
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  mark("approve_job_lookup");
   if (!jobRow) {
     throw workspaceError("Takeoff job not found", 404);
   }
@@ -2109,6 +2112,7 @@ export async function approveAndBuildEstimate({
     takeoffJobId,
     jobRow.result_summary
   );
+  mark("approve_latest_lookup");
   let resolvedResult = takeoffResult;
   if (!resolvedResult) {
     if (latestRow?.normalized_takeoff_json) {
@@ -2137,6 +2141,7 @@ export async function approveAndBuildEstimate({
         baseResultId: latestRow?.id ?? null,
         reopenIfApproved: reopenIfApproved === true
       });
+      mark("approve_save_correction");
     } catch (e) {
       const err = workspaceError(
         `Failed to persist reviewed Takeoff edits: ${e instanceof Error ? e.message : String(e)}`,
@@ -2348,6 +2353,7 @@ export async function approveAndBuildEstimate({
     latestRow?.id ||
     null;
 
+  mark("approve_persist");
   return {
     ...approved,
     ok: true,
@@ -2374,7 +2380,19 @@ export async function approveAndBuildEstimate({
       ...diagnosticsBase,
       hardBlockers: [],
       branch: "approve_and_build_approved"
-    })
+    }),
+    // Request-scoped facts for Set Scope reuse within the same transaction only.
+    setScopeFacts: {
+      takeoffJobId,
+      reviewStatus: "approved",
+      resultId: approvedResultId,
+      normalizedTakeoffJson: resolvedResult,
+      computedMeasurementsJson: computed,
+      validationDiagnosticsJson: validation,
+      reviewState: effectiveRs,
+      approvedAt: approved?.approvedAt ?? new Date().toISOString(),
+      approvedByUserId: userId ?? null
+    }
   };
 }
 

@@ -925,7 +925,10 @@ export function createStudioEstimateService(deps = {}) {
     return row;
   }
 
-  async function refreshTakeoffGate(row, organizationId, actorUserId) {
+  async function refreshTakeoffGate(row, organizationId, actorUserId, opts = {}) {
+    const mark = (name) => opts._timing?.mark?.(name);
+    const facts = opts.setScopeFacts && typeof opts.setScopeFacts === "object" ? opts.setScopeFacts : null;
+
     // Confirmed manual estimates have no Takeoff job — do not force needs_takeoff_approval.
     if (isConfirmedManualPhysicalScope(row?.scope) && !row.takeoffJobId) {
       return row;
@@ -942,16 +945,46 @@ export function createStudioEstimateService(deps = {}) {
         actorUserId
       );
     }
-    const workspace = await loadWorkspace({
-      organizationId,
-      takeoffJobId: row.takeoffJobId
-    });
+
+    // Prefer request-scoped facts from the same Set Scope freeze/approve when present.
+    // Guarantees: reviewStatus, resultId, and normalized rooms match what freeze just wrote.
+    let workspace;
+    let latest;
+    if (
+      facts &&
+      String(facts.takeoffJobId || "") === String(row.takeoffJobId) &&
+      facts.normalizedTakeoffJson &&
+      Array.isArray(facts.normalizedTakeoffJson.rooms)
+    ) {
+      workspace = {
+        reviewStatus: facts.reviewStatus || "approved",
+        approvedAt: facts.approvedAt || null,
+        approvedByUserId: facts.approvedByUserId || null,
+        latestResult: facts.resultId ? { id: facts.resultId } : null
+      };
+      latest = {
+        id: facts.resultId || null,
+        normalizedTakeoffJson: facts.normalizedTakeoffJson,
+        computedMeasurementsJson: facts.computedMeasurementsJson || null,
+        validationDiagnosticsJson: facts.validationDiagnosticsJson || null,
+        reviewState: facts.reviewState || null
+      };
+      mark("refresh_gate_reuse_facts");
+    } else {
+      workspace = await loadWorkspace({
+        organizationId,
+        takeoffJobId: row.takeoffJobId
+      });
+      mark("refresh_gate_workspace");
+      latest = await loadLatestResult({
+        organizationId,
+        takeoffJobId: row.takeoffJobId
+      }).catch(() => null);
+      mark("refresh_gate_latest");
+    }
+
     const reviewStatus = String(workspace?.reviewStatus ?? "").toLowerCase();
-    const latest = await loadLatestResult({
-      organizationId,
-      takeoffJobId: row.takeoffJobId
-    }).catch(() => null);
-    const resultId = workspace?.latestResult?.id || latest?.id || null;
+    const resultId = workspace?.latestResult?.id || latest?.id || latest?.resultId || null;
 
     // Active-v4: AI geometry is only the starting source for the canonical
     // Scope — a separate "Approve Takeoff" click is no longer a required
@@ -1327,15 +1360,27 @@ export function createStudioEstimateService(deps = {}) {
       return safeEstimateView(row);
     },
 
-    async getOrCreateForCase({ organizationId, intakeCaseId, takeoffJobId, actorUserId }) {
+    async getOrCreateForCase({
+      organizationId,
+      intakeCaseId,
+      takeoffJobId,
+      actorUserId,
+      setScopeFacts = null,
+      _timing = null
+    }) {
       let row = await ensureEstimate({
         organizationId,
         intakeCaseId,
         takeoffJobId,
         actorUserId
       });
+      _timing?.mark?.("ensure_estimate");
       try {
-        row = await refreshTakeoffGate(row, organizationId, actorUserId);
+        row = await refreshTakeoffGate(row, organizationId, actorUserId, {
+          setScopeFacts,
+          _timing
+        });
+        _timing?.mark?.("refresh_takeoff_gate");
       } catch (e) {
         if (e?.code === "takeoff_unavailable" || e?.statusCode === 404) {
           // Keep estimate; UI shows needs takeoff.
