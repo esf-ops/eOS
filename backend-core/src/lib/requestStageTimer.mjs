@@ -1,6 +1,7 @@
 /**
  * Lightweight request-stage timing for Brain performance investigations.
  * No secrets. Enable via ELITEOS_REQUEST_TIMING=1 or opts.enabled.
+ * Keep production env unset unless actively measuring (Phase 3 measurement complete).
  */
 
 /**

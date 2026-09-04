@@ -4908,6 +4908,7 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | Production Set Scope stayed ~8–10s after Phase 2; dominant duplicate work was freeze loading job/latest then refreshTakeoffGate loading the same facts again. |
 | **Impacted** | `quoteFlowSetScope.mjs`, `studioEstimateService.mjs`, `takeoffWorkspaceService.mjs` (`approveAndBuildEstimate` marks + `setScopeFacts`). |
 | **Protected / unchanged** | Save-ack frontend transaction, geometry/backsplash/open-edge math, Starting Configuration rules, pricing, auth. |
+| **Measured (Pearson dirty Set Scope, build `7c75a987`)** | Server `totalMs` **4321** (client resource ~5041). Stages: `approve_persist` 952, `persist_physical_facts` 771, `display_name` 483, `starting_configuration` 439, `prior_scope_and_quote_name` 421, `auth_org` 315, `ensure_estimate` 278, `resolve_intake_case` 250, `refresh_takeoff_gate` 192 (post-reuse seed/update), `refresh_gate_reuse_facts` 0. Duplicate workspace/latest rereads removed. Remaining floor is mostly Supabase write/read RTTs — not safe to strip further without semantic risk. `ELITEOS_REQUEST_TIMING` turned off after sample. |
 
 ---
 
