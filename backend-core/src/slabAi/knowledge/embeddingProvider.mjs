@@ -25,11 +25,20 @@ export function getEmbeddingConfig(env = process.env) {
   const version = String(env.SLAB_AI_EMBEDDING_VERSION || DEFAULT_EMBEDDING_VERSION).trim();
   const apiKey =
     String(env.SLAB_AI_EMBEDDING_API_KEY || env.EMBEDDING_API_KEY || env.OPENAI_API_KEY || "").trim() || null;
+  const ollamaBaseUrl = String(env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").trim().replace(/\/+$/, "");
   const mock =
     String(env.SLAB_AI_EMBEDDING_MOCK || "").trim() === "1" ||
     provider === "mock" ||
-    (!apiKey && String(env.NODE_ENV) !== "production");
-  return { provider: mock ? "mock" : provider, model, dimensions, version, apiKey, mock };
+    (!apiKey && provider !== "ollama" && provider !== "local" && String(env.NODE_ENV) !== "production");
+  return {
+    provider: mock ? "mock" : provider,
+    model,
+    dimensions,
+    version,
+    apiKey,
+    ollamaBaseUrl,
+    mock,
+  };
 }
 
 /**
@@ -47,6 +56,9 @@ export function createEmbeddingProvider(env = process.env) {
       });
     }
     return createOpenAiEmbeddingProvider(cfg);
+  }
+  if (cfg.provider === "ollama" || cfg.provider === "local") {
+    return createOllamaEmbeddingProvider(cfg);
   }
   throw Object.assign(new Error(`Unsupported embedding provider: ${cfg.provider}`), {
     code: "EMBEDDING_UNSUPPORTED",
@@ -118,6 +130,59 @@ function createOpenAiEmbeddingProvider(cfg) {
       const rows = Array.isArray(data.data) ? data.data : [];
       rows.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
       return rows.map((r) => r.embedding);
+    },
+  };
+}
+
+/**
+ * Local / Ollama embeddings.
+ * Vectors must not be mixed with OpenAI vectors unless dimensions+version match an explicit migration.
+ */
+function createOllamaEmbeddingProvider(cfg) {
+  const base = cfg.ollamaBaseUrl || "http://127.0.0.1:11434";
+  const model = cfg.model || "nomic-embed-text";
+  return {
+    id: "ollama",
+    model,
+    dimensions: cfg.dimensions,
+    version: cfg.version,
+    async embedText(text) {
+      const [v] = await this.embedBatch([text]);
+      return v;
+    },
+    async embedBatch(texts) {
+      const out = [];
+      for (const text of texts) {
+        const res = await fetch(`${base}/api/embeddings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model, prompt: String(text || "").slice(0, 8000) }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw Object.assign(new Error(`Ollama embedding failed (${res.status})`), {
+            code: "EMBEDDING_FAILED",
+            detail: body.slice(0, 200),
+          });
+        }
+        const data = await res.json();
+        const vec = data.embedding;
+        if (!Array.isArray(vec)) {
+          throw Object.assign(new Error("Ollama embedding response missing embedding array"), {
+            code: "EMBEDDING_FAILED",
+          });
+        }
+        if (cfg.dimensions && vec.length !== cfg.dimensions) {
+          throw Object.assign(
+            new Error(
+              `Embedding dimension mismatch: got ${vec.length}, expected ${cfg.dimensions}. Do not mix incompatible vector spaces — bump SLAB_AI_EMBEDDING_VERSION and re-embed.`
+            ),
+            { code: "EMBEDDING_DIMENSION_MISMATCH" }
+          );
+        }
+        out.push(vec);
+      }
+      return out;
     },
   };
 }

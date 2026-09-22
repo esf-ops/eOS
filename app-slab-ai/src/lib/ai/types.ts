@@ -1,6 +1,6 @@
 export type ModelClass = "fast" | "reasoning";
 
-export type AIProviderName = "openai" | "mock";
+export type AIProviderName = "openai" | "ollama" | "mock";
 
 export type AIProviderConfig = {
   provider: AIProviderName;
@@ -11,6 +11,7 @@ export type AIProviderConfig = {
   hasApiKey: boolean;
   /** True when production would silence mock masquerading. */
   allowMockInProduction: boolean;
+  ollamaBaseUrl?: string;
 };
 
 export type GenerationRequest = {

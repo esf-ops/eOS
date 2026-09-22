@@ -4985,3 +4985,29 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Governed org-wide job search API; finance permission-safe summary DTOs; inventory remnant-specific actions; human-approved write action phase; Playwright when sentinel auth exists. |
 
 ---
+
+### 372. eliteOS Brain Agent Gateway — read-only local AI foundation
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | Introduce a **Brain Agent Gateway** as the only operational data interface available to AI agents. The LLM receives **no database credentials**, **no arbitrary SQL**, and **no write actions**. Company facts must be backed by **evidence IDs** produced in the same agent run; unsupported claims are rejected by **deterministic validation**. Foundation capabilities (Accounts, Quotes, account-scoped Jobs, Inventory, Knowledge, server-side `quote_count` by account) wrap existing AI-safe Brain adapters. **Ollama** is a first-class chat provider (`AI_PROVIDER=ollama`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`). Embeddings support **ollama/local** with explicit dimension/version guards (no silent mixing with OpenAI vectors). Capability map: `docs/ai/BRAIN_AGENT_CAPABILITY_MAP.md`. |
+| **Why** | Move from Skills/form catalog toward a trustworthy investigative agent over eliteOS Brain without weakening org/head permissions or inventing company facts. |
+| **Impacted files/docs** | `backend-core/src/brainAgent/*`, `server.js` route attach, `embeddingProvider.mjs` (ollama/local), `app-slab-ai/src/lib/ai/provider.ts`, `docs/ai/BRAIN_AGENT_CAPABILITY_MAP.md`, this entry. |
+| **What is NOT built** | Write actions; finance/HR exposure; org-wide job search; full multi-domain wiring; automatic deploy; production embedding re-backfill migration; LLM-as-sole-verifier. |
+| **Revisit trigger** | Next slice: wire `brain.get_recent_activity` + sales-safe metrics; Ollama tool-calling planner when model quality is proven; embedding version migration for local models. |
+
+---
+
+### 373. Brain Agent is model-driven investigation — no app intent/workflow routing
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | The Brain Agent runtime is a true iterative loop: **MODEL → TOOL → OBSERVATION → MODEL → … → evidence-grounded answer**. The **model** decides user meaning, investigation path, which read capability to call, whether another query is needed, how facts relate, and what to say. Application code **must not** classify business intent (no growing regex/keyword routers, no hard-coded conversational workflows, no `planDeterministicInvestigation`-style path pickers). Deterministic code is limited to authz, org isolation, read-only enforcement, schema/input validation, limits/timeouts, provenance, and factual support checking. If no planner model is configured, the agent **abstains** — it does **not** fall back to regex workflows. Denied/unknown tools return as **observations** so the model can continue within the user’s permitted capability set. |
+| **Why** | Prior slabOS AI failed by having application code prescribe workflows. That does not scale and re-creates brittle intent libraries. Investigation over authorized Brain data must be free-form within hard safety gates. |
+| **Impacted files/docs** | `backend-core/src/brainAgent/agentRuntime.mjs`, `modelDriver.mjs`, `evals/brainAgent.eval.test.mjs`, `docs/ai/BRAIN_AGENT_CAPABILITY_MAP.md`, this entry. |
+| **What is NOT built** | Write tools; automatic deploy; replacing slabOS conversational UX in this change; requiring a workflow per business question. |
+| **Revisit trigger** | If a capability still needs deterministic post-processing for safety (e.g. metric aggregation), keep it inside the capability — never as user-intent routing. |
+
+---

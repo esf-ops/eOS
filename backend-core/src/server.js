@@ -26,6 +26,7 @@ import { attachAccountDirectoryRoutes, resolveAccountDirectoryStore } from "./ac
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
 import { attachSlabAiRoutes } from "./slabAi/slabAiApi.js";
 import { attachSlabAiKnowledgeRoutes } from "./slabAi/slabAiKnowledgeApi.js";
+import { attachBrainAgentRoutes } from "./brainAgent/brainAgentApi.js";
 import { attachSalesOpsRoutes } from "./salesOps/salesOpsApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
@@ -1316,6 +1317,12 @@ attachSlabAiRoutes(app, {
 });
 
 attachSlabAiKnowledgeRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachBrainAgentRoutes(app, {
   requireAuth,
   requireHeadAccess,
   getSupabase: supabaseServerClient
