@@ -30,6 +30,8 @@ export type AiQuoteListItem = {
   recordedTotal: number | null;
   salesRep?: string | null;
   branch?: string | null;
+  /** Authoritative Quote Library updated_at — used for latest/most-recent selection. */
+  updatedAt?: string | null;
   note?: string;
 };
 

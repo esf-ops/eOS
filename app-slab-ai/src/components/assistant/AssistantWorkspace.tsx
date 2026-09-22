@@ -121,6 +121,7 @@ export function AssistantWorkspace() {
   } | null>(null);
   const [clarifyDraft, setClarifyDraft] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
+  const [editArtifactSource, setEditArtifactSource] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -819,6 +820,19 @@ export function AssistantWorkspace() {
                   <div className="flex gap-1">
                     <button
                       type="button"
+                      className={cn(
+                        "rounded px-1.5 py-1 text-[10px] font-medium",
+                        editArtifactSource
+                          ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                          : "text-[var(--muted-fg)] hover:bg-[var(--muted)]"
+                      )}
+                      title="Edit source"
+                      onClick={() => setEditArtifactSource((v) => !v)}
+                    >
+                      {editArtifactSource ? "Done" : "Edit"}
+                    </button>
+                    <button
+                      type="button"
                       className="rounded p-1.5 text-[var(--muted-fg)] hover:bg-[var(--muted)]"
                       title="Copy"
                       onClick={() => void copyArtifact()}
@@ -844,25 +858,27 @@ export function AssistantWorkspace() {
                   </div>
                 </div>
                 {copied ? <p className="px-3 pt-1 text-[10px] text-[var(--accent)]">Copied</p> : null}
-                <textarea
-                  className="min-h-0 flex-1 resize-none bg-transparent px-3 py-3 font-[family-name:var(--font-body)] text-xs leading-relaxed text-[var(--fg)] outline-none"
-                  value={activeArtifact.content}
-                  onChange={(e) =>
-                    setArtifacts((prev) =>
-                      prev.map((a) => (a.id === activeArtifact.id ? { ...a, content: e.target.value } : a))
-                    )
-                  }
-                />
-                {activeArtifact.content.trim() ? (
-                  <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-[var(--border)] px-3 py-2">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-fg)]">
-                      Preview
-                    </p>
-                    <div className="ai-markdown prose-sm max-w-none text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeArtifact.content}</ReactMarkdown>
-                    </div>
+                {editArtifactSource ? (
+                  <textarea
+                    className="min-h-0 flex-1 resize-none bg-transparent px-3 py-3 font-[family-name:var(--font-body)] text-xs leading-relaxed text-[var(--fg)] outline-none"
+                    value={activeArtifact.content}
+                    onChange={(e) =>
+                      setArtifacts((prev) =>
+                        prev.map((a) => (a.id === activeArtifact.id ? { ...a, content: e.target.value } : a))
+                      )
+                    }
+                  />
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                    {activeArtifact.content.trim() ? (
+                      <div className="ai-markdown prose-sm max-w-none text-sm leading-relaxed">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeArtifact.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[var(--muted-fg)]">Generating…</p>
+                    )}
                   </div>
-                ) : null}
+                )}
               </>
             ) : (
               <p className="p-4 text-xs text-[var(--muted-fg)]">

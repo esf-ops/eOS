@@ -40,6 +40,7 @@ export type DisambiguationOption = {
   id: string;
   label: string;
   meta?: string;
+  updatedAt?: string | null;
 };
 
 export type AssistantTurnResult =

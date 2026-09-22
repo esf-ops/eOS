@@ -1,4 +1,5 @@
 import type { AssistantIntent, AssistantThreadContext, ClarifyQuestion } from "./types";
+import { extractAccountSearchQuery } from "./deterministicPlan";
 
 const CARE_RE =
   /\b(care\s*(sheet|guide)|maintenance\s*guide|cleaning\s*(guide|instructions)|care\s*instructions)\b/i;
@@ -46,14 +47,9 @@ export function extractEntityHints(message: string): {
   const m = message.trim();
   const out: ReturnType<typeof extractEntityHints> = {};
 
-  const quoted = m.match(/["“]([^"”]{2,80})["”]/);
-  if (quoted) out.accountHint = quoted[1].trim();
-
-  const pullUp = m.match(/\b(?:pull\s+up|look\s+up|brief(?:ing)?\s+(?:me\s+)?(?:on|for)|about)\s+([A-Z][\w&.' -]{1,60})/i);
-  if (pullUp && !out.accountHint) out.accountHint = pullUp[1].replace(/[?.!,]+$/, "").trim();
-
-  const withName = m.match(/\bwith\s+([A-Z][\w&.' -]{1,60}?)(?:\?|$)/);
-  if (withName && !out.accountHint) out.accountHint = withName[1].trim();
+  // Prefer scaffold-stripping extraction (handles "brief me… 319 design")
+  const accountQ = extractAccountSearchQuery(m);
+  if (accountQ) out.accountHint = accountQ;
 
   const quoteNum = m.match(/\b(?:quote|estimate)\s+#?\s*([A-Z0-9][\w-]{2,40})/i);
   if (quoteNum) out.quoteHint = quoteNum[1].trim();
