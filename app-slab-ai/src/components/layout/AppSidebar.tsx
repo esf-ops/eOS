@@ -22,8 +22,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 const primaryNavBase = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/tools", label: "All Tools", icon: LayoutGrid },
+  { href: "/", label: "Assistant", icon: Home },
+  { href: "/tools", label: "Skills", icon: LayoutGrid },
   { href: "/favorites", label: "Favorites", icon: Star },
   { href: "/recent", label: "Recent", icon: Clock3 },
 ];
@@ -53,7 +53,7 @@ export function AppSidebar() {
           {!collapsed ? (
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-fg)]">slabOS</p>
-              <p className="text-sm font-semibold tracking-tight">AI Studio</p>
+              <p className="text-sm font-semibold tracking-tight">Operating assistant</p>
             </div>
           ) : (
             <span className="mx-auto text-xs font-bold">sAI</span>

@@ -337,15 +337,19 @@ export async function processKnowledgeDocument({ db, organizationId, documentId,
     };
   } catch (e) {
     const safe = "Processing failed. Retry after verifying the file.";
-    await updateKnowledgeDocument(db, {
-      organizationId,
-      documentId,
-      patch: {
-        status: "processing_failed",
-        processing_error: safe,
-        processed_at: new Date().toISOString(),
-      },
-    }).catch(() => null);
+    try {
+      await updateKnowledgeDocument(db, {
+        organizationId,
+        documentId,
+        patch: {
+          status: "processing_failed",
+          processing_error: safe,
+          processed_at: new Date().toISOString(),
+        },
+      });
+    } catch {
+      /* ignore secondary status write failure */
+    }
     return { ok: false, status: 500, error: safe, detail: String(e?.message || e) };
   }
 }

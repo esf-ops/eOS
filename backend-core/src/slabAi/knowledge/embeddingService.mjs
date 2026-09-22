@@ -17,15 +17,18 @@ export async function embedDocumentPassages(db, { organizationId, documentId, fo
   try {
     provider = createEmbeddingProvider();
   } catch (e) {
-    await db
-      .from("slab_ai_knowledge_documents")
-      .update({
-        embedding_status: "failed",
-        embedding_error: String(e.message || e).slice(0, 240),
-      })
-      .eq("organization_id", organizationId)
-      .eq("id", documentId)
-      .catch(() => null);
+    try {
+      await db
+        .from("slab_ai_knowledge_documents")
+        .update({
+          embedding_status: "failed",
+          embedding_error: String(e.message || e).slice(0, 240),
+        })
+        .eq("organization_id", organizationId)
+        .eq("id", documentId);
+    } catch {
+      /* schema may lack embedding columns */
+    }
     return { ok: false, error: String(e.message || e), code: e.code || "EMBEDDING_UNAVAILABLE" };
   }
 
@@ -113,15 +116,18 @@ export async function embedDocumentPassages(db, { organizationId, documentId, fo
     } catch (e) {
       failed += slice.length;
       for (const p of slice) {
-        await db
-          .from("slab_ai_knowledge_passages")
-          .update({
-            embedding_status: "failed",
-            embedding_error: String(e.message || e).slice(0, 200),
-          })
-          .eq("id", p.id)
-          .eq("organization_id", organizationId)
-          .catch(() => null);
+        try {
+          await db
+            .from("slab_ai_knowledge_passages")
+            .update({
+              embedding_status: "failed",
+              embedding_error: String(e.message || e).slice(0, 200),
+            })
+            .eq("id", p.id)
+            .eq("organization_id", organizationId);
+        } catch {
+          /* ignore per-passage status write failures */
+        }
       }
     }
   }

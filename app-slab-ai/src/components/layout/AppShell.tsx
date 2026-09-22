@@ -9,8 +9,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <SlabAiTopbar />
       <div className="flex min-h-0 flex-1">
         <AppSidebar />
-        <main className="min-w-0 flex-1 overflow-x-hidden px-4 py-5 pb-24 md:px-8 md:py-7 md:pb-7">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
+        <main className="min-w-0 flex-1 overflow-x-hidden px-3 py-3 pb-24 md:px-5 md:py-4 md:pb-4">
+          <div className="mx-auto w-full max-w-[1400px]">{children}</div>
         </main>
       </div>
     </div>

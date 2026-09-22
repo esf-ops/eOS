@@ -83,11 +83,14 @@ export async function ensureSentinelKnowledge(db, organizationId) {
   const documentId = docRows?.[0]?.id;
   if (!documentId) return { ok: false, error: "insert failed" };
 
-  await db
-    .from("slab_ai_knowledge_documents")
-    .update({ source_group_id: documentId })
-    .eq("id", documentId)
-    .catch(() => null);
+  try {
+    await db
+      .from("slab_ai_knowledge_documents")
+      .update({ source_group_id: documentId })
+      .eq("id", documentId);
+  } catch {
+    /* optional Phase 3 column */
+  }
 
   await insertPassages(db, organizationId, documentId);
   return { ok: true, documentId, seeded: true };

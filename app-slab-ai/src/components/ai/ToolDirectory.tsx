@@ -19,7 +19,7 @@ export function ToolDirectory({
   favorites,
   onToggleFavorite,
   initialCategory = "all",
-  heading = "All tools",
+  heading = "Skills",
   showFilters = true,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -33,11 +33,11 @@ export function ToolDirectory({
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-[var(--fg)]">{heading}</h2>
           <p className="mt-1 text-sm text-[var(--fg-secondary)]">
-            Specialized AI coworkers for stone fabrication — searchable and expandable.
+            Guided workflows the assistant can also invoke from natural language.
           </p>
         </div>
         <label className="relative block w-full sm:max-w-sm">
-          <span className="sr-only">Search tools</span>
+          <span className="sr-only">Search skills</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-fg)]" />
           <input
             value={query}
