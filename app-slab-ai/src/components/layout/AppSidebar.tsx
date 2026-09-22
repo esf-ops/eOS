@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 const primaryNavBase = [
-  { href: "/", label: "Assistant", icon: Home },
+  { href: "/", label: "Ask eliteOS", icon: Home },
   { href: "/tools", label: "Skills", icon: LayoutGrid },
   { href: "/favorites", label: "Favorites", icon: Star },
   { href: "/recent", label: "Recent", icon: Clock3 },

@@ -107,14 +107,22 @@ Respond with a single JSON object only, one of:
 }
 
 function buildUserTurn({ message, context, history, evidenceSnapshot }) {
+  const ctx = context && typeof context === "object" ? context : {};
   return JSON.stringify(
     {
       userMessage: message,
       threadContext: {
-        accountId: context.accountId || null,
-        accountLabel: context.accountLabel || null,
-        quoteId: context.quoteId || null,
-        quoteLabel: context.quoteLabel || null,
+        accountId: ctx.accountId || null,
+        accountLabel: ctx.accountLabel || null,
+        quoteId: ctx.quoteId || null,
+        quoteLabel: ctx.quoteLabel || null,
+        jobId: ctx.jobId || null,
+        jobLabel: ctx.jobLabel || null,
+        selectedEntityId: ctx.selectedEntityId || null,
+        selectedEntityLabel: ctx.selectedEntityLabel || null,
+        // Recent turns for follow-ups ("their", "that quote") — model interprets; no app pronoun resolver.
+        recentMessages: Array.isArray(ctx.recentMessages) ? ctx.recentMessages.slice(-12) : [],
+        priorEvidenceRefs: Array.isArray(ctx.priorEvidenceRefs) ? ctx.priorEvidenceRefs.slice(-20) : [],
       },
       priorToolHistory: history,
       evidenceSoFar: evidenceSnapshot,

@@ -15,8 +15,11 @@ type Body = {
 
 /**
  * POST /api/ai/assistant
- * Intent → clarify / disambiguate / generate skill / message.
- * Read-only orchestration; does not grant LLM database access.
+ *
+ * LEGACY — Skill/intent orchestration (classifyIntent, deterministicPlan, runAssistant).
+ * Kept for rollback and direct Skill tooling. NOT the primary home chat path.
+ *
+ * Primary conversational path: POST /api/ai/brain-agent/run → Brain Agent.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -32,7 +35,12 @@ export async function POST(req: NextRequest) {
       auth,
     });
 
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      path: "legacy-assistant",
+      legacyAssistant: true,
+    });
   } catch (err) {
     const e = err as { message?: string; code?: string; status?: number };
     const status = e.status ?? 500;
@@ -44,6 +52,8 @@ export async function POST(req: NextRequest) {
             ? "Unable to process that request."
             : e.message || "Request failed",
         code: e.code || "INTERNAL_ERROR",
+        path: "legacy-assistant",
+        legacyAssistant: true,
       },
       { status }
     );
@@ -54,6 +64,9 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "slab-ai-assistant",
+    legacy: true,
+    primary: false,
+    note: "Legacy Skill/intent orchestrator. Primary chat uses /api/ai/brain-agent/run.",
     modes: ["clarify", "disambiguate", "generate", "message"],
     writeActions: false,
   });

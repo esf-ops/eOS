@@ -5011,3 +5011,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | If a capability still needs deterministic post-processing for safety (e.g. metric aggregation), keep it inside the capability — never as user-intent routing. |
 
 ---
+
+### 374. eliteOS AI head primary path → model-driven Brain Agent
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | The eliteOS AI head (`app-slab-ai`) **Ask eliteOS** home experience proxies authenticated chat to Brain `POST /api/brain-agent/run` via `POST /api/ai/brain-agent/run`. Ordinary messages do **not** use legacy `classifyIntent` / `deterministicPlan` / `runAssistant` / Skill routing. Thread context sends recent messages + resolved entity IDs/labels + prior evidence refs; the model interprets follow-ups. Legacy `/api/ai/assistant` remains for rollback; Skills pages remain independently reachable. Admin/executive debug drawer may request tool traces. |
+| **Why** | Productize the model-driven investigator without reintroducing app-layer workflow routing. |
+| **Impacted files/docs** | `app-slab-ai/src/app/api/ai/brain-agent/run/route.ts`, `AssistantWorkspace.tsx`, `lib/brainAgent/*`, legacy assistant route marked non-primary, this entry. |
+| **What is NOT built** | New Skills; domain expansion; write actions; Ollama network changes; deploy. |
+| **Revisit trigger** | Wire Skill generation as optional post-answer affordance only if users still need guided forms after Brain Agent answers. |
+
+---

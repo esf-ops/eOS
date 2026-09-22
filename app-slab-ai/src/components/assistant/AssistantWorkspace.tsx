@@ -6,76 +6,66 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
+  Bug,
   Building2,
-  Copy,
-  Download,
   FileText,
   Gem,
   Loader2,
-  Printer,
   Sparkles,
   Wrench,
   X,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { downloadBlob, markdownToDocxBlob } from "@/lib/export/docx";
-import type { AssistantThreadContext, ClarifyQuestion, DisambiguationOption } from "@/lib/ai/assistant/types";
+import {
+  BRAIN_AGENT_CHAT_PATH,
+  answerStateBanner,
+  buildBrainAgentContext,
+  canShowBrainAgentDebug,
+  formatEvidenceForDisplay,
+  mergeResolvedFromEvidence,
+  sanitizeDebugPayload,
+  type BrainAgentRunResult,
+  type BrainAgentThreadContext,
+  type BrainEvidenceItem,
+} from "@/lib/brainAgent";
 import { cn } from "@/lib/utils";
 
-type ChatRole = "user" | "assistant" | "system";
+type ChatRole = "user" | "assistant";
 
 type Provenance = {
   company: Array<{ type: string; entityId: string; label: string }>;
-  knowledge: Array<{
-    id: string;
-    title: string;
-    locator?: string | null;
-    sourceType?: string;
-  }>;
+  knowledge: Array<{ id: string; title: string; locator?: string | null }>;
   analysisNotes: string[];
 };
 
-type Artifact = {
-  id: string;
-  title: string;
-  skillId: string;
-  content: string;
-  editable: boolean;
-};
+type ClarifyOption = { id: string; label: string; meta?: string };
 
 type ChatMessage = {
   id: string;
   role: ChatRole;
   text: string;
-  clarify?: ClarifyQuestion[];
-  options?: DisambiguationOption[];
-  domain?: "account" | "quote";
-  followUps?: string[];
+  answerState?: string;
+  options?: ClarifyOption[];
   provenance?: Provenance;
-  artifactId?: string;
+  freshnessWarnings?: string[];
+  toolCalls?: number;
   streaming?: boolean;
 };
 
 const STARTERS = [
-  { label: "Brief me on an account", prompt: "Brief me on an account before I call them." },
-  { label: "Draft a quote scope", prompt: "Find a quote and draft a customer-ready scope." },
-  { label: "Troubleshoot a shop issue", prompt: "We're getting chipping on a Taj Mahal miter. What should we check?" },
-  { label: "Create a care guide", prompt: "Make a care guide for Cambria Whitendale." },
-  { label: "Find material", prompt: "Do we have any Taj Mahal that could work for a vanity?" },
-  { label: "Search company knowledge", prompt: "What do our approved install standards say about seam placement?" },
+  { label: "Account status", prompt: "What's going on with our top builder accounts recently?" },
+  { label: "Find a quote", prompt: "Find the latest quote for an account I name." },
+  { label: "Material on hand", prompt: "Do we have any Taj Mahal slabs that could work for a vanity?" },
+  { label: "Company knowledge", prompt: "What do our approved install standards say about seam placement?" },
+  { label: "Account lookup", prompt: "Pull up Garman Built." },
+  { label: "Jobs for an account", prompt: "Show recent jobs for an account I have open." },
 ];
 
-function stripMeta(raw: string): { content: string; meta: Record<string, unknown> | null } {
-  const m = raw.match(/^<!--SLAB_AI_META:([\s\S]*?)-->\n?/);
-  if (!m) return { content: raw, meta: null };
-  try {
-    return { content: raw.slice(m[0].length), meta: JSON.parse(m[1]) as Record<string, unknown> };
-  } catch {
-    return { content: raw, meta: null };
-  }
+function uid() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function chipsFromContext(ctx: AssistantThreadContext) {
+function chipsFromContext(ctx: BrainAgentThreadContext) {
   const chips: Array<{ type: string; id: string; label: string }> = [];
   if (ctx.accountId && ctx.accountLabel) chips.push({ type: "account", id: ctx.accountId, label: ctx.accountLabel });
   if (ctx.quoteId && ctx.quoteLabel) chips.push({ type: "quote", id: ctx.quoteId, label: ctx.quoteLabel });
@@ -84,47 +74,37 @@ function chipsFromContext(ctx: AssistantThreadContext) {
   return chips;
 }
 
-function skillTitle(skillId: string): string {
-  switch (skillId) {
-    case "stone-care":
-      return "Stone care guide";
-    case "quote-scope":
-      return "Quote scope";
-    case "account-brief":
-      return "Account brief";
-    case "machine-troubleshooter":
-      return "Shop diagnostic";
-    case "remnant-pitch":
-      return "Remnant marketing";
-    default:
-      return "Generated document";
-  }
-}
-
-function uid() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function provenanceFromEvidence(evidence: BrainEvidenceItem[] | undefined): Provenance {
+  const formatted = formatEvidenceForDisplay(evidence);
+  return {
+    company: formatted.company.map((c) => ({
+      type: c.type,
+      entityId: c.entityId,
+      label: c.label,
+    })),
+    knowledge: formatted.knowledge.map((k) => ({
+      id: k.entityId,
+      title: k.label,
+      locator: k.freshnessNote || null,
+    })),
+    analysisNotes: formatted.freshnessWarnings,
+  };
 }
 
 export function AssistantWorkspace() {
-  const { accessToken } = useAuth();
-  const [context, setContext] = useState<AssistantThreadContext>({});
+  const { accessToken, context: authContext } = useAuth();
+  const [thread, setThread] = useState<BrainAgentThreadContext>({});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [composer, setComposer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
-  const [panelTab, setPanelTab] = useState<"evidence" | "artifact">("evidence");
-  const [pendingClarify, setPendingClarify] = useState<{
-    questions: ClarifyQuestion[];
-    fields: Record<string, unknown>;
-    intentMessage: string;
-  } | null>(null);
-  const [clarifyDraft, setClarifyDraft] = useState<Record<string, string>>({});
-  const [copied, setCopied] = useState(false);
-  const [editArtifactSource, setEditArtifactSource] = useState(false);
+  const [latestEvidence, setLatestEvidence] = useState<BrainEvidenceItem[]>([]);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [lastDebug, setLastDebug] = useState<Record<string, unknown> | null>(null);
+  const [wantDebug, setWantDebug] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const showDebugControls = canShowBrainAgentDebug(authContext?.role);
 
   const authHeaders = useCallback((): HeadersInit => {
     const h: HeadersInit = { "Content-Type": "application/json" };
@@ -136,11 +116,10 @@ export function AssistantWorkspace() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, busy]);
 
-  const activeArtifact = artifacts.find((a) => a.id === activeArtifactId) || null;
   const latestProvenance = [...messages].reverse().find((m) => m.provenance)?.provenance || null;
 
   function clearChip(type: string) {
-    setContext((c) => {
+    setThread((c) => {
       const next = { ...c };
       if (type === "account") {
         next.accountId = null;
@@ -159,258 +138,118 @@ export function AssistantWorkspace() {
     });
   }
 
-  async function runGenerate(skillId: string, formData: Record<string, unknown>, assistantNote?: string) {
-    const artId = uid();
-    const streamingMsgId = uid();
-    setArtifacts((prev) => [
-      ...prev,
-      { id: artId, title: skillTitle(skillId), skillId, content: "", editable: true },
-    ]);
-    setActiveArtifactId(artId);
-    setPanelTab("artifact");
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: streamingMsgId,
-        role: "assistant",
-        text: assistantNote || `Working on ${skillTitle(skillId).toLowerCase()}…`,
-        streaming: true,
-        artifactId: artId,
-      },
-    ]);
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const res = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ toolId: skillId, formData }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        let message = "Generation failed.";
-        try {
-          const data = (await res.json()) as { error?: string };
-          if (data.error) message = data.error;
-        } catch {
-          /* ignore */
-        }
-        setMessages((prev) =>
-          prev.map((m) => (m.id === streamingMsgId ? { ...m, text: message, streaming: false } : m))
-        );
-        return;
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === streamingMsgId ? { ...m, text: "No response stream.", streaming: false } : m
-          )
-        );
-        return;
-      }
-
-      let raw = "";
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        raw += decoder.decode(value, { stream: true });
-        const { content, meta } = stripMeta(raw);
-        setArtifacts((prev) => prev.map((a) => (a.id === artId ? { ...a, content } : a)));
-        if (meta) {
-          const sources = (meta.sources as Provenance["knowledge"]) || [];
-          const ops = (meta.operationalSources as Provenance["company"]) || [];
-          const warnings = (meta.warnings as string[]) || [];
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === streamingMsgId
-                ? {
-                    ...m,
-                    provenance: {
-                      company: ops,
-                      knowledge: sources.map((s) => ({
-                        id: String((s as { id?: string }).id || ""),
-                        title: String((s as { title?: string }).title || "Source"),
-                        locator: (s as { locator?: string | null }).locator,
-                        sourceType: (s as { sourceType?: string }).sourceType,
-                      })),
-                      analysisNotes: warnings,
-                    },
-                  }
-                : m
-            )
-          );
-        }
-      }
-
-      const { content, meta } = stripMeta(raw);
-      setArtifacts((prev) => prev.map((a) => (a.id === artId ? { ...a, content } : a)));
-      const sources = ((meta?.sources as Provenance["knowledge"]) || []).map((s) => ({
-        id: String((s as { id?: string }).id || ""),
-        title: String((s as { title?: string }).title || "Source"),
-        locator: (s as { locator?: string | null }).locator,
-        sourceType: (s as { sourceType?: string }).sourceType,
-      }));
-      const ops = (meta?.operationalSources as Provenance["company"]) || [];
-      const warnings = (meta?.warnings as string[]) || [];
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === streamingMsgId
-            ? {
-                ...m,
-                streaming: false,
-                text: `Here’s your **${skillTitle(skillId)}**. Review it in the artifact panel — edit, copy, or download as DOCX.`,
-                followUps: [
-                  "Refine the tone for a customer email",
-                  "What company data did you use?",
-                  "Is there approved manufacturer guidance loaded?",
-                ],
-                provenance: {
-                  company: ops,
-                  knowledge: sources,
-                  analysisNotes: warnings.length
-                    ? warnings
-                    : ["Conclusions below the evidence line are AI synthesis — verify against shop standards."],
-                },
-                artifactId: artId,
-              }
-            : m
-        )
-      );
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === streamingMsgId
-            ? { ...m, text: (err as Error).message || "Generation failed.", streaming: false }
-            : m
-        )
-      );
-    }
-  }
-
-  async function submitTurn(opts: {
-    message: string;
-    selectedEntity?: { domain: "account" | "quote"; id: string; label: string };
-    clarifyAnswers?: Record<string, string>;
-  }) {
+  async function submitTurn(opts: { message: string; entityPick?: ClarifyOption }) {
     const displayText = opts.message.trim();
-    if (displayText) {
-      setMessages((prev) => [...prev, { id: uid(), role: "user", text: displayText }]);
-    }
+    if (!displayText) return;
+
+    const nextMessages: ChatMessage[] = [
+      ...messages,
+      { id: uid(), role: "user", text: displayText },
+    ];
+    setMessages(nextMessages);
     setBusy(true);
-    setPendingClarify(null);
+
+    let resolved = { ...thread };
+    if (opts.entityPick) {
+      // Attach chosen clarify option for the model — do not classify account vs quote in the app.
+      resolved = {
+        ...resolved,
+        selectedEntityId: opts.entityPick.id,
+        selectedEntityLabel: opts.entityPick.label,
+      };
+      setThread(resolved);
+    }
+
+    const context = buildBrainAgentContext({
+      resolved,
+      recentMessages: nextMessages.map((m) => ({ role: m.role, text: m.text })),
+      latestEvidence,
+    });
 
     try {
-      const res = await fetch("/api/ai/assistant", {
+      const res = await fetch(BRAIN_AGENT_CHAT_PATH, {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
-          message: opts.message,
+          message: displayText,
           context,
-          selectedEntity: opts.selectedEntity,
-          clarifyAnswers: opts.clarifyAnswers,
+          debug: wantDebug && showDebugControls,
         }),
       });
-      const data = (await res.json()) as Record<string, unknown> & {
-        ok?: boolean;
+      const data = (await res.json()) as BrainAgentRunResult & {
+        path?: string;
+        legacyAssistant?: boolean;
         error?: string;
-        mode?: string;
-        message?: string;
-        context?: AssistantThreadContext;
-        questions?: ClarifyQuestion[];
-        options?: DisambiguationOption[];
-        domain?: "account" | "quote";
-        skillId?: string;
-        formData?: Record<string, unknown>;
-        assistantNote?: string;
-        suggestedFields?: Record<string, unknown>;
-        followUps?: string[];
-        operationalSources?: Provenance["company"];
       };
 
-      if (!res.ok || data.ok === false) {
-        setMessages((prev) => [
-          ...prev,
-          { id: uid(), role: "assistant", text: data.error || "Something went wrong." },
-        ]);
-        return;
-      }
-
-      if (data.context) setContext(data.context);
-
-      if (data.mode === "clarify" && data.questions?.length) {
-        setPendingClarify({
-          questions: data.questions,
-          fields: data.suggestedFields || {},
-          intentMessage: data.message || "",
-        });
-        setClarifyDraft({});
+      if (data.legacyAssistant === true || data.path === "legacy-assistant") {
         setMessages((prev) => [
           ...prev,
           {
             id: uid(),
             role: "assistant",
-            text: data.message || "I need a bit more detail.",
-            clarify: data.questions,
+            text: "Misrouted to the legacy assistant. Primary chat must use the Brain Agent.",
+            answerState: "CAPABILITY_UNAVAILABLE",
           },
         ]);
         return;
       }
 
-      if (data.mode === "disambiguate" && data.options?.length) {
+      if (showDebugControls && wantDebug) {
+        setLastDebug(
+          sanitizeDebugPayload({
+            ...data,
+            evidence: data.evidence,
+          } as Record<string, unknown>)
+        );
+      }
+
+      if (!res.ok && !data.answer) {
         setMessages((prev) => [
           ...prev,
           {
             id: uid(),
             role: "assistant",
-            text: data.message || "Select the correct match.",
-            options: data.options,
-            domain: data.domain,
+            text: data.error || data.answer || "Unable to reach the Brain Agent.",
+            answerState: data.answerState || "CAPABILITY_UNAVAILABLE",
           },
         ]);
         return;
       }
 
-      if (data.mode === "generate" && data.skillId && data.formData) {
-        if (data.assistantNote) {
-          setMessages((prev) => [
-            ...prev,
-            { id: uid(), role: "assistant", text: data.assistantNote as string },
-          ]);
-        }
-        await runGenerate(data.skillId, data.formData, data.assistantNote);
-        return;
-      }
+      const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+      setLatestEvidence(evidence);
+      setThread((prev) => mergeResolvedFromEvidence({ ...prev, ...resolved }, evidence));
 
-      // message mode
+      const provenance = provenanceFromEvidence(evidence);
+      const freshness = formatEvidenceForDisplay(evidence).freshnessWarnings;
+      const banner = answerStateBanner(data.answerState);
+
       setMessages((prev) => [
         ...prev,
         {
           id: uid(),
           role: "assistant",
-          text: data.message || "How can I help?",
-          followUps: data.followUps,
-          provenance: data.operationalSources?.length
-            ? {
-                company: data.operationalSources,
-                knowledge: [],
-                analysisNotes: [],
-              }
-            : undefined,
+          text: data.answer || "I don't have enough authoritative eliteOS data to answer that.",
+          answerState: data.answerState,
+          options: data.answerState === "AMBIGUOUS_ENTITY" ? data.options : undefined,
+          provenance,
+          freshnessWarnings: [
+            ...(banner && banner.tone !== "ok" ? [banner.label] : []),
+            ...freshness,
+          ],
+          toolCalls: data.toolCalls,
         },
       ]);
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { id: uid(), role: "assistant", text: (err as Error).message || "Request failed." },
+        {
+          id: uid(),
+          role: "assistant",
+          text: (err as Error).message || "Request failed.",
+          answerState: "CAPABILITY_UNAVAILABLE",
+        },
       ]);
     } finally {
       setBusy(false);
@@ -424,75 +263,55 @@ export function AssistantWorkspace() {
     void submitTurn({ message: text });
   }
 
-  function onSelectEntity(domain: "account" | "quote", opt: DisambiguationOption) {
+  function onSelectOption(opt: ClarifyOption) {
     void submitTurn({
-      message: "continue",
-      selectedEntity: { domain, id: opt.id, label: opt.label },
+      message: `Use this match: ${opt.label}`,
+      entityPick: opt,
     });
   }
 
-  function onSubmitClarify() {
-    if (!pendingClarify) return;
-    const answers: Record<string, string> = { ...clarifyDraft };
-    const mergedMessage = [
-      pendingClarify.intentMessage,
-      ...pendingClarify.questions.map((q) => {
-        const v = answers[q.field || q.id];
-        return v ? `${q.prompt} ${v}` : "";
-      }),
-    ]
-      .filter(Boolean)
-      .join("\n");
-    void submitTurn({
-      message: mergedMessage || composer || "continue",
-      clarifyAnswers: answers,
-    });
-  }
-
-  async function copyArtifact() {
-    if (!activeArtifact?.content) return;
-    await navigator.clipboard.writeText(activeArtifact.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-  }
-
-  async function downloadArtifact() {
-    if (!activeArtifact?.content) return;
-    const blob = await markdownToDocxBlob({
-      title: activeArtifact.title,
-      content: activeArtifact.content,
-    });
-    downloadBlob(blob, `${activeArtifact.skillId}-${Date.now()}.docx`);
-  }
-
-  function printArtifact() {
-    if (!activeArtifact?.content) return;
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(
-      `<html><head><title>${activeArtifact.title}</title></head><body style="font-family:system-ui;padding:24px;white-space:pre-wrap">${activeArtifact.content
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")}</body></html>`
-    );
-    w.document.close();
-    w.print();
-  }
-
-  const chips = chipsFromContext(context);
+  const chips = chipsFromContext(thread);
   const empty = messages.length === 0;
 
   return (
     <div className="flex h-[calc(100dvh-7.5rem)] min-h-[520px] flex-col gap-3 lg:flex-row">
-      {/* Main conversation column */}
       <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
         <header className="shrink-0 border-b border-[var(--border)] px-5 py-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-fg)]">slabOS</p>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-[var(--fg)] md:text-[1.75rem]">
-            Ask slabOS anything about your work
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--fg-secondary)]">
-            Natural language first. Skills and Knowledge Hub stay available behind the assistant — you don’t pick a form to get started.
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-fg)]">
+                eliteOS
+              </p>
+              <h1 className="font-[family-name:var(--font-display)] text-2xl font-semibold tracking-tight text-[var(--fg)] md:text-[1.75rem]">
+                Ask eliteOS
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-[var(--fg-secondary)]">
+                Natural language over your authorized company data. The Brain Agent investigates —
+                no Skill picker required.
+              </p>
+            </div>
+            {showDebugControls ? (
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted-fg)]">
+                  <input
+                    type="checkbox"
+                    checked={wantDebug}
+                    onChange={(e) => setWantDebug(e.target.checked)}
+                    className="rounded border-[var(--border)]"
+                  />
+                  Agent debug
+                </label>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[10px] font-medium text-[var(--fg-secondary)] hover:bg-[var(--muted)]"
+                  onClick={() => setDebugOpen((v) => !v)}
+                >
+                  <Bug className="h-3 w-3" />
+                  {debugOpen ? "Hide trace" : "Show trace"}
+                </button>
+              </div>
+            ) : null}
+          </div>
           {chips.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {chips.map((c) => (
@@ -516,11 +335,28 @@ export function AssistantWorkspace() {
           ) : null}
         </header>
 
+        {showDebugControls && debugOpen ? (
+          <div className="shrink-0 border-b border-[var(--border)] bg-[var(--muted)]/25 px-4 py-3">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-fg)]">
+              Agent debug (admin)
+            </p>
+            {lastDebug ? (
+              <pre className="max-h-40 overflow-auto rounded-lg bg-[var(--bg)] p-2 text-[10px] leading-relaxed text-[var(--fg-secondary)]">
+                {JSON.stringify(lastDebug, null, 2)}
+              </pre>
+            ) : (
+              <p className="text-xs text-[var(--muted-fg)]">
+                Enable “Agent debug” and send a message to capture tool trace, latency, and validation.
+              </p>
+            )}
+          </div>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-5">
           {empty ? (
             <div className="mx-auto flex max-w-2xl flex-col items-stretch gap-6 pt-6 md:pt-10">
               <p className="text-center text-sm text-[var(--fg-secondary)]">
-                Try a starter, or type what you need — accounts, quotes, shop issues, care guides, material.
+                Ask about accounts, quotes, jobs, inventory, or approved company knowledge.
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
                 {STARTERS.map((s) => (
@@ -538,7 +374,7 @@ export function AssistantWorkspace() {
                 ))}
               </div>
               <p className="text-center text-xs text-[var(--muted-fg)]">
-                Prefer a guided workflow?{" "}
+                Prefer a guided form?{" "}
                 <Link href="/tools" className="font-medium text-[var(--accent)] underline-offset-2 hover:underline">
                   Open Skills
                 </Link>
@@ -546,113 +382,83 @@ export function AssistantWorkspace() {
             </div>
           ) : (
             <ul className="mx-auto flex max-w-3xl flex-col gap-4">
-              {messages.map((m) => (
-                <li
-                  key={m.id}
-                  className={cn(
-                    "rounded-xl px-3.5 py-3 text-sm leading-relaxed",
-                    m.role === "user"
-                      ? "ml-8 bg-[var(--accent)] text-white"
-                      : "mr-4 border border-[var(--border)] bg-[var(--bg)]/40 text-[var(--fg)]"
-                  )}
-                >
-                  {m.role === "assistant" ? (
-                    <div className="ai-markdown prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{m.text}</p>
-                  )}
-                  {m.streaming ? (
-                    <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-[var(--muted-fg)]">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…
-                    </p>
-                  ) : null}
-                  {m.options?.length && m.domain ? (
-                    <ul className="mt-3 space-y-1.5">
-                      {m.options.map((opt) => (
-                        <li key={opt.id}>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm hover:border-[var(--accent)]/50 hover:bg-[var(--accent-soft)]/30 disabled:opacity-50"
-                            onClick={() => onSelectEntity(m.domain!, opt)}
-                          >
-                            <span className="font-medium">{opt.label}</span>
-                            {opt.meta ? (
-                              <span className="mt-0.5 block text-xs text-[var(--muted-fg)]">{opt.meta}</span>
-                            ) : null}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {m.followUps?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {m.followUps.map((f) => (
-                        <button
-                          key={f}
-                          type="button"
-                          disabled={busy}
-                          className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--fg-secondary)] hover:bg-[var(--muted)] disabled:opacity-50"
-                          onClick={() => void submitTurn({ message: f })}
-                        >
-                          {f}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {m.artifactId ? (
-                    <button
-                      type="button"
-                      className="mt-2 text-xs font-medium text-[var(--accent)] underline-offset-2 hover:underline"
-                      onClick={() => {
-                        setActiveArtifactId(m.artifactId!);
-                        setPanelTab("artifact");
-                      }}
-                    >
-                      Open artifact →
-                    </button>
-                  ) : null}
+              {messages.map((m) => {
+                const banner = answerStateBanner(m.answerState);
+                return (
+                  <li
+                    key={m.id}
+                    className={cn(
+                      "rounded-xl px-3.5 py-3 text-sm leading-relaxed",
+                      m.role === "user"
+                        ? "ml-8 bg-[var(--accent)] text-white"
+                        : "mr-4 border border-[var(--border)] bg-[var(--bg)]/40 text-[var(--fg)]"
+                    )}
+                  >
+                    {m.role === "assistant" && banner ? (
+                      <p
+                        className={cn(
+                          "mb-2 rounded-md px-2 py-1 text-[11px] font-medium",
+                          banner.tone === "deny" && "bg-red-500/10 text-red-700",
+                          banner.tone === "warn" && "bg-amber-500/10 text-amber-800",
+                          banner.tone === "info" && "bg-[var(--muted)] text-[var(--fg-secondary)]"
+                        )}
+                      >
+                        {banner.label}
+                      </p>
+                    ) : null}
+                    {m.role === "assistant" ? (
+                      <div className="ai-markdown prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{m.text}</p>
+                    )}
+                    {typeof m.toolCalls === "number" && m.role === "assistant" ? (
+                      <p className="mt-1.5 text-[10px] text-[var(--muted-fg)]">
+                        Investigation: {m.toolCalls} tool call{m.toolCalls === 1 ? "" : "s"}
+                      </p>
+                    ) : null}
+                    {m.freshnessWarnings?.length ? (
+                      <ul className="mt-2 space-y-0.5">
+                        {m.freshnessWarnings.map((w) => (
+                          <li key={w.slice(0, 48)} className="text-[11px] text-amber-800">
+                            {w}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {m.options?.length ? (
+                      <ul className="mt-3 space-y-1.5">
+                        {m.options.map((opt) => (
+                          <li key={opt.id}>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left text-sm hover:border-[var(--accent)]/50 hover:bg-[var(--accent-soft)]/30 disabled:opacity-50"
+                              onClick={() => onSelectOption(opt)}
+                            >
+                              <span className="font-medium">{opt.label}</span>
+                              {opt.meta ? (
+                                <span className="mt-0.5 block text-xs text-[var(--muted-fg)]">{opt.meta}</span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
+              {busy ? (
+                <li className="mr-4 inline-flex items-center gap-1.5 px-3.5 text-xs text-[var(--muted-fg)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Investigating…
                 </li>
-              ))}
+              ) : null}
               <div ref={bottomRef} />
             </ul>
           )}
         </div>
 
-        {/* Clarify strip */}
-        {pendingClarify ? (
-          <div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)]/30 px-4 py-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-fg)]">
-              Need a couple details
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {pendingClarify.questions.map((q) => (
-                <label key={q.id} className="block text-xs text-[var(--fg-secondary)]">
-                  <span className="mb-1 block">{q.prompt}</span>
-                  <input
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-sm text-[var(--fg)]"
-                    value={clarifyDraft[q.field || q.id] || ""}
-                    onChange={(e) =>
-                      setClarifyDraft((d) => ({ ...d, [q.field || q.id]: e.target.value }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              className="mt-2 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-50"
-              onClick={onSubmitClarify}
-            >
-              Continue
-            </button>
-          </div>
-        ) : null}
-
-        {/* Composer */}
         <div className="shrink-0 border-t border-[var(--border)] p-3 md:p-4">
           <div className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg)]/50 p-2 shadow-[var(--shadow-sm)] focus-within:border-[var(--accent)]/45">
             <textarea
@@ -666,7 +472,7 @@ export function AssistantWorkspace() {
                   onSend();
                 }
               }}
-              placeholder="Pull up an account, draft a scope, ask about chipping, care guides, material…"
+              placeholder="Ask about an account, quote, job, material, or company knowledge…"
               className="max-h-36 min-h-[52px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-[var(--fg)] outline-none placeholder:text-[var(--muted-fg)]"
               disabled={busy}
             />
@@ -681,212 +487,105 @@ export function AssistantWorkspace() {
             </button>
           </div>
           <p className="mt-2 text-[10px] text-[var(--muted-fg)]">
-            Read-only assistant — retrieves and drafts; does not change quotes, jobs, inventory, or CRM records.
+            Read-only Brain Agent — investigates authorized eliteOS data; does not change records.
           </p>
         </div>
       </section>
 
-      {/* Evidence / Artifact side panel */}
       <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)] lg:w-[340px] xl:w-[380px]">
-        <div className="flex shrink-0 border-b border-[var(--border)]">
-          <button
-            type="button"
-            className={cn(
-              "flex-1 px-3 py-2.5 text-xs font-semibold",
-              panelTab === "evidence" ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--muted-fg)]"
-            )}
-            onClick={() => setPanelTab("evidence")}
-          >
-            Sources & evidence
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "flex-1 px-3 py-2.5 text-xs font-semibold",
-              panelTab === "artifact" ? "border-b-2 border-[var(--accent)] text-[var(--accent)]" : "text-[var(--muted-fg)]"
-            )}
-            onClick={() => setPanelTab("artifact")}
-          >
-            Artifact
-          </button>
+        <div className="shrink-0 border-b border-[var(--border)] px-3 py-2.5 text-xs font-semibold text-[var(--accent)]">
+          Sources & evidence
         </div>
-
-        {panelTab === "evidence" ? (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
-            {!latestProvenance ? (
-              <p className="text-xs leading-relaxed text-[var(--muted-fg)]">
-                Company data, approved knowledge, and AI analysis will appear here when slabOS uses them.
-              </p>
-            ) : (
-              <>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
+          {!latestProvenance ? (
+            <p className="text-xs leading-relaxed text-[var(--muted-fg)]">
+              Company data and approved knowledge used by the agent will appear here.
+            </p>
+          ) : (
+            <>
+              <section>
+                <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
+                  Company data used
+                </h3>
+                {latestProvenance.company.length ? (
+                  <ul className="space-y-1">
+                    {latestProvenance.company.map((c) => (
+                      <li key={`${c.type}-${c.entityId}`} className="flex items-start gap-2 text-xs">
+                        {c.type === "account" || c.type.includes("account") ? (
+                          <Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                        ) : c.type === "quote" || c.type.includes("quote") ? (
+                          <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                        ) : (
+                          <Gem className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                        )}
+                        <span>
+                          <span className="font-medium">{c.label}</span>
+                          <span className="ml-1 text-[var(--muted-fg)]">({c.type})</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[var(--muted-fg)]">No company records cited for this turn.</p>
+                )}
+              </section>
+              <section>
+                <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
+                  Knowledge used
+                </h3>
+                {latestProvenance.knowledge.length ? (
+                  <ul className="space-y-1.5">
+                    {latestProvenance.knowledge.map((k) => (
+                      <li key={k.id || k.title} className="text-xs">
+                        <span className="font-medium">{k.title}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-[var(--muted-fg)]">No approved knowledge passages cited.</p>
+                )}
+              </section>
+              {latestProvenance.analysisNotes.length ? (
                 <section>
                   <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
-                    Company data used
+                    Freshness
                   </h3>
-                  {latestProvenance.company.length ? (
-                    <ul className="space-y-1">
-                      {latestProvenance.company.map((c) => (
-                        <li key={`${c.type}-${c.entityId}`} className="flex items-start gap-2 text-xs">
-                          {c.type === "account" ? (
-                            <Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-                          ) : c.type === "quote" ? (
-                            <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-                          ) : (
-                            <Gem className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-                          )}
-                          <span>
-                            <span className="font-medium">{c.label}</span>
-                            <span className="ml-1 text-[var(--muted-fg)]">({c.type})</span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-[var(--muted-fg)]">No company records loaded for this turn.</p>
-                  )}
+                  <ul className="space-y-1">
+                    {latestProvenance.analysisNotes.map((n) => (
+                      <li key={n.slice(0, 40)} className="text-xs text-amber-800">
+                        {n}
+                      </li>
+                    ))}
+                  </ul>
                 </section>
-                <section>
-                  <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
-                    Knowledge used
-                  </h3>
-                  {latestProvenance.knowledge.length ? (
-                    <ul className="space-y-1.5">
-                      {latestProvenance.knowledge.map((k) => (
-                        <li key={k.id || k.title} className="text-xs">
-                          <span className="font-medium">{k.title}</span>
-                          {k.locator ? (
-                            <span className="mt-0.5 block text-[var(--muted-fg)]">{k.locator}</span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-[var(--muted-fg)]">
-                      No approved knowledge document was retrieved. Ask a Knowledge Admin to load manufacturer docs if you need verified guidance.
-                    </p>
-                  )}
-                </section>
-                <section>
-                  <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-fg)]">
-                    AI reasoning
-                  </h3>
-                  {latestProvenance.analysisNotes.length ? (
-                    <ul className="space-y-1">
-                      {latestProvenance.analysisNotes.map((n) => (
-                        <li key={n.slice(0, 40)} className="text-xs leading-relaxed text-[var(--fg-secondary)]">
-                          {n}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-[var(--muted-fg)]">
-                      Synthesis is labeled separately from facts pulled from company systems or approved docs.
-                    </p>
-                  )}
-                </section>
-              </>
-            )}
-            <div className="rounded-lg border border-dashed border-[var(--border)] p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-fg)]">Skills</p>
-              <p className="mt-1 text-xs text-[var(--fg-secondary)]">
-                Reusable workflows when you want a guided form.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {[
-                  { href: "/tools/account-brief", label: "Account Brief", Icon: Building2 },
-                  { href: "/tools/quote-scope", label: "Quote Scope", Icon: FileText },
-                  { href: "/tools/machine-troubleshooter", label: "Troubleshooter", Icon: Wrench },
-                  { href: "/tools/stone-care", label: "Stone Care", Icon: Sparkles },
-                  { href: "/tools/remnant-pitch", label: "Remnant", Icon: Gem },
-                ].map(({ href, label, Icon }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] font-medium text-[var(--fg-secondary)] hover:bg-[var(--muted)]"
-                  >
-                    <Icon className="h-3 w-3" />
-                    {label}
-                  </Link>
-                ))}
-              </div>
+              ) : null}
+            </>
+          )}
+          <div className="rounded-lg border border-dashed border-[var(--border)] p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-fg)]">Skills</p>
+            <p className="mt-1 text-xs text-[var(--fg-secondary)]">
+              Optional guided forms — not required for Ask eliteOS.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[
+                { href: "/tools/account-brief", label: "Account Brief", Icon: Building2 },
+                { href: "/tools/quote-scope", label: "Quote Scope", Icon: FileText },
+                { href: "/tools/machine-troubleshooter", label: "Troubleshooter", Icon: Wrench },
+                { href: "/tools/stone-care", label: "Stone Care", Icon: Sparkles },
+                { href: "/tools/remnant-pitch", label: "Remnant", Icon: Gem },
+              ].map(({ href, label, Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] font-medium text-[var(--fg-secondary)] hover:bg-[var(--muted)]"
+                >
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </Link>
+              ))}
             </div>
           </div>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            {activeArtifact ? (
-              <>
-                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
-                  <p className="truncate text-xs font-semibold">{activeArtifact.title}</p>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      className={cn(
-                        "rounded px-1.5 py-1 text-[10px] font-medium",
-                        editArtifactSource
-                          ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                          : "text-[var(--muted-fg)] hover:bg-[var(--muted)]"
-                      )}
-                      title="Edit source"
-                      onClick={() => setEditArtifactSource((v) => !v)}
-                    >
-                      {editArtifactSource ? "Done" : "Edit"}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded p-1.5 text-[var(--muted-fg)] hover:bg-[var(--muted)]"
-                      title="Copy"
-                      onClick={() => void copyArtifact()}
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded p-1.5 text-[var(--muted-fg)] hover:bg-[var(--muted)]"
-                      title="DOCX"
-                      onClick={() => void downloadArtifact()}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded p-1.5 text-[var(--muted-fg)] hover:bg-[var(--muted)]"
-                      title="Print"
-                      onClick={printArtifact}
-                    >
-                      <Printer className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-                {copied ? <p className="px-3 pt-1 text-[10px] text-[var(--accent)]">Copied</p> : null}
-                {editArtifactSource ? (
-                  <textarea
-                    className="min-h-0 flex-1 resize-none bg-transparent px-3 py-3 font-[family-name:var(--font-body)] text-xs leading-relaxed text-[var(--fg)] outline-none"
-                    value={activeArtifact.content}
-                    onChange={(e) =>
-                      setArtifacts((prev) =>
-                        prev.map((a) => (a.id === activeArtifact.id ? { ...a, content: e.target.value } : a))
-                      )
-                    }
-                  />
-                ) : (
-                  <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-                    {activeArtifact.content.trim() ? (
-                      <div className="ai-markdown prose-sm max-w-none text-sm leading-relaxed">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeArtifact.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-[var(--muted-fg)]">Generating…</p>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="p-4 text-xs text-[var(--muted-fg)]">
-                Generated scopes, care guides, and briefs appear here as editable artifacts — not raw chat paste.
-              </p>
-            )}
-          </div>
-        )}
+        </div>
       </aside>
     </div>
   );
