@@ -2,13 +2,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let browserClient: SupabaseClient | null = null;
 
-function publicEnv(name: string): string {
-  return String(process.env[name] ?? "").trim();
-}
-
 export function getSupabaseBrowserClient(): SupabaseClient | null {
-  const url = publicEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const anon = publicEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  // Direct static references so Next.js can inline NEXT_PUBLIC_* at build time.
+  const url = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+  const anon = String(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
   if (!url || !anon) return null;
   if (!browserClient) {
     browserClient = createClient(url, anon, {
