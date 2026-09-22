@@ -19,6 +19,8 @@ import { validateAnswerAgainstEvidence, scrubKnowledgeAsData } from "./answerVal
 import { ANSWER_STATES, userMessageForState } from "./answerStates.mjs";
 import { evidenceForModel } from "./evidence.mjs";
 import { createLiveModelDriver, validateModelStep } from "./modelDriver.mjs";
+import { getCapability } from "./capabilityRegistry.mjs";
+import { schemaForObservation } from "./capabilitySchemas.mjs";
 
 export const AGENT_LIMITS = Object.freeze({
   maxToolCalls: 8,
@@ -26,6 +28,31 @@ export const AGENT_LIMITS = Object.freeze({
   timeoutMs: 45_000,
   maxRowsPerCall: 25,
 });
+
+/** Strip secrets / oversized values from tool inputs for admin debug. */
+export function sanitizeToolInputForDebug(input) {
+  if (!input || typeof input !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    const key = String(k);
+    if (/password|token|secret|authorization|service_role|api[_-]?key/i.test(key)) {
+      out[key] = "[redacted]";
+      continue;
+    }
+    if (typeof v === "string") {
+      out[key] = v.length > 200 ? `${v.slice(0, 200)}…` : v;
+    } else if (typeof v === "number" || typeof v === "boolean" || v == null) {
+      out[key] = v;
+    } else if (Array.isArray(v)) {
+      out[key] = v.slice(0, 20);
+    } else if (typeof v === "object") {
+      out[key] = sanitizeToolInputForDebug(v);
+    } else {
+      out[key] = String(v).slice(0, 80);
+    }
+  }
+  return out;
+}
 
 function observationForModel(result) {
   if (!result) return { ok: false, error: "No result" };
@@ -44,20 +71,34 @@ function observationForModel(result) {
     rows,
     metric,
     period,
+    dimension,
     truncated,
     truncatedScan,
     evidenceForModel: efm,
     evidence,
+    capability,
+    expectedInputSchema,
   } = result;
+
+  // Surface authoritative accountIds from metric rankings for follow-up tool calls
+  const metricAccountIds = Array.isArray(rows)
+    ? rows
+        .map((r) => (r && r.accountId ? String(r.accountId) : null))
+        .filter(Boolean)
+        .slice(0, AGENT_LIMITS.maxRowsPerCall)
+    : undefined;
 
   return {
     ok: Boolean(ok),
     error: error || null,
     code: code || null,
     answerState: answerState || null,
+    capability: capability || null,
+    expectedInputSchema: expectedInputSchema || null,
     ambiguous: Boolean(ambiguous),
     truncated: Boolean(truncated || truncatedScan),
     metric: metric || null,
+    dimension: dimension || null,
     period: period || null,
     itemCount: Array.isArray(items) ? items.length : undefined,
     items: Array.isArray(items) ? items.slice(0, AGENT_LIMITS.maxRowsPerCall) : undefined,
@@ -72,6 +113,7 @@ function observationForModel(result) {
         }))
       : undefined,
     rows: rows ? rows.slice(0, AGENT_LIMITS.maxRowsPerCall) : undefined,
+    metricAccountIds,
     evidence: (efm || (evidence || []).map(evidenceForModel) || []).slice(0, 40),
   };
 }
@@ -102,6 +144,11 @@ export async function runBrainAgent({
 
   let toolCalls = 0;
   let modelSteps = 0;
+  let lastProviderMeta = {
+    toolCallingMode: driver.kind === "scripted" ? "scripted" : null,
+    provider: null,
+    model: null,
+  };
 
   while (modelSteps < AGENT_LIMITS.maxModelSteps) {
     if (Date.now() - started > AGENT_LIMITS.timeoutMs) {
@@ -110,14 +157,17 @@ export async function runBrainAgent({
         message: "Investigation timed out before enough evidence was gathered.",
         evidenceBag,
         toolCalls,
+        modelSteps,
         toolTrace,
         debug,
         started,
         permittedNames,
+        lastProviderMeta,
       });
     }
 
     modelSteps += 1;
+    const lastObservation = [...history].reverse().find((h) => h.role === "observation") || null;
     const decision = await driver.nextStep({
       message,
       context,
@@ -125,7 +175,16 @@ export async function runBrainAgent({
       permittedNames,
       history,
       evidenceSnapshot: evidenceBag.map(evidenceForModel),
+      lastObservation: lastObservation?.observation || null,
     });
+
+    if (decision?.toolCallingMode || decision?.provider || decision?.model) {
+      lastProviderMeta = {
+        toolCallingMode: decision.toolCallingMode || lastProviderMeta.toolCallingMode,
+        provider: decision.provider ?? lastProviderMeta.provider,
+        model: decision.model ?? lastProviderMeta.model,
+      };
+    }
 
     const step = decision?.step;
     const checked = validateModelStep(step, permittedNames);
@@ -135,10 +194,12 @@ export async function runBrainAgent({
         message: "The planner produced an invalid step. I will not invent a workflow.",
         evidenceBag,
         toolCalls,
+        modelSteps,
         toolTrace,
         debug,
         started,
         permittedNames,
+        lastProviderMeta,
         extra: { validationError: checked.error },
       });
     }
@@ -158,6 +219,7 @@ export async function runBrainAgent({
         validation: { ok: true, state },
         durationMs: Date.now() - started,
         planner: driver.kind,
+        providerMeta: debug ? lastProviderMeta : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
@@ -175,6 +237,7 @@ export async function runBrainAgent({
         validation: { ok: true, state: ANSWER_STATES.AMBIGUOUS_ENTITY },
         durationMs: Date.now() - started,
         planner: driver.kind,
+        providerMeta: debug ? lastProviderMeta : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
@@ -187,7 +250,6 @@ export async function runBrainAgent({
         requiresAuthoritative: true,
       });
       if (!validation.ok) {
-        // Model claimed facts without evidence — block; do not ship unsupported company facts
         return {
           ok: false,
           answerState: validation.state,
@@ -202,6 +264,7 @@ export async function runBrainAgent({
           toolTrace: debug ? toolTrace : undefined,
           durationMs: Date.now() - started,
           planner: driver.kind,
+          providerMeta: debug ? lastProviderMeta : undefined,
           blockedUnsupportedClaim: true,
         };
       }
@@ -216,6 +279,7 @@ export async function runBrainAgent({
         validation,
         durationMs: Date.now() - started,
         planner: driver.kind,
+        providerMeta: debug ? lastProviderMeta : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
@@ -227,32 +291,60 @@ export async function runBrainAgent({
         message: "Reached the tool-call limit before a grounded answer was ready.",
         evidenceBag,
         toolCalls,
+        modelSteps,
         toolTrace,
         debug,
         started,
         permittedNames,
+        lastProviderMeta,
       });
     }
 
     if (!permittedNames.has(action.capability)) {
+      const observation = {
+        ok: false,
+        code: "CAPABILITY_NOT_PERMITTED",
+        error: "That tool is not available for your access.",
+        capability: action.capability,
+      };
+      history.push({
+        role: "tool_call",
+        capability: action.capability,
+        input: action.input || {},
+        modelStep: modelSteps,
+      });
       history.push({
         role: "observation",
         capability: action.capability,
-        observation: {
-          ok: false,
-          code: "CAPABILITY_NOT_PERMITTED",
-          error: "That tool is not available for your access.",
-        },
+        observation,
       });
-      toolTrace.push({ capability: action.capability, skipped: true, reason: "not_permitted" });
+      if (debug) {
+        toolTrace.push({
+          modelStep: modelSteps,
+          capability: action.capability,
+          ok: false,
+          skipped: true,
+          reason: "not_permitted",
+          durationMs: 0,
+          evidenceCount: 0,
+          code: "CAPABILITY_NOT_PERMITTED",
+          input: sanitizeToolInputForDebug(action.input || {}),
+          validationError: observation.error,
+          toolCallingMode: lastProviderMeta.toolCallingMode,
+          provider: lastProviderMeta.provider,
+          model: lastProviderMeta.model,
+        });
+      }
       continue;
     }
 
+    const callStarted = Date.now();
     const result = await executeCapability({
       name: action.capability,
       input: action.input || {},
       ctx: gatewayCtx,
     });
+    const callDurationMs = Date.now() - callStarted;
     toolCalls += 1;
 
     if (result.ok && Array.isArray(result.evidence)) {
@@ -264,11 +356,19 @@ export async function runBrainAgent({
       }
     }
 
+    // Ensure validation failures always carry the contract for recovery
+    if (!result.ok && result.code === "VALIDATION_ERROR" && !result.expectedInputSchema) {
+      const cap = getCapability(action.capability);
+      result.expectedInputSchema = schemaForObservation(action.capability) || cap?.inputSchema || null;
+      result.capability = action.capability;
+    }
+
     const observation = observationForModel(result);
     history.push({
       role: "tool_call",
       capability: action.capability,
       input: action.input || {},
+      modelStep: modelSteps,
     });
     history.push({
       role: "observation",
@@ -276,13 +376,21 @@ export async function runBrainAgent({
       observation,
     });
 
-    toolTrace.push({
-      capability: action.capability,
-      ok: Boolean(result.ok),
-      durationMs: Date.now() - started,
-      evidenceCount: (result.evidence || []).length,
-      code: result.code || null,
-    });
+    if (debug) {
+      toolTrace.push({
+        modelStep: modelSteps,
+        capability: action.capability,
+        ok: Boolean(result.ok),
+        durationMs: callDurationMs,
+        evidenceCount: (result.evidence || []).length,
+        code: result.code || null,
+        input: sanitizeToolInputForDebug(action.input || {}),
+        validationError: result.code === "VALIDATION_ERROR" ? result.error || null : null,
+        toolCallingMode: lastProviderMeta.toolCallingMode,
+        provider: lastProviderMeta.provider,
+        model: lastProviderMeta.model,
+      });
+    }
 
     // Permission denial is structural — surface immediately (not a business workflow)
     if (result.answerState === ANSWER_STATES.PERMISSION_DENIED || result.code === "DOMAIN_HEAD_REQUIRED") {
@@ -297,8 +405,11 @@ export async function runBrainAgent({
         validation: { ok: true, state: ANSWER_STATES.PERMISSION_DENIED },
         durationMs: Date.now() - started,
         planner: driver.kind,
+        providerMeta: debug ? lastProviderMeta : undefined,
       };
     }
+
+    // VALIDATION_ERROR → observation already in history; model may correct on next step
   }
 
   return finishAbstain({
@@ -306,10 +417,12 @@ export async function runBrainAgent({
     message: "Investigation ended without a grounded final answer.",
     evidenceBag,
     toolCalls,
+    modelSteps,
     toolTrace,
     debug,
     started,
     permittedNames,
+    lastProviderMeta,
   });
 }
 
@@ -318,10 +431,12 @@ function finishAbstain({
   message,
   evidenceBag,
   toolCalls,
+  modelSteps,
   toolTrace,
   debug,
   started,
   permittedNames,
+  lastProviderMeta,
   extra = {},
 }) {
   return {
@@ -330,9 +445,11 @@ function finishAbstain({
     answer: userMessageForState(state, message),
     evidence: evidenceBag.map(evidenceForModel),
     toolCalls,
+    modelSteps,
     toolTrace: debug ? toolTrace : undefined,
     validation: { ok: true, state },
     durationMs: Date.now() - started,
+    providerMeta: debug ? lastProviderMeta : undefined,
     permittedCapabilities: [...permittedNames],
     ...extra,
   };

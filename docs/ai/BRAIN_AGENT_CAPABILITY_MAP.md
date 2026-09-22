@@ -10,7 +10,7 @@ Map what the eliteOS Brain already contains, what AI-safe read surfaces exist to
 
 **Principle:** The LLM is never authoritative for company facts. Facts must come from Brain evidence produced in the same agent run.
 
-**Investigation architecture:** The agent loop is **model-driven** (`MODEL → TOOL → OBSERVATION → … → grounded answer`). Application code does **not** route natural-language requests into business workflows via regex, keywords, or hard-coded conversational paths. Deterministic code owns authz, org isolation, read-only gates, schemas, limits, provenance, and factual support checking only. See FEATURE_DECISIONS §373.
+**Investigation architecture:** The agent loop is **model-driven** (`MODEL → TOOL → OBSERVATION → … → grounded answer`). Application code does **not** route natural-language requests into business workflows via regex, keywords, or hard-coded conversational paths. Deterministic code owns authz, org isolation, read-only gates, schemas, limits, provenance, and factual support checking only. Each capability exposes a machine-readable **`inputSchema`** (JSON Schema) to the model. See FEATURE_DECISIONS §373–§375.
 
 ## Sensitivity legend
 

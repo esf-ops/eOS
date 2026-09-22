@@ -5024,3 +5024,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Wire Skill generation as optional post-answer affordance only if users still need guided forms after Brain Agent answers. |
 
 ---
+
+### 375. Brain Agent capability contracts are model-native (JSON Schema)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | Every Brain Agent capability exposes an authoritative **JSON Schema `inputSchema`**. The live model driver sends full contracts (OpenAI **native function/tool calling** when available; **JSON-plan** prompt with the same schemas for Ollama / fallback). Invalid tool inputs return `VALIDATION_ERROR` observations including `expectedInputSchema` so the model can correct and continue — no app workflow sequencing. Metric evidence retains `accountId` on ranking rows for follow-up tools. Admin debug traces include per-call duration, sanitized input, validation errors, model step, and provider/mode. |
+| **Why** | Production multi-hop failed after a correct `query_metric` because the model guessed `get_related_records` arguments without a machine-readable contract. |
+| **Impacted files/docs** | `capabilitySchemas.mjs`, `capabilityRegistry.mjs`, `registerFoundation.mjs`, `gateway.mjs`, `modelDriver.mjs`, `agentRuntime.mjs`, contract tests, this entry. |
+| **What is NOT built** | Intent routing; hard-coded metric→jobs workflow; domain expansion; deploy; Ollama networking. |
+| **Revisit trigger** | Add Ajv (or equivalent) only if hand-written validateInput drifts from schemas; prefer generating validators from schema. |
+
+---

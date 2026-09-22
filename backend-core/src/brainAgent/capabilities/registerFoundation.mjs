@@ -4,6 +4,7 @@
 
 import { registerCapability } from "../capabilityRegistry.mjs";
 import { makeEvidence } from "../evidence.mjs";
+import { CAPABILITY_INPUT_SCHEMAS } from "../capabilitySchemas.mjs";
 import { searchQuotesForAi, retrieveQuoteForAi } from "../../slabAi/slabAiQuoteActions.js";
 import { searchAccountsForAi, retrieveAccountForAi } from "../../slabAi/slabAiAccountActions.mjs";
 import { listAccountJobsForAi } from "../../slabAi/slabAiJobActions.mjs";
@@ -17,9 +18,15 @@ function pickStr(v) {
 
 function okInput(obj, required = []) {
   for (const k of required) {
-    if (!pickStr(obj?.[k])) return { ok: false, error: `${k} is required` };
+    if (!pickStr(obj?.[k])) return { ok: false, error: `${k} is required`, code: "VALIDATION_ERROR" };
   }
   return { ok: true };
+}
+
+function schema(name) {
+  const s = CAPABILITY_INPUT_SCHEMAS[name];
+  if (!s) throw new Error(`missing input schema for ${name}`);
+  return s;
 }
 
 export function registerFoundationCapabilities() {
@@ -31,10 +38,11 @@ export function registerFoundationCapabilities() {
     requiredHead: null, // domain-specific heads enforced inside
     sensitivity: "medium",
     authoritativeSource: "eliteOS Brain AI-safe adapters",
+    inputSchema: schema("brain.search_entities"),
     validateInput: (input) => {
-      const entityType = pickStr(input?.entityType || "account");
+      const entityType = pickStr(input?.entityType || "");
       if (!["account", "quote", "material"].includes(entityType)) {
-        return { ok: false, error: "entityType must be account|quote|material" };
+        return { ok: false, error: "entityType must be account|quote|material", code: "VALIDATION_ERROR" };
       }
       return okInput({ query: input?.query }, ["query"]);
     },
@@ -153,9 +161,12 @@ export function registerFoundationCapabilities() {
     requiredHead: null,
     sensitivity: "medium",
     authoritativeSource: "eliteOS Brain AI-safe adapters",
+    inputSchema: schema("brain.get_entity"),
     validateInput: (input) => {
       const t = pickStr(input?.entityType);
-      if (!["account", "quote"].includes(t)) return { ok: false, error: "entityType must be account|quote" };
+      if (!["account", "quote"].includes(t)) {
+        return { ok: false, error: "entityType must be account|quote", code: "VALIDATION_ERROR" };
+      }
       return okInput({ entityId: input?.entityId }, ["entityId"]);
     },
     async execute(input, ctx) {
@@ -209,14 +220,22 @@ export function registerFoundationCapabilities() {
 
   registerCapability({
     name: "brain.get_related_records",
-    description: "List related records for an entity (currently: jobs for an account).",
+    description:
+      "List related records for an account. Required input: { relation: \"jobs\", accountId: \"<Account Directory UUID from evidence>\" }.",
     domain: "job",
     mode: "read",
     requiredHead: "account_directory",
     sensitivity: "medium",
     authoritativeSource: "Moraware prepared facts via Account 360",
+    inputSchema: schema("brain.get_related_records"),
     validateInput: (input) => {
-      if (pickStr(input?.relation) !== "jobs") return { ok: false, error: "relation must be jobs in this foundation" };
+      if (pickStr(input?.relation) !== "jobs") {
+        return {
+          ok: false,
+          error: 'relation must be "jobs" (required). Example: { "relation": "jobs", "accountId": "<uuid>" }',
+          code: "VALIDATION_ERROR",
+        };
+      }
       return okInput({ accountId: input?.accountId }, ["accountId"]);
     },
     async execute(input, ctx) {
@@ -262,6 +281,7 @@ export function registerFoundationCapabilities() {
     requiredHead: "account_directory",
     sensitivity: "high",
     authoritativeSource: "account_directory",
+    inputSchema: schema("brain.get_account_360"),
     validateInput: (input) => okInput({ accountId: input?.accountId }, ["accountId"]),
     async execute(input, ctx) {
       const gate = await ctx.requireHead("account_directory");
@@ -310,6 +330,7 @@ export function registerFoundationCapabilities() {
     requiredHead: null,
     sensitivity: "medium",
     authoritativeSource: "quote_headers",
+    inputSchema: schema("brain.get_quote_360"),
     validateInput: (input) => okInput({ quoteId: input?.quoteId }, ["quoteId"]),
     async execute(input, ctx) {
       const result = await retrieveQuoteForAi({
@@ -342,6 +363,7 @@ export function registerFoundationCapabilities() {
     requiredHead: "slab_inventory",
     sensitivity: "low",
     authoritativeSource: "slab_inventory cache",
+    inputSchema: schema("brain.search_inventory"),
     validateInput: (input) => okInput({ query: input?.query }, ["query"]),
     async execute(input, ctx) {
       const gate = await ctx.requireHead("slab_inventory");
@@ -378,6 +400,7 @@ export function registerFoundationCapabilities() {
     requiredHead: null,
     sensitivity: "medium",
     authoritativeSource: "slab_ai_knowledge (approved+current)",
+    inputSchema: schema("brain.search_company_knowledge"),
     validateInput: (input) => okInput({ query: input?.query }, ["query"]),
     async execute(input, ctx) {
       const result = await searchApprovedKnowledge({
@@ -415,18 +438,27 @@ export function registerFoundationCapabilities() {
   registerCapability({
     name: "brain.query_metric",
     description:
-      "Server-computed metrics. Foundation supports metric=quote_count dimension=account (no LLM math).",
+      "Server-computed metrics. Foundation: metric=quote_count, dimension=account, period=quarter|month|week|today|all. Returns rows with accountId + quoteCount — use accountId for follow-up tools.",
     domain: "quote",
     mode: "read",
     requiredHead: null,
     sensitivity: "medium",
     authoritativeSource: "quote_headers aggregation",
+    inputSchema: schema("brain.query_metric"),
     validateInput: (input) => {
       if (pickStr(input?.metric) !== "quote_count") {
         return { ok: false, error: "Foundation metric must be quote_count", code: "CAPABILITY_UNAVAILABLE" };
       }
       if (pickStr(input?.dimension || "account") !== "account") {
         return { ok: false, error: "Foundation dimension must be account", code: "CAPABILITY_UNAVAILABLE" };
+      }
+      const period = pickStr(input?.period || "quarter");
+      if (period && !["today", "week", "month", "quarter", "all"].includes(period)) {
+        return {
+          ok: false,
+          error: "period must be today|week|month|quarter|all",
+          code: "VALIDATION_ERROR",
+        };
       }
       return { ok: true };
     },

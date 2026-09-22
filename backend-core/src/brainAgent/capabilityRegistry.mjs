@@ -14,6 +14,7 @@
  * @property {string|null} requiredHead
  * @property {Sensitivity} sensitivity
  * @property {string} authoritativeSource
+ * @property {object} inputSchema — JSON Schema for tool arguments (model-native contract)
  * @property {(input: object, ctx: object) => Promise<object>} execute
  * @property {(input: object) => object|null} [validateInput]
  */
@@ -24,6 +25,9 @@ const REGISTRY = new Map();
 export function registerCapability(cap) {
   if (!cap?.name) throw new Error("capability name required");
   if (cap.mode !== "read") throw new Error(`capability ${cap.name} must be mode=read`);
+  if (!cap.inputSchema || typeof cap.inputSchema !== "object") {
+    throw new Error(`capability ${cap.name} requires inputSchema (JSON Schema)`);
+  }
   REGISTRY.set(cap.name, cap);
   return cap;
 }
@@ -46,6 +50,7 @@ export function listCapabilities({ permittedHeads = null, includeUnavailable = f
       requiredHead: cap.requiredHead,
       sensitivity: cap.sensitivity,
       authoritativeSource: cap.authoritativeSource,
+      inputSchema: cap.inputSchema,
       available: headOk,
     });
   }

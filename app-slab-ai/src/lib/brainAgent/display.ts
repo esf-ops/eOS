@@ -87,6 +87,7 @@ export function sanitizeDebugPayload(result: Record<string, unknown>): Record<st
     "permittedCapabilities",
     "validation",
     "toolTrace",
+    "providerMeta",
     "blockedUnsupportedClaim",
     "evidenceCount",
   ];

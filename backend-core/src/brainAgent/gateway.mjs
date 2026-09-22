@@ -7,6 +7,7 @@ import { evidenceForModel } from "./evidence.mjs";
 import { ANSWER_STATES } from "./answerStates.mjs";
 import { requireDomainHead, userMayAccessHead } from "../slabAi/slabAiPermissionIntersection.mjs";
 import { registerFoundationCapabilities } from "./capabilities/registerFoundation.mjs";
+import { schemaForObservation } from "./capabilitySchemas.mjs";
 
 let foundationsRegistered = false;
 
@@ -93,6 +94,8 @@ export async function executeCapability({ name, input, ctx }) {
         status: v.code === "CAPABILITY_UNAVAILABLE" ? 501 : 400,
         code: v.code || "VALIDATION_ERROR",
         error: v.error || "Invalid input",
+        capability: cap.name,
+        expectedInputSchema: schemaForObservation(cap.name) || cap.inputSchema || null,
         answerState:
           v.code === "CAPABILITY_UNAVAILABLE"
             ? ANSWER_STATES.CAPABILITY_UNAVAILABLE

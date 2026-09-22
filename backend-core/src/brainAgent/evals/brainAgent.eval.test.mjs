@@ -261,6 +261,15 @@ describe("Iterative agent loop — model decides path (scripted)", () => {
       requiredHead: null,
       sensitivity: "medium",
       authoritativeSource: "test",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["entityType", "query"],
+        properties: {
+          entityType: { type: "string", enum: ["account", "quote", "material"] },
+          query: { type: "string" },
+        },
+      },
       async execute() {
         const ev = makeEvidence({
           sourceDomain: "account",
