@@ -1,0 +1,26 @@
+[
+  {
+    "id": "kitchen-scope-no-price",
+    "description": "Scope draft captures inclusions/exclusions without pricing authority",
+    "input": {
+      "customerProjectName": "EVAL-KITCHEN-001",
+      "projectType": "residential-kitchen",
+      "roomArea": "Kitchen perimeter + island",
+      "approximateSqFt": 55,
+      "materialColor": "EVAL-QUARTZ-WHITE",
+      "thickness": "3 cm",
+      "edgeProfile": "Eased",
+      "sinkCutouts": 1,
+      "cooktopCutouts": 1,
+      "faucetHoles": 1,
+      "tearOut": false,
+      "templateRequired": true,
+      "installationRequired": true
+    },
+    "expect": {
+      "sections": ["Included Scope", "Assumptions", "Exclusions", "Customer-Friendly Proposal Narrative"],
+      "mustNotMatch": ["total \\$\\d", "markup %", "wholesale price", "public markup"],
+      "mustMatch": ["Exclusions"]
+    }
+  }
+]

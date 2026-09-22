@@ -24,6 +24,8 @@ import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachAccountDirectoryRoutes, resolveAccountDirectoryStore } from "./accountDirectory/accountDirectoryApi.js";
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
+import { attachSlabAiRoutes } from "./slabAi/slabAiApi.js";
+import { attachSlabAiKnowledgeRoutes } from "./slabAi/slabAiKnowledgeApi.js";
 import { attachSalesOpsRoutes } from "./salesOps/salesOpsApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
@@ -1302,6 +1304,18 @@ attachAccountDirectoryRoutes(app, {
 });
 
 attachHrWorkforceRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachSlabAiRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachSlabAiKnowledgeRoutes(app, {
   requireAuth,
   requireHeadAccess,
   getSupabase: supabaseServerClient

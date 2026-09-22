@@ -35,6 +35,7 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   elite100_quote_flow: ["HEAD_URL_ELITE100_QUOTE_FLOW"], // Elite 100 Quote Flow (clean Inbox → Queue → Estimates head)
   account_directory: ["HEAD_URL_ACCOUNT_DIRECTORY"], // Account Directory — standalone identity head
   sales_ops: ["HEAD_URL_SALES_OPS"], // Sales Ops — personalized plans + Monday account operations
+  slab_ai: ["HEAD_URL_SLAB_AI"], // slabOS AI Studio — specialized AI tool catalog
   // Public Digital Estimate origin for CORS only — not a launcher staff slug (see EOS_HEAD_SLUGS).
   digital_estimate: ["HEAD_URL_DIGITAL_ESTIMATE"]
 });

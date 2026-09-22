@@ -4921,3 +4921,67 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
+### 367. slabOS AI Studio foundation (app-slab-ai)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-21 |
+| **Decision** | Shipped **slabOS AI Studio** as head `app-slab-ai` (slug **`slab_ai`**) — a data-driven catalog of specialized AI tools for stone fabrication. **Stack exception:** this is the first **Next.js App Router** head in the monorepo (other heads remain Vite) so AI generation/streaming can live in server routes with the Vercel AI SDK. Generation is **orchestration only** — prompts/schemas are modular and versioned; mock mode works without `OPENAI_API_KEY`; provider abstraction supports fast/reasoning model classes. **Authority boundaries:** LLM must not invent pricing, authoritative machine setpoints, warranties, or permissions. Governed Brain actions (`retrieveQuote`, etc.) are typed stubs for later wiring. Client catalog omits system prompts. Favorites/history are localStorage for MVP. Launcher/CORS use `HEAD_URL_SLAB_AI`. |
+| **Why** | Fabricators need specialized AI coworkers (remnant marketing, CNC troubleshooting, scope drafting, care guides) without becoming a ChatGPT wrapper or a second pricing engine. Next.js was chosen for streaming AI routes while keeping Brain as long-term governed-data authority. |
+| **Impacted files/docs** | `app-slab-ai/**`, `backend-core/src/auth/eosGovernanceConstants.js`, `headDeploymentUrls.js`, `launcherHeads.js`, root `package.json` (`eos:build:slab-ai`, `eos:test:slab-ai`, all-heads), `docs/eliteos/eliteOS-master-head-map.md`, `SYSTEM_BLUEPRINT.md`, this entry. |
+| **What is NOT built** | Live Brain quote/account/job RAG; persistent org-scoped generation history; EliteosTopbar session hard-gate (optional next); production DNS; Monday/Moraware/QB writes; pricing calculators. |
+| **Revisit trigger** | Move generation into Brain; require auth + `requireHeadAccess("slab_ai")` for generate; org-scoped telemetry tables; add tools via registry only. |
+
+---
+
+### 368. slabOS AI Studio Phase 2 — identity, evidence, history, governed reads
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-21 |
+| **Decision** | Phase 2 trust layer for **slabOS AI Studio**. Production AI routes require Supabase session → Brain `GET /api/slab-ai/context` (`requireAuth` + `requireHeadAccess("slab_ai")`) → organization resolution. Durable org/user history + feedback via `slab_ai_generations` / `slab_ai_generation_feedback`. Knowledge retrieval abstraction with Brain-backed org-scoped docs/passages (`eliteos_slab_ai_v1.sql`) + controlled sentinel fixtures. Citation integrity filters hallucinated source IDs. Prompt assembly separates system policy, tool instructions, evidence (DATA ONLY), and user form data. Governed **read-only** Brain actions `retrieveQuote` / `searchQuotes` via `/api/slab-ai/quotes/*` (AI-safe DTOs; no quote mutation). Tools declare `allowedActions` / `knowledgeEnabled` (least privilege). Dev-only `SLAB_AI_DEV_AUTH_BYPASS` (labeled sentinel; refused in production) is separate from `AI_MOCK_MODE`. Favorites remain localStorage. |
+| **Why** | Phase 1 proved specialized generation; Phase 2 makes the head trustworthy for company context without inventing a second permission/pricing backend. |
+| **Impacted files/docs** | `app-slab-ai/**` (auth, generate, knowledge, actions, history UX), `backend-core/src/slabAi/**`, `backend-core/supabase/eliteos_slab_ai_v1.sql`, `SYSTEM_BLUEPRINT.md`, this entry. |
+| **What is NOT built** | Write actions; vector/embeddings platform; document ingestion UI; account/job adapters; analytics dashboard; EliteosTopbar hard-gate; production SQL auto-apply; DNS for slab-ai host. |
+| **Revisit trigger** | Document ingestion pipeline; EliteosTopbar migration; optional Brain-hosted generation; write enablement only with explicit approval. |
+
+---
+
+### 369. slabOS AI Knowledge Hub — governed ingestion & approval
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-21 |
+| **Decision** | Phase 3 **Knowledge Hub** for slabOS AI Studio. **Permission split:** `slab_ai` head grants AI usage; knowledge administration requires **`requireHeadAccess("slab_ai")` + `requireRole(["admin","super_admin","executive"])`** (Brain-enforced). Lifecycle: upload → validate → private Storage (`eliteos-slab-ai-knowledge`) → extract (PDF/DOCX/TXT/MD) → chunk → **`review_required`** → approve → searchable. Upload is never immediately trusted. Additive SQL `eliteos_slab_ai_knowledge_hub_v1.sql` extends Phase 2 tables (status, version/source_group, authority, storage metadata, SHA-256 duplicate detection, passage page/section). Retrieval remains **lexical + metadata** (approved + `is_current` only) — no embeddings. Shared **`EliteosTopbar`** integrated via Next client adapter (no fork). Citation click opens governed passage preview. AI actions remain read-only. |
+| **Why** | Trust requires approved provenance: users must see what was used, whether it was approved/current, and which parts are still AI reasoning. |
+| **Impacted files/docs** | `backend-core/src/slabAi/knowledge/**`, `slabAiKnowledgeApi.js`, `eliteos_slab_ai_knowledge_hub_v1.sql`, `app-slab-ai` Knowledge UX + topbar, this entry, `SYSTEM_BLUEPRINT.md`. |
+| **What is NOT built** | OCR for scanned PDFs; vector embeddings; autonomous AI write actions; public storage; automatic approve-on-upload; manufacturer catalog integrations. |
+| **Revisit trigger** | Optional hybrid semantic retrieval; OCR; richer conflict ranking UI; System Admin UI for knowledge-admin grants beyond role list. |
+
+---
+
+### 370. slabOS AI Hybrid Retrieval + OCR — Phase 4
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | Phase 4 upgrades Knowledge Hub retrieval from lexical-only to **hybrid lexical + semantic (pgvector)** while preserving all trust gates. **Embedding:** Brain-side `EmbeddingProvider` abstraction; production = OpenAI `text-embedding-3-small` (1536 dims, cosine); mock provider for tests. Config: `SLAB_AI_EMBEDDING_*` (preferred key separate from generation). Passages store `embedding`, `embedding_model`, `embedding_dimensions`, `embedding_version`, `embedding_status`, `embedded_at`. HNSW cosine index. Embeddings are derived artifacts — backfill via `POST /api/slab-ai/knowledge/embeddings/backfill` (admin). Embedding failure does **not** fail extraction; document stays reviewable. **Hybrid ranking:** authorized org+approved+current+active filter first → lexical top-N + semantic top-N → Reciprocal Rank Fusion (`rrfK=60`) → metadata/authority/exact-identifier boosts (centralized in `hybridRanking.mjs`). Exact model/SKU/error tokens remain strongly favored. Semantic outage degrades to lexical. **OCR:** OpenAI vision/PDF transcription behind `OcrProvider` (not tesseract — Vercel serverless incompatible). Triggered only when native text is inadequate (`minNativeChars=80` / sparse pages) or `forceOcr`. Limits: `SLAB_AI_OCR_MAX_PAGES` (40), `SLAB_AI_OCR_MAX_BYTES` (20MB). OCR provenance on passages (`extraction_origin=ocr`) + review UX banner. Approval still mandatory. Additive SQL: `eliteos_slab_ai_hybrid_retrieval_v1.sql` + RPC `slab_ai_match_knowledge_passages` (org + approved + current + active + model filter). Retrieval eval harness compares lexical vs hybrid (Recall@K, MRR). AI actions remain read-only. No new tool catalog sprawl. |
+| **Why** | Find approved evidence when user wording differs from source terminology; admit scanned manuals into the same governed lifecycle without weakening authorization. |
+| **Impacted files/docs** | `backend-core/src/slabAi/knowledge/{embedding*,ocr*,hybridRanking,retrievalEval,knowledgeRetrieval,knowledgeIngestion}*`, `eliteos_slab_ai_hybrid_retrieval_v1.sql`, Knowledge review UX, `app-slab-ai/evals/retrieval/`, this entry, `SYSTEM_BLUEPRINT.md`. |
+| **What is NOT built** | Multi-provider embedding marketplace; local tesseract; diagram/image understanding; vectorizing quotes/jobs/accounts; autonomous write actions; production auto-migration; full Playwright browser E2E (lifecycle covered by contract tests). |
+| **Revisit trigger** | Embedding model change → re-backfill; OCR provider quality for dense tables/handwriting; optional page-image preview for reviewers; richer conflict UI; Playwright E2E when auth fixtures exist. |
+
+---
+
+### 371. slabOS AI Governed Operational Context — Phase 5
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | Phase 5 adds a **read-only operational context layer** so slabOS AI can use approved knowledge **and** typed company data without vectorizing operational databases. **Architecture:** AI actions → Brain adapters → existing Account Directory / Quote Library / Moraware prepared facts / slab inventory cache → safe DTOs. Knowledge Hub remains documentation-only. **Cross-head permission:** `slab_ai` ∩ domain head (e.g. `account_directory`, `slab_inventory`); finance company-head actions are **not** exposed (`retrieveAccountFinancialSummary` catalogued as unavailable). Account 360 relationship is reused with `embedFinancials: false`. **Actions (all mode=read):** `searchQuotes`, `retrieveQuote`, `searchAccounts`, `retrieveAccount`, `listAccountJobs`, `retrieveJob`, `searchMaterials` (+ catalog notes `searchJobs` / finance unavailable). **Provenance UI:** Company data used vs Knowledge sources used are separate. **New tool:** Account Brief (operational-only). Quote Scope gains account search/select + knowledge policies + conflict warnings. Truncation, ambiguity (multi-account select), freshness notes, context inspector (admin), and action telemetry/audit metadata included. No autonomous writes. No live Moraware/QB/Monday fan-out from AI. |
+| **Why** | Employees need answers grounded in the current work (quotes/accounts/jobs) plus approved SOPs — without turning AI Studio into a finance or CRM bypass. |
+| **Impacted files/docs** | `backend-core/src/slabAi/{slabAiPermissionIntersection,slabAiAccountActions,slabAiJobActions,slabAiInventoryActions,slabAiQuoteActions,slabAiApi}*`, `app-slab-ai` operationalContext/actions/Account Brief/Quote Scope UI, this entry, `SYSTEM_BLUEPRINT.md`, head map. |
+| **What is NOT built** | Org-wide `searchJobs`; Finance Head / QuickBooks Intelligence AI summaries; live vendor calls; autonomous writes; graph DB; Playwright browser E2E (auth fixtures not practical yet); vectorizing quotes/jobs/accounts. |
+| **Revisit trigger** | Governed org-wide job search API; finance permission-safe summary DTOs; inventory remnant-specific actions; human-approved write action phase; Playwright when sentinel auth exists. |
+
+---

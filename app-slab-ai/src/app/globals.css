@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f4f1;
+  --sidebar: #f0ece6;
+  --surface: #fffcf8;
+  --fg: #1c1917;
+  --fg-secondary: #57534e;
+  --muted: #e7e2da;
+  --muted-fg: #78716c;
+  --border: #ddd5cb;
+  --accent: #3f5b4c;
+  --accent-soft: #dfe8e2;
+  --danger: #b42318;
+  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.05);
+  --shadow-md: 0 8px 24px rgba(28, 25, 23, 0.08);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #141210;
+  --sidebar: #1a1714;
+  --surface: #1f1b18;
+  --fg: #f5f0ea;
+  --fg-secondary: #c4b8ac;
+  --muted: #2a2420;
+  --muted-fg: #a89c90;
+  --border: #3a322c;
+  --accent: #8faf9a;
+  --accent-soft: #243029;
+  --danger: #f97066;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(63, 91, 76, 0.08), transparent 55%),
+    radial-gradient(900px 400px at 100% 0%, rgba(120, 90, 60, 0.06), transparent 50%),
+    var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(143, 175, 154, 0.08), transparent 55%),
+    radial-gradient(900px 400px at 100% 0%, rgba(80, 60, 40, 0.12), transparent 50%),
+    var(--bg);
+}
+
+.ai-markdown h1,
+.ai-markdown h2,
+.ai-markdown h3 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 1.1em 0 0.45em;
+}
+
+.ai-markdown h3 {
+  font-size: 1.05rem;
+}
+
+.ai-markdown p {
+  margin: 0.45em 0;
+}
+
+.ai-markdown ul {
+  margin: 0.4em 0 0.6em;
+  padding-left: 1.2rem;
+}
+
+.ai-markdown li {
+  margin: 0.2em 0;
+}
+
+.ai-markdown strong {
+  font-weight: 650;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media print {
+  aside,
+  nav,
+  button {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+}

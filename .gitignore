@@ -56,4 +56,7 @@ local-imports/
 /supabase/.branches/
 /supabase/.cache/
 /supabase/supabase/
+backend-core/supabase/.temp/
+backend-core/supabase/.branches/
+**/supabase/.temp/
 

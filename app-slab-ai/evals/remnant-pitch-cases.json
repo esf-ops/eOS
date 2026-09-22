@@ -1,0 +1,39 @@
+[
+  {
+    "id": "remnant-vanity-fit",
+    "description": "36x22 remnant should support vanity discussion without inventing price",
+    "input": {
+      "materialType": "Quartz",
+      "colorName": "EVAL-WHITE-001",
+      "lengthIn": 36,
+      "widthIn": 22,
+      "thickness": "3 cm",
+      "finish": "Polished",
+      "quantity": 1,
+      "possibleApplication": "vanity"
+    },
+    "expect": {
+      "sections": ["Opportunity Summary", "Retail Listing", "Social Post", "Sales Email", "Suggested Applications"],
+      "mustNotMatch": ["\\$\\d", "priced at", "MSRP"],
+      "mustMatch": ["vanity"]
+    }
+  },
+  {
+    "id": "remnant-too-small-desk",
+    "description": "12x8 remnant should not claim full desk suitability",
+    "input": {
+      "materialType": "Granite",
+      "colorName": "EVAL-BLACK-002",
+      "lengthIn": 12,
+      "widthIn": 8,
+      "thickness": "3 cm",
+      "finish": "Honed",
+      "quantity": 1,
+      "possibleApplication": "desk"
+    },
+    "expect": {
+      "mustNotMatch": ["perfect full desk", "\\$\\d"],
+      "dimensionalHonesty": true
+    }
+  }
+]

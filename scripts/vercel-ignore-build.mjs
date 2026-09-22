@@ -49,7 +49,8 @@ export const PROJECT_DEPENDENCIES = Object.freeze({
   "app-slab-inventory": ["shared/eliteos-ui"],
   "app-visualizer": ["shared/eliteos-ui"],
   "app-pricing-admin": ["shared/eliteos-ui"],
-  "app-internal-estimate": ["shared/eliteos-ui"]
+  "app-internal-estimate": ["shared/eliteos-ui"],
+  "app-slab-ai": ["backend-core/src/slabAi", "shared/eliteos-ui"]
 });
 
 /** Paths that force every managed project to rebuild. */

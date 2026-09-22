@@ -29,7 +29,7 @@
 
 | Layer | Role |
 |-------|------|
-| **Heads / frontends** | Vite + React apps (`app-*`). Each head is a product slice; must not duplicate **eliteOS Brain** business logic as the source of truth. |
+| **Heads / frontends** | Vite + React apps (`app-*`), plus **`app-slab-ai`** (Next.js App Router exception for AI streaming — see `FEATURE_DECISIONS.md` §367). Each head is a product slice; must not duplicate **eliteOS Brain** business logic as the source of truth. |
 | **eliteOS Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
 | **Supabase** | Database, Auth (anon + user JWT for heads), Row Level Security where enabled; **organization-scoped** data for SaaS. |
 | **Monday.com** | Optional CRM sync for public (and other) quotes; **server-side only** token. |
@@ -72,6 +72,7 @@ Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to f
 | **HR Head (`app-hr`)** | **`https://hr.eliteosfab.com`**; set **`HEAD_URL_HR`**. **eliteOS HR Head** — slug **`hr`**; workforce quality grading (supervisor-logged mistakes, weekly letter grades, performance history). |
 | **QuickBooks Intelligence Head (`app-quickbooks-intelligence`)** | Recommended **`https://qb.eliteosfab.com`** (or chosen finance host); set **`HEAD_URL_QUICKBOOKS_INTELLIGENCE`**. **eliteOS QuickBooks Intelligence** — slug **`quickbooks_intelligence`**; staff auth + head access; read-only executive snapshot from QuickBooks staging via Brain. No AI, no writeback, no `raw_payload` in the browser. |
 | **Finance Head (`app-finance`)** | Hostname **not defined in-repo**. Set **`HEAD_URL_FINANCE`** to the Vercel (or DNS) origin after the project exists. **eliteOS Finance Head** — slug **`finance`**; staff auth + head access; eliteOS-styled owner command center for governed Accrual P&L/BS (YTD derived from contiguous monthly snapshots), A/R, A/P, cash, reconciliation, and bounded investigative detail via `GET /api/finance/*`. Detail reads are org-scoped, paginated (50 default / 100 maximum), allowlisted, ID-scrubbed, and QuickBooks read-only. Historical charts require stored snapshots and equivalent period coverage. Distinct from QuickBooks Intelligence. |
+| **slabOS AI Studio (`app-slab-ai`)** | Hostname **not defined in-repo** yet. Set **`HEAD_URL_SLAB_AI`**. Slug **`slab_ai`**. Next.js AI tool catalog with Brain-enforced access, org-scoped history/feedback, **Knowledge Hub** (upload → review → approve; hybrid lexical+semantic retrieval via pgvector; OCR for scanned PDFs), **Phase 5 governed operational context** (read-only Account Directory / Quote / Moraware-prepared jobs / slab inventory adapters with cross-head permission intersection; Company data vs Knowledge provenance UI; Account Brief tool), and shared **EliteosTopbar**. See `FEATURE_DECISIONS.md` §367–§371. |
 | **eliteOS Brain / API** | https://backend-core-six.vercel.app |
 | **Future API hostname** | `api.eliteosfab.com` — **if/when** DNS and Vercel project wiring are configured |
 
@@ -264,6 +265,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | **`app-pricing-admin` changed** | `npm install --prefix app-pricing-admin` (first clone) then `npm run build --prefix app-pricing-admin` |
 | **`app-elite100-quote-flow` changed** | `npm install --prefix app-elite100-quote-flow` (first clone) then `npm run build --prefix app-elite100-quote-flow` |
 | **`app-elite100-estimate-studio` changed** | `npm run build --prefix app-elite100-estimate-studio` |
+| **`app-slab-ai` changed** | `npm install --prefix app-slab-ai` (first clone) then `npm test --prefix app-slab-ai` and `npm run build --prefix app-slab-ai` |
 | **Backend JS touched** | `node --check <path-to-changed-file.js>` |
 | **Repo-wide sanity** | `npm run eos:check:local` |
 | **After deploy** (sensitive) | Hosted smoke: public calculate + submit + verify Supabase + Monday |

@@ -154,8 +154,9 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 - Purchasing / Material Readiness Head  
 - Supplier / Vendor Head  
-- **Slab Inventory Head** (**`app-slab-inventory/`** — env `HEAD_URL_SLAB_INVENTORY`; slug `slab_inventory`; Brain routes `/api/slab-inventory/*`; **read-only v1**) — internal slab browser over the normalized SlabCloud cache (`slab_inventory` / `slab_images` / `slab_materials` / `slabcloud_sync_runs`). SlabCloud/Slabsmith stays the source of truth; no holds, allocation, overrides, or writeback. `price_group` is shown as **imported source price group**, not slabOS pricing authority. (Supersedes the generic "Inventory / Slab Head" placeholder for v1.)  
-- SlabSmith Integration Head  
+- **Slab Inventory Head** (**`app-slab-inventory/`** — env `HEAD_URL_SLAB_INVENTORY`; slug `slab_inventory`; Brain routes `/api/slab-inventory/*`; **read-only v1**) — internal slab browser over the normalized SlabCloud cache (`slab_inventory` / `slab_images` / `slab_materials` / `slabcloud_sync_runs`). SlabCloud/Slabsmith stays the source of truth; no holds, allocation, overrides, or writeback. `price_group` is shown as **imported source price group**, not slabOS pricing authority. (Supersedes the generic "Inventory / Slab Head" placeholder for v1.)
+- **slabOS AI Studio** (**`app-slab-ai/`** — env `HEAD_URL_SLAB_AI`; slug `slab_ai`; Next.js App Router) — catalog of specialized AI tools (remnant marketing, bridge saw/CNC troubleshooter, quote scope drafting, stone care, account brief). Orchestration only; mock mode without keys; does not own pricing, inventory qty, or machine setpoints. Knowledge Hub with hybrid lexical+semantic retrieval + OCR; Phase 5 read-only operational context via Brain adapters (§367–§371).
+- SlabSmith Integration Head
 - Remnant Head  
 - Material Risk / Reorder Recommendation Head  
 

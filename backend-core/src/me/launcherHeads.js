@@ -241,6 +241,16 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/visualizer",
     roleNote:
       "Concept visualization only — not an estimate, measurement, layout, inventory reservation, or production drawing. Does not write to quotes or inventory."
+  },
+  {
+    slug: "slab_ai",
+    label: "slabOS AI Studio",
+    description:
+      "Catalog of specialized AI coworkers for remnant marketing, shop troubleshooting, scope drafting, and customer care.",
+    category: "Operations",
+    href: "/slab-ai",
+    roleNote:
+      "AI orchestration head — drafts and assists only. Does not own pricing, inventory quantities, or machine setpoints. Live model calls use server-side keys; mock mode is for local testing."
   }
 ];
 

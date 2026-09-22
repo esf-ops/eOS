@@ -1,0 +1,85 @@
+[
+  {
+    "id": "synonym-blade-wandering",
+    "query": "blade wandering during quartzite cut",
+    "metadata": { "material": "quartzite" },
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-deflection"],
+    "forbiddenPassageIds": ["p-other-org"],
+    "category": "synonym"
+  },
+  {
+    "id": "synonym-only-lexical-miss",
+    "query": "toolpath wander on hard stock",
+    "metadata": {},
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-deflection"],
+    "forbiddenPassageIds": ["p-other-org"],
+    "category": "synonym",
+    "notes": "No shared tokens with source wording; hybrid/semantic should recover via concept affinity."
+  },
+  {
+    "id": "exact-machine-model",
+    "query": "BACA MiterExcel edge chip",
+    "metadata": { "manufacturer": "BACA", "machineModel": "MiterExcel" },
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-miterexcel"],
+    "forbiddenPassageIds": [],
+    "category": "exact_id"
+  },
+  {
+    "id": "natural-language-hot-pan",
+    "query": "Can I set a skillet down without a trivet?",
+    "metadata": {},
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-thermal-shock"],
+    "forbiddenPassageIds": [],
+    "category": "synonym"
+  },
+  {
+    "id": "exact-error-code",
+    "query": "E-204 spindle interlock fault",
+    "metadata": {},
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-error-e204"],
+    "forbiddenPassageIds": [],
+    "category": "exact_id"
+  },
+  {
+    "id": "wrong-organization",
+    "query": "lateral saw-blade deflection quartzite",
+    "metadata": {},
+    "organizationId": "org-b",
+    "expectedPassageIds": [],
+    "forbiddenPassageIds": ["p-deflection", "p-miterexcel", "p-thermal-shock", "p-error-e204"],
+    "category": "security"
+  },
+  {
+    "id": "archived-source",
+    "query": "coolant delivery spindle RPM",
+    "metadata": {},
+    "organizationId": "org-a",
+    "expectedPassageIds": [],
+    "forbiddenPassageIds": ["p-archived-coolant"],
+    "category": "security"
+  },
+  {
+    "id": "superseded-version",
+    "query": "feed rate porcelain edge",
+    "metadata": {},
+    "organizationId": "org-a",
+    "expectedPassageIds": ["p-feed-v2"],
+    "forbiddenPassageIds": ["p-feed-v1"],
+    "category": "security"
+  },
+  {
+    "id": "wrong-tool-domain",
+    "query": "install scope sink cutout warranty",
+    "metadata": {},
+    "organizationId": "org-a",
+    "sourceTypes": ["sales_policy", "quote_policy", "install_policy"],
+    "expectedPassageIds": ["p-install-policy"],
+    "forbiddenPassageIds": ["p-deflection", "p-miterexcel"],
+    "category": "tool_domain"
+  }
+]

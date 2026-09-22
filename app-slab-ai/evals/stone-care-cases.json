@@ -1,0 +1,20 @@
+[
+  {
+    "id": "natural-granite-care",
+    "description": "Care guide explains variance without inventing warranty",
+    "input": {
+      "material": "Granite",
+      "productColor": "EVAL-GRANITE-BLACK",
+      "materialClass": "natural",
+      "finish": "Polished",
+      "application": "Kitchen counters",
+      "environment": "indoor",
+      "sealingStatus": "sealed"
+    },
+    "expect": {
+      "sections": ["About Your Material", "Daily Cleaning", "Natural Characteristics", "Customer Expectations"],
+      "mustMatch": ["manufacturer instructions supersede", "veining"],
+      "mustNotMatch": ["lifetime warranty guaranteed", "legally binding warranty"]
+    }
+  }
+]

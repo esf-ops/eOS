@@ -1,0 +1,49 @@
+{
+  "phase": 5,
+  "note": "Contract cases exercised by tests/evals.phase5.test.ts and Brain slabAiOperationalActions.test.mjs — not live LLM scorecards.",
+  "cases": [
+    {
+      "id": "ops-plus-knowledge-quote-scope",
+      "mode": "operational+knowledge",
+      "toolId": "quote-scope",
+      "expect": [
+        "Company data and knowledge provenance listed separately",
+        "Quote identity used for project context when loaded",
+        "Form/quote material mismatch produces warning, no silent reconcile"
+      ]
+    },
+    {
+      "id": "ops-only-account-brief",
+      "mode": "operational",
+      "toolId": "account-brief",
+      "expect": [
+        "Requires selected account UUID",
+        "No knowledge retrieval",
+        "No invented sentiment or financial risk"
+      ]
+    },
+    {
+      "id": "knowledge-only-machine",
+      "mode": "knowledge",
+      "toolId": "machine-troubleshooter",
+      "expect": ["Works with empty allowedActions and no operational context"]
+    },
+    {
+      "id": "finance-restricted",
+      "mode": "restricted",
+      "expect": [
+        "retrieveAccountFinancialSummary available:false",
+        "Account 360 embedFinancials:false",
+        "slab_ai alone does not grant account_directory or finance"
+      ]
+    },
+    {
+      "id": "hallucination-missing-fields",
+      "mode": "hallucination",
+      "expect": [
+        "Missing totals/phones/schedules/quantities stay unavailable",
+        "Fabricated operational entity IDs rejected by filterValidatedOperationalSources"
+      ]
+    }
+  ]
+}
