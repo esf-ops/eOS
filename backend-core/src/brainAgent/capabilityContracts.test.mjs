@@ -34,6 +34,7 @@ const FOUNDATION = [
   "brain.search_inventory",
   "brain.search_company_knowledge",
   "brain.query_metric",
+  "brain.evaluate_rectangular_fit",
 ];
 
 function reset() {

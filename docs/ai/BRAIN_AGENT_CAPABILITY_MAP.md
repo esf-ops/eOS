@@ -55,6 +55,7 @@ Map what the eliteOS Brain already contains, what AI-safe read surfaces exist to
 | `brain.search_inventory` | Implemented | AI materials search |
 | `brain.search_company_knowledge` | Implemented | Knowledge hybrid search |
 | `brain.query_metric` | Implemented (quote_count by account) | Server-side aggregation on `quote_headers` |
+| `brain.evaluate_rectangular_fit` | Implemented | Deterministic bounding-box fit (optional rotation); dimensional disclaimer |
 | `brain.get_time_series` | Catalog only | Not implemented |
 | `brain.compare_periods` | Catalog only | Not implemented |
 | `brain.get_operational_exceptions` | Catalog only | Not implemented |

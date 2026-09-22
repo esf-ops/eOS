@@ -15,5 +15,6 @@ export {
 export {
   formatEvidenceForDisplay,
   answerStateBanner,
+  displayAnswerForUser,
   sanitizeDebugPayload,
 } from "./display";

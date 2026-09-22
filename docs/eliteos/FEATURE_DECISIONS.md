@@ -5037,3 +5037,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Add Ajv (or equivalent) only if hand-written validateInput drifts from schemas; prefer generating validators from schema. |
 
 ---
+
+### 376. Brain Agent accuracy — server computation + loop efficiency
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-22 |
+| **Decision** | **Authoritative computation is server-side** when practical (counts, rankings, dimensional fit, etc.). The model chooses *what* to compute; Brain executes; the model explains with evidence. First concrete capability: **`brain.evaluate_rectangular_fit`** (bounding-box fit with optional 90° rotation; explicit fabrication-disclaimer). Identical capability+input repeats in one run return **`DUPLICATE_TOOL_CALL`** without re-execution. Tool-budget exhaustion with useful evidence yields **`PARTIALLY_SUPPORTED`** rather than empty insufficient. Raw `[ev_*]` citations stay for validation but are hidden in normal UI prose. |
+| **Why** | Production Taj Mahal vanity answer missed a valid 52×51 fit (LLM geometry). Broad “Garman Built / anything concerning?” runs burned 8 identical-style tool calls without a partial answer. |
+| **Impacted files/docs** | `rectangularFit.mjs`, `capabilitySchemas.mjs`, `registerFoundation.mjs`, `agentRuntime.mjs`, `modelDriver.mjs`, inventory `lengthIn`/`widthIn`, UI `displayAnswerForUser`, accuracy tests, this entry. |
+| **What is NOT built** | Intent/vanity workflows; expanding maxToolCalls; concern-score domain; deploy. |
+| **Revisit trigger** | Add more server computations (period compare, status age) as production derived-fact errors appear. |
+
+---

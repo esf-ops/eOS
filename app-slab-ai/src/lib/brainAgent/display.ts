@@ -75,6 +75,24 @@ export function answerStateBanner(state: BrainAnswerState | undefined): {
   }
 }
 
+/**
+ * Hide raw [ev_*] machine citations from normal employee-facing prose.
+ * Validation still uses the raw answer + citedEvidenceIds on the server.
+ * Debug mode may show originals.
+ */
+export function displayAnswerForUser(
+  answer: string | undefined | null,
+  opts: { showEvidenceIds?: boolean } = {}
+): string {
+  const text = String(answer || "");
+  if (opts.showEvidenceIds) return text;
+  return text
+    .replace(/\s*\[ev_[a-f0-9]{8,32}\]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /** Sanitize debug payload for UI — strip anything that looks like a secret. */
 export function sanitizeDebugPayload(result: Record<string, unknown>): Record<string, unknown> {
   const allowed = [
@@ -88,6 +106,7 @@ export function sanitizeDebugPayload(result: Record<string, unknown>): Record<st
     "validation",
     "toolTrace",
     "providerMeta",
+    "debugStop",
     "blockedUnsupportedClaim",
     "evidenceCount",
   ];

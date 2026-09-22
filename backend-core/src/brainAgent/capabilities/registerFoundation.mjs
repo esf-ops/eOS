@@ -11,6 +11,7 @@ import { listAccountJobsForAi } from "../../slabAi/slabAiJobActions.mjs";
 import { searchMaterialsForAi } from "../../slabAi/slabAiInventoryActions.mjs";
 import { searchApprovedKnowledge } from "../../slabAi/knowledge/knowledgeRetrieval.mjs";
 import { queryQuoteCountByAccount } from "./queryMetric.mjs";
+import { evaluateRectangularFitBatch } from "./rectangularFit.mjs";
 
 function pickStr(v) {
   return String(v ?? "").trim();
@@ -469,6 +470,51 @@ export function registerFoundationCapabilities() {
         period: input.period || "quarter",
         order: input.order === "asc" ? "asc" : "desc",
         limit: input.limit,
+      });
+    },
+  });
+
+  registerCapability({
+    name: "brain.evaluate_rectangular_fit",
+    description:
+      "Server-computed rectangular bounding-box fit. Pass requiredLength/requiredWidth and candidates[{id,length,width}] from inventory evidence. Prefer this over mental geometry. Result is dimensional fit only (see disclaimer).",
+    domain: "computation",
+    mode: "read",
+    requiredHead: null,
+    sensitivity: "low",
+    authoritativeSource: "brain_evaluate_rectangular_fit",
+    inputSchema: schema("brain.evaluate_rectangular_fit"),
+    validateInput: (input) => {
+      if (Number(input?.requiredLength) <= 0 || Number(input?.requiredWidth) <= 0) {
+        return {
+          ok: false,
+          error: "requiredLength and requiredWidth must be positive numbers",
+          code: "VALIDATION_ERROR",
+        };
+      }
+      if (!Array.isArray(input?.candidates) || input.candidates.length === 0) {
+        return { ok: false, error: "candidates must be a non-empty array", code: "VALIDATION_ERROR" };
+      }
+      for (const c of input.candidates) {
+        if (!c || c.id == null || c.id === "") {
+          return { ok: false, error: "each candidate requires id", code: "VALIDATION_ERROR" };
+        }
+        if (!(Number(c.length) > 0) || !(Number(c.width) > 0)) {
+          return {
+            ok: false,
+            error: "each candidate requires positive length and width",
+            code: "VALIDATION_ERROR",
+          };
+        }
+      }
+      return { ok: true };
+    },
+    async execute(input) {
+      return evaluateRectangularFitBatch({
+        requiredLength: input.requiredLength,
+        requiredWidth: input.requiredWidth,
+        candidates: input.candidates,
+        allowRotation: input.allowRotation !== false,
       });
     },
   });

@@ -191,6 +191,56 @@ export const CAPABILITY_INPUT_SCHEMAS = Object.freeze({
       },
     },
   },
+
+  "brain.evaluate_rectangular_fit": {
+    $id: "brain.evaluate_rectangular_fit",
+    type: "object",
+    additionalProperties: false,
+    required: ["requiredLength", "requiredWidth", "candidates"],
+    properties: {
+      requiredLength: {
+        type: "number",
+        exclusiveMinimum: 0,
+        description: "Required piece length (same units as candidates, typically inches)",
+      },
+      requiredWidth: {
+        type: "number",
+        exclusiveMinimum: 0,
+        description: "Required piece width (same units as candidates, typically inches)",
+      },
+      allowRotation: {
+        type: "boolean",
+        description: "Allow 90° rotation when testing fit (default true)",
+      },
+      candidates: {
+        type: "array",
+        minItems: 1,
+        maxItems: 50,
+        description: "Slab/remnant candidates with numeric length and width from inventory evidence",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "length", "width"],
+          properties: {
+            id: {
+              type: "string",
+              description: "Candidate id (e.g. materialId from inventory evidence)",
+            },
+            length: {
+              type: "number",
+              exclusiveMinimum: 0,
+              description: "Available length",
+            },
+            width: {
+              type: "number",
+              exclusiveMinimum: 0,
+              description: "Available width",
+            },
+          },
+        },
+      },
+    },
+  },
 });
 
 export function getCapabilityInputSchema(name) {
@@ -235,7 +285,7 @@ export const AGENT_CONTROL_OPENAI_TOOLS = Object.freeze([
     function: {
       name: "agent_final_answer",
       description:
-        "Return an evidence-grounded final answer. Cite evidence IDs like [ev_…] for every company fact.",
+        "Return an evidence-grounded final answer. Cite evidence IDs like [ev_…] for every company fact. Use answerState PARTIALLY_SUPPORTED when only part of the question can be answered with exposed capabilities.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -245,6 +295,10 @@ export const AGENT_CONTROL_OPENAI_TOOLS = Object.freeze([
           citedEvidenceIds: {
             type: "array",
             items: { type: "string" },
+          },
+          answerState: {
+            type: "string",
+            enum: ["SUPPORTED", "PARTIALLY_SUPPORTED"],
           },
         },
       },
@@ -293,6 +347,7 @@ export const AGENT_CONTROL_OPENAI_TOOLS = Object.freeze([
               "CAPABILITY_UNAVAILABLE",
               "PERMISSION_DENIED",
               "AMBIGUOUS_ENTITY",
+              "PARTIALLY_SUPPORTED",
             ],
           },
         },

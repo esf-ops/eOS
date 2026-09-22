@@ -21,6 +21,7 @@ import {
   answerStateBanner,
   buildBrainAgentContext,
   canShowBrainAgentDebug,
+  displayAnswerForUser,
   formatEvidenceForDisplay,
   mergeResolvedFromEvidence,
   sanitizeDebugPayload,
@@ -408,7 +409,9 @@ export function AssistantWorkspace() {
                     ) : null}
                     {m.role === "assistant" ? (
                       <div className="ai-markdown prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {displayAnswerForUser(m.text, { showEvidenceIds: wantDebug && showDebugControls })}
+                        </ReactMarkdown>
                       </div>
                     ) : (
                       <p className="whitespace-pre-wrap">{m.text}</p>

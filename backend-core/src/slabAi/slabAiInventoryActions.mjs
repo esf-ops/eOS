@@ -31,6 +31,9 @@ export function toAiMaterialSummary(row, retrievedAt) {
     materialName: pickStr(row.material_name) || null,
     thickness: pickStr(row.thickness_nominal) || null,
     dimensions: dims,
+    /** Numeric inches for server-side fit tools (brain.evaluate_rectangular_fit). */
+    lengthIn: Number.isFinite(l) ? l : null,
+    widthIn: Number.isFinite(w) ? w : null,
     rack: pickStr(row.rack) || null,
     lot: pickStr(row.lot) || null,
     distributor: pickStr(row.distributor) || null,

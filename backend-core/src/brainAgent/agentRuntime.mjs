@@ -7,8 +7,10 @@
  * - auth / org / head permission (gateway)
  * - capability allowlist enforcement
  * - input/schema validation
+ * - identical-call deduplication
  * - limits / timeouts
  * - evidence provenance + factual support checking
+ * - server-side computations (metrics, rectangular fit)
  *
  * The MODEL decides intent, investigation path, tool choice, and when to answer.
  * There is NO regex intent router and NO hard-coded business workflow library.
@@ -44,7 +46,9 @@ export function sanitizeToolInputForDebug(input) {
     } else if (typeof v === "number" || typeof v === "boolean" || v == null) {
       out[key] = v;
     } else if (Array.isArray(v)) {
-      out[key] = v.slice(0, 20);
+      out[key] = v.slice(0, 20).map((item) =>
+        item && typeof item === "object" ? sanitizeToolInputForDebug(item) : item
+      );
     } else if (typeof v === "object") {
       out[key] = sanitizeToolInputForDebug(v);
     } else {
@@ -52,6 +56,66 @@ export function sanitizeToolInputForDebug(input) {
     }
   }
   return out;
+}
+
+/** Stable fingerprint for identical capability+input deduplication. */
+export function normalizeToolCallKey(capability, input) {
+  const norm = (v) => {
+    if (v == null) return null;
+    if (typeof v === "number" || typeof v === "boolean") return v;
+    if (typeof v === "string") return v.trim();
+    if (Array.isArray(v)) return v.map(norm);
+    if (typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v).sort()) out[k] = norm(v[k]);
+      return out;
+    }
+    return String(v);
+  };
+  return JSON.stringify({ capability: String(capability || ""), input: norm(input || {}) });
+}
+
+function summarizeObservation(obs) {
+  if (!obs || typeof obs !== "object") return null;
+  return {
+    ok: Boolean(obs.ok),
+    code: obs.code || null,
+    error: obs.error || null,
+    itemCount: obs.itemCount,
+    metric: obs.metric || null,
+    fitsCount: obs.fitsCount,
+    truncated: Boolean(obs.truncated),
+  };
+}
+
+function evidenceDomainsCollected(evidenceBag) {
+  const domains = new Set();
+  for (const ev of evidenceBag || []) {
+    if (ev?.sourceDomain) domains.add(String(ev.sourceDomain));
+    if (ev?.entityType) domains.add(String(ev.entityType));
+  }
+  return [...domains].sort();
+}
+
+function hasUsefulPartialEvidence(evidenceBag) {
+  return (evidenceBag || []).some((ev) => {
+    const t = String(ev?.entityType || "");
+    const d = String(ev?.sourceDomain || "");
+    return (
+      ev?.authoritative !== false &&
+      (t === "account" ||
+        t === "quote" ||
+        t === "job" ||
+        t === "metric" ||
+        t === "material" ||
+        t === "rectangular_fit" ||
+        d === "account" ||
+        d === "quote" ||
+        d === "job" ||
+        d === "inventory" ||
+        d === "computation")
+    );
+  });
 }
 
 function observationForModel(result) {
@@ -69,6 +133,7 @@ function observationForModel(result) {
     recentJobs,
     passages,
     rows,
+    results,
     metric,
     period,
     dimension,
@@ -78,9 +143,12 @@ function observationForModel(result) {
     evidence,
     capability,
     expectedInputSchema,
+    disclaimer,
+    fitsCount,
+    requiredLength,
+    requiredWidth,
   } = result;
 
-  // Surface authoritative accountIds from metric rankings for follow-up tool calls
   const metricAccountIds = Array.isArray(rows)
     ? rows
         .map((r) => (r && r.accountId ? String(r.accountId) : null))
@@ -100,6 +168,10 @@ function observationForModel(result) {
     metric: metric || null,
     dimension: dimension || null,
     period: period || null,
+    disclaimer: disclaimer || null,
+    fitsCount: typeof fitsCount === "number" ? fitsCount : undefined,
+    requiredLength: requiredLength ?? undefined,
+    requiredWidth: requiredWidth ?? undefined,
     itemCount: Array.isArray(items) ? items.length : undefined,
     items: Array.isArray(items) ? items.slice(0, AGENT_LIMITS.maxRowsPerCall) : undefined,
     entity: entity || account || quote || undefined,
@@ -113,16 +185,29 @@ function observationForModel(result) {
         }))
       : undefined,
     rows: rows ? rows.slice(0, AGENT_LIMITS.maxRowsPerCall) : undefined,
+    results: results ? results.slice(0, AGENT_LIMITS.maxRowsPerCall) : undefined,
     metricAccountIds,
     evidence: (efm || (evidence || []).map(evidenceForModel) || []).slice(0, 40),
   };
 }
 
+function debugStopMeta({
+  reason,
+  toolCalls,
+  maxToolCalls,
+  evidenceBag,
+  lastProviderMeta,
+}) {
+  return {
+    stopReason: reason,
+    toolBudgetRemaining: Math.max(0, maxToolCalls - toolCalls),
+    evidenceDomains: evidenceDomainsCollected(evidenceBag),
+    providerMeta: lastProviderMeta,
+  };
+}
+
 /**
  * Run a read-only investigation driven by the model.
- *
- * @param {object} args
- * @param {object} [args.modelDriver] — injectable; defaults to live LLM driver
  */
 export async function runBrainAgent({
   message,
@@ -137,6 +222,8 @@ export async function runBrainAgent({
   const toolTrace = [];
   const evidenceBag = [];
   const history = [];
+  /** @type {Map<string, object>} */
+  const priorCallByKey = new Map();
 
   const permitted = await listPermittedCapabilities({ db: gatewayCtx.db, user: gatewayCtx.user });
   const permittedNames = new Set(permitted.map((p) => p.name));
@@ -150,11 +237,19 @@ export async function runBrainAgent({
     model: null,
   };
 
+  const pushTrace = (entry) => {
+    if (debug) toolTrace.push(entry);
+  };
+
   while (modelSteps < AGENT_LIMITS.maxModelSteps) {
     if (Date.now() - started > AGENT_LIMITS.timeoutMs) {
-      return finishAbstain({
-        state: ANSWER_STATES.CAPABILITY_UNAVAILABLE,
-        message: "Investigation timed out before enough evidence was gathered.",
+      return finishStop({
+        state: hasUsefulPartialEvidence(evidenceBag)
+          ? ANSWER_STATES.PARTIALLY_SUPPORTED
+          : ANSWER_STATES.CAPABILITY_UNAVAILABLE,
+        message: hasUsefulPartialEvidence(evidenceBag)
+          ? "I found some authoritative eliteOS data before timing out, but could not complete a full investigation within the time limit."
+          : "Investigation timed out before enough evidence was gathered.",
         evidenceBag,
         toolCalls,
         modelSteps,
@@ -163,6 +258,8 @@ export async function runBrainAgent({
         started,
         permittedNames,
         lastProviderMeta,
+        maxToolCalls,
+        stopReason: "timeout",
       });
     }
 
@@ -189,7 +286,7 @@ export async function runBrainAgent({
     const step = decision?.step;
     const checked = validateModelStep(step, permittedNames);
     if (!checked.ok) {
-      return finishAbstain({
+      return finishStop({
         state: ANSWER_STATES.INSUFFICIENT_EVIDENCE,
         message: "The planner produced an invalid step. I will not invent a workflow.",
         evidenceBag,
@@ -200,6 +297,8 @@ export async function runBrainAgent({
         started,
         permittedNames,
         lastProviderMeta,
+        maxToolCalls,
+        stopReason: "invalid_model_step",
         extra: { validationError: checked.error },
       });
     }
@@ -220,6 +319,15 @@ export async function runBrainAgent({
         durationMs: Date.now() - started,
         planner: driver.kind,
         providerMeta: debug ? lastProviderMeta : undefined,
+        debugStop: debug
+          ? debugStopMeta({
+              reason: "model_abstain",
+              toolCalls,
+              maxToolCalls,
+              evidenceBag,
+              lastProviderMeta,
+            })
+          : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
@@ -238,6 +346,15 @@ export async function runBrainAgent({
         durationMs: Date.now() - started,
         planner: driver.kind,
         providerMeta: debug ? lastProviderMeta : undefined,
+        debugStop: debug
+          ? debugStopMeta({
+              reason: "model_clarify",
+              toolCalls,
+              maxToolCalls,
+              evidenceBag,
+              lastProviderMeta,
+            })
+          : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
@@ -266,29 +383,58 @@ export async function runBrainAgent({
           planner: driver.kind,
           providerMeta: debug ? lastProviderMeta : undefined,
           blockedUnsupportedClaim: true,
+          debugStop: debug
+            ? debugStopMeta({
+                reason: "unsupported_claim_blocked",
+                toolCalls,
+                maxToolCalls,
+                evidenceBag,
+                lastProviderMeta,
+              })
+            : undefined,
         };
       }
+      const state =
+        action.answerState === ANSWER_STATES.PARTIALLY_SUPPORTED
+          ? ANSWER_STATES.PARTIALLY_SUPPORTED
+          : validation.state;
       return {
         ok: true,
-        answerState: validation.state,
+        answerState: state,
         answer: action.answer,
         evidence: evidenceBag.map(evidenceForModel),
         toolCalls,
         modelSteps,
         toolTrace: debug ? toolTrace : undefined,
-        validation,
+        validation: { ...validation, state },
         durationMs: Date.now() - started,
         planner: driver.kind,
         providerMeta: debug ? lastProviderMeta : undefined,
+        debugStop: debug
+          ? debugStopMeta({
+              reason:
+                state === ANSWER_STATES.PARTIALLY_SUPPORTED
+                  ? "model_partial_answer"
+                  : "model_final_answer",
+              toolCalls,
+              maxToolCalls,
+              evidenceBag,
+              lastProviderMeta,
+            })
+          : undefined,
         permittedCapabilities: [...permittedNames],
       };
     }
 
     // call_tool
     if (toolCalls >= maxToolCalls) {
-      return finishAbstain({
-        state: ANSWER_STATES.INSUFFICIENT_EVIDENCE,
-        message: "Reached the tool-call limit before a grounded answer was ready.",
+      return finishStop({
+        state: hasUsefulPartialEvidence(evidenceBag)
+          ? ANSWER_STATES.PARTIALLY_SUPPORTED
+          : ANSWER_STATES.INSUFFICIENT_EVIDENCE,
+        message: hasUsefulPartialEvidence(evidenceBag)
+          ? "I gathered some authoritative eliteOS evidence but reached the tool-call limit before fully answering. What I found is partial — eliteOS may not currently expose every signal needed for a complete concern assessment."
+          : "Reached the tool-call limit before a grounded answer was ready.",
         evidenceBag,
         toolCalls,
         modelSteps,
@@ -297,6 +443,8 @@ export async function runBrainAgent({
         started,
         permittedNames,
         lastProviderMeta,
+        maxToolCalls,
+        stopReason: "tool_budget_exhausted",
       });
     }
 
@@ -304,7 +452,7 @@ export async function runBrainAgent({
       const observation = {
         ok: false,
         code: "CAPABILITY_NOT_PERMITTED",
-        error: "That tool is not available for your access.",
+        error: "That tool is not available for your access. Do not keep searching for it.",
         capability: action.capability,
       };
       history.push({
@@ -313,28 +461,60 @@ export async function runBrainAgent({
         input: action.input || {},
         modelStep: modelSteps,
       });
-      history.push({
-        role: "observation",
+      history.push({ role: "observation", capability: action.capability, observation });
+      pushTrace({
+        modelStep: modelSteps,
         capability: action.capability,
-        observation,
+        ok: false,
+        skipped: true,
+        reason: "not_permitted",
+        durationMs: 0,
+        evidenceCount: 0,
+        code: "CAPABILITY_NOT_PERMITTED",
+        input: sanitizeToolInputForDebug(action.input || {}),
+        validationError: observation.error,
+        toolCallingMode: lastProviderMeta.toolCallingMode,
+        provider: lastProviderMeta.provider,
+        model: lastProviderMeta.model,
       });
-      if (debug) {
-        toolTrace.push({
-          modelStep: modelSteps,
-          capability: action.capability,
-          ok: false,
-          skipped: true,
-          reason: "not_permitted",
-          durationMs: 0,
-          evidenceCount: 0,
-          code: "CAPABILITY_NOT_PERMITTED",
-          input: sanitizeToolInputForDebug(action.input || {}),
-          validationError: observation.error,
-          toolCallingMode: lastProviderMeta.toolCallingMode,
-          provider: lastProviderMeta.provider,
-          model: lastProviderMeta.model,
-        });
-      }
+      continue;
+    }
+
+    const callKey = normalizeToolCallKey(action.capability, action.input || {});
+    if (priorCallByKey.has(callKey)) {
+      const prior = priorCallByKey.get(callKey);
+      const observation = {
+        ok: false,
+        code: "DUPLICATE_TOOL_CALL",
+        error: "This exact query was already executed.",
+        message: "This exact query was already executed.",
+        capability: action.capability,
+        priorObservationSummary: prior,
+      };
+      history.push({
+        role: "tool_call",
+        capability: action.capability,
+        input: action.input || {},
+        modelStep: modelSteps,
+        duplicate: true,
+      });
+      history.push({ role: "observation", capability: action.capability, observation });
+      pushTrace({
+        modelStep: modelSteps,
+        capability: action.capability,
+        ok: false,
+        skipped: true,
+        reason: "duplicate",
+        durationMs: 0,
+        evidenceCount: 0,
+        code: "DUPLICATE_TOOL_CALL",
+        input: sanitizeToolInputForDebug(action.input || {}),
+        validationError: observation.error,
+        toolCallingMode: lastProviderMeta.toolCallingMode,
+        provider: lastProviderMeta.provider,
+        model: lastProviderMeta.model,
+      });
+      // Do not burn tool budget on identical re-executions
       continue;
     }
 
@@ -356,7 +536,6 @@ export async function runBrainAgent({
       }
     }
 
-    // Ensure validation failures always carry the contract for recovery
     if (!result.ok && result.code === "VALIDATION_ERROR" && !result.expectedInputSchema) {
       const cap = getCapability(action.capability);
       result.expectedInputSchema = schemaForObservation(action.capability) || cap?.inputSchema || null;
@@ -364,6 +543,8 @@ export async function runBrainAgent({
     }
 
     const observation = observationForModel(result);
+    priorCallByKey.set(callKey, summarizeObservation(observation));
+
     history.push({
       role: "tool_call",
       capability: action.capability,
@@ -376,23 +557,20 @@ export async function runBrainAgent({
       observation,
     });
 
-    if (debug) {
-      toolTrace.push({
-        modelStep: modelSteps,
-        capability: action.capability,
-        ok: Boolean(result.ok),
-        durationMs: callDurationMs,
-        evidenceCount: (result.evidence || []).length,
-        code: result.code || null,
-        input: sanitizeToolInputForDebug(action.input || {}),
-        validationError: result.code === "VALIDATION_ERROR" ? result.error || null : null,
-        toolCallingMode: lastProviderMeta.toolCallingMode,
-        provider: lastProviderMeta.provider,
-        model: lastProviderMeta.model,
-      });
-    }
+    pushTrace({
+      modelStep: modelSteps,
+      capability: action.capability,
+      ok: Boolean(result.ok),
+      durationMs: callDurationMs,
+      evidenceCount: (result.evidence || []).length,
+      code: result.code || null,
+      input: sanitizeToolInputForDebug(action.input || {}),
+      validationError: result.code === "VALIDATION_ERROR" ? result.error || null : null,
+      toolCallingMode: lastProviderMeta.toolCallingMode,
+      provider: lastProviderMeta.provider,
+      model: lastProviderMeta.model,
+    });
 
-    // Permission denial is structural — surface immediately (not a business workflow)
     if (result.answerState === ANSWER_STATES.PERMISSION_DENIED || result.code === "DOMAIN_HEAD_REQUIRED") {
       return {
         ok: true,
@@ -406,15 +584,26 @@ export async function runBrainAgent({
         durationMs: Date.now() - started,
         planner: driver.kind,
         providerMeta: debug ? lastProviderMeta : undefined,
+        debugStop: debug
+          ? debugStopMeta({
+              reason: "permission_denied",
+              toolCalls,
+              maxToolCalls,
+              evidenceBag,
+              lastProviderMeta,
+            })
+          : undefined,
       };
     }
-
-    // VALIDATION_ERROR → observation already in history; model may correct on next step
   }
 
-  return finishAbstain({
-    state: ANSWER_STATES.INSUFFICIENT_EVIDENCE,
-    message: "Investigation ended without a grounded final answer.",
+  return finishStop({
+    state: hasUsefulPartialEvidence(evidenceBag)
+      ? ANSWER_STATES.PARTIALLY_SUPPORTED
+      : ANSWER_STATES.INSUFFICIENT_EVIDENCE,
+    message: hasUsefulPartialEvidence(evidenceBag)
+      ? "I gathered some authoritative eliteOS evidence but could not complete a full answer with the available capabilities and step budget."
+      : "Investigation ended without a grounded final answer.",
     evidenceBag,
     toolCalls,
     modelSteps,
@@ -423,10 +612,12 @@ export async function runBrainAgent({
     started,
     permittedNames,
     lastProviderMeta,
+    maxToolCalls,
+    stopReason: "model_steps_exhausted",
   });
 }
 
-function finishAbstain({
+function finishStop({
   state,
   message,
   evidenceBag,
@@ -437,6 +628,8 @@ function finishAbstain({
   started,
   permittedNames,
   lastProviderMeta,
+  maxToolCalls,
+  stopReason,
   extra = {},
 }) {
   return {
@@ -450,6 +643,15 @@ function finishAbstain({
     validation: { ok: true, state },
     durationMs: Date.now() - started,
     providerMeta: debug ? lastProviderMeta : undefined,
+    debugStop: debug
+      ? debugStopMeta({
+          reason: stopReason,
+          toolCalls,
+          maxToolCalls,
+          evidenceBag,
+          lastProviderMeta,
+        })
+      : undefined,
     permittedCapabilities: [...permittedNames],
     ...extra,
   };
