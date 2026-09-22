@@ -1,8 +1,11 @@
 /**
  * Brain Agent HTTP API — read-only gateway + agent run.
  * Auth: requireAuth + requireHeadAccess(slab_ai)
+ *
+ * Brain has no global JSON body parser — POST routes must attach express.json locally.
  */
 
+import express from "express";
 import {
   createGatewayContext,
   executeCapability,
@@ -16,6 +19,9 @@ import { logAction } from "../auth/auditLog.js";
 import { getOllamaConfig } from "./ollamaProvider.mjs";
 
 const HEAD = "slab_ai";
+
+/** Same small-body convention as Account Directory / Sales / HR APIs. */
+const jsonParser = express.json({ limit: "256kb" });
 
 function jsonNoStore(res) {
   res.setHeader("Cache-Control", "no-store");
@@ -59,7 +65,7 @@ export function attachBrainAgentRoutes(app, { requireAuth, requireHeadAccess, ge
     }
   });
 
-  app.post("/api/brain-agent/execute", ...guard, async (req, res) => {
+  app.post("/api/brain-agent/execute", ...guard, jsonParser, async (req, res) => {
     try {
       jsonNoStore(res);
       const organizationId = await orgId(req);
@@ -98,7 +104,7 @@ export function attachBrainAgentRoutes(app, { requireAuth, requireHeadAccess, ge
     }
   });
 
-  app.post("/api/brain-agent/run", ...guard, async (req, res) => {
+  app.post("/api/brain-agent/run", ...guard, jsonParser, async (req, res) => {
     try {
       jsonNoStore(res);
       const organizationId = await orgId(req);
@@ -111,8 +117,8 @@ export function attachBrainAgentRoutes(app, { requireAuth, requireHeadAccess, ge
         req.body?.context && typeof req.body.context === "object" ? req.body.context : {};
       const debug =
         String(process.env.BRAIN_AGENT_DEBUG || "") === "1" ||
-        Boolean(req.body?.debug) &&
-          ["admin", "super_admin", "executive"].includes(String(req.user?.role || ""));
+        (Boolean(req.body?.debug) &&
+          ["admin", "super_admin", "executive"].includes(String(req.user?.role || "")));
 
       const gatewayCtx = await createGatewayContext({
         db: db(),
@@ -150,7 +156,7 @@ export function attachBrainAgentRoutes(app, { requireAuth, requireHeadAccess, ge
     }
   });
 
-  app.post("/api/brain-agent/validate-answer", ...guard, async (req, res) => {
+  app.post("/api/brain-agent/validate-answer", ...guard, jsonParser, async (req, res) => {
     try {
       jsonNoStore(res);
       const validation = validateAnswerAgainstEvidence({
