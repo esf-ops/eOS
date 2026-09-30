@@ -752,6 +752,20 @@ export type QuoteFlowAcceptedReportPayload = {
       internalOnly?: Array<{ label?: string | null; amount?: number | null; internalOnly?: boolean }>;
       notes?: string | null;
     };
+    breakdownBasis?: "published" | "accepted" | null;
+    breakdownNotice?: string | null;
+    acceptedBreakdown?: {
+      rooms?: Array<{
+        roomName?: string | null;
+        material?: string | null;
+        countertop?: number | null;
+        backsplash?: number | null;
+        addOns?: Array<{ label?: string | null; amount?: number | null }>;
+        roomTotal?: number | null;
+      }>;
+      projectItems?: Array<{ label?: string | null; amount?: number | null }>;
+      projectTotal?: number | null;
+    } | null;
     invoicePreparation?: {
       acceptedCustomerTotal?: number | null;
       materialCountertopTotal?: number | null;

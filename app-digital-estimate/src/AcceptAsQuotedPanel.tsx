@@ -55,6 +55,7 @@ export function AcceptAsQuotedPanel({
         confirmation: "accept_final_estimate",
         ...(boundSession.rowVersion != null ? { expectedRowVersion: boundSession.rowVersion } : {}),
         expectedSessionId: boundSession.id || "",
+        expectedAcceptMode: "published",
       });
       setAcceptance(res.acceptance);
     } catch (e) {

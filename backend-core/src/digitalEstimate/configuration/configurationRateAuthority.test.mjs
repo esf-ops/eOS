@@ -537,6 +537,8 @@ async function assertBlocked(stack, reasonPattern, label) {
   assert.equal(exchanged.state.message, PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE);
   assert.match(exchanged.state.message, /contact Elite/i);
   assert.equal(exchanged.state.configuration, null);
+  assert.equal(exchanged.state.readMode, "baseline", "customer can still accept the published total as quoted");
+  assert.ok(exchanged.state.session?.id, "session present for accept-as-quoted");
   assert.equal(exchanged.state.estimate?.totals?.estimatedProjectTotal ?? 870, 870, "published total unchanged");
 
   await assert.rejects(

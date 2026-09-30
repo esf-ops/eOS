@@ -113,7 +113,9 @@ export function createStudioSalesOrderService(deps) {
 
   async function statusForEstimate(organizationId, estimateId) {
     const job = repository.getLatestForEstimate ? await repository.getLatestForEstimate(organizationId, estimateId) : null;
-    return job ? queue.getJob(organizationId, job.id) : null;
+    if (job) return queue.getJob(organizationId, job.id);
+    const config = await loadSalesOrderIntegrationConfig(db(), organizationId);
+    return config ? null : { status: "not_configured" };
   }
 
   return { queue, repository, enqueueForSoldSnapshot, sweepMissingJobs, statusForEstimate };
@@ -272,7 +274,7 @@ export function attachQuoteFlowSoldRoutes(app, deps) {
       requireSoldPrivilege(req);
       const organizationId = await orgIdFor(req);
       const current = await salesOrders().statusForEstimate(organizationId, estimateIdOf(req));
-      if (!current) throw httpError("sales_order_job_not_found", "No sales order for this estimate.", 404);
+      if (!current?.jobId) throw httpError("sales_order_job_not_found", "No sales order for this estimate.", 404);
       res.json({ ok: true, salesOrder: await salesOrders().queue.retry({ organizationId, jobId: current.jobId }) });
     } catch (e) {
       sendError(res, e, "Unable to retry the sales order.");
@@ -284,7 +286,7 @@ export function attachQuoteFlowSoldRoutes(app, deps) {
       requireSoldPrivilege(req);
       const organizationId = await orgIdFor(req);
       const current = await salesOrders().statusForEstimate(organizationId, estimateIdOf(req));
-      if (!current) throw httpError("sales_order_job_not_found", "No sales order for this estimate.", 404);
+      if (!current?.jobId) throw httpError("sales_order_job_not_found", "No sales order for this estimate.", 404);
       const selection = { listId: req.body?.listId ?? null, fullName: req.body?.fullName ?? null };
       if (selection.fullName && !selection.listId && String(env.QB_SALES_ORDER_WRITE_ENVIRONMENT || "").trim().toLowerCase() !== "test") {
         throw httpError("customer_job_list_id_required", "Choose a QuickBooks customer:job from the list.", 400);

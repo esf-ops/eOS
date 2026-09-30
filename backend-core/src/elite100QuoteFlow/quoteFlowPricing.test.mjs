@@ -298,7 +298,22 @@ function makeStore(initialRows) {
       }),
     (e) => e.code === "pricing_invalid"
   );
-  console.log("ok: missing/invalid pricing input returns safe validation");
+  const beforeNegative = structuredClone(repo.peek(EST).scope.estimateWideAdjustment ?? null);
+  for (const percentage of [-5, 150]) {
+    await assert.rejects(
+      () =>
+        svc.patchPricing({
+          organizationId: ORG,
+          estimateId: EST,
+          body: {
+            pricing: { estimateWideAdjustment: { active: true, percentage, reason: "Surcharge" } }
+          }
+        }),
+      (e) => e.code === "pricing_invalid" && /between 0% and 100%/.test(JSON.stringify(e))
+    );
+  }
+  assert.deepEqual(repo.peek(EST).scope.estimateWideAdjustment ?? null, beforeNegative);
+  console.log("ok: missing/invalid pricing input returns safe validation; out-of-range Increase by refused");
 
   const calculated = await svc.calculatePricing({
     organizationId: ORG,

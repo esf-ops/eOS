@@ -15,6 +15,7 @@ import {
 } from "./studioSalesOrderQueue.mjs";
 import { buildStudioSalesOrderPlan } from "./studioSalesOrderPlan.mjs";
 import { buildSalesOrderAddRq } from "./studioSalesOrderQbxml.mjs";
+import { createStudioSalesOrderService } from "./studioSalesOrderRoutes.js";
 
 console.log("\nstudioSalesOrderQueue.test.mjs\n");
 
@@ -310,6 +311,22 @@ const addCount = (qb) => qb.state.requests.filter((x) => x.includes("<SalesOrder
   assert.equal(presentSalesOrderJob(job).typedCustomerJobAllowed, false, "production default: pick from list");
   assert.equal(presentSalesOrderJob(job, { typedCustomerJobAllowed: true }).typedCustomerJobAllowed, true);
   console.log("ok: 10 typed customer:job offered only when Brain allows it (TEST company)");
+}
+
+{
+  // Production today: no quickbooks_sales_order config row. Mark Sold records the sale; no job, never "Synced".
+  const configQuery = { select: () => configQuery, eq: () => configQuery, maybeSingle: async () => ({ data: null, error: null }) };
+  const db = { from: (table) => {
+    if (table !== "organization_integration_configs") throw new Error(`unexpected read of ${table}`);
+    return configQuery;
+  } };
+  const svc = createStudioSalesOrderService({ getSupabase: () => db, env: {}, repository: createInMemorySalesOrderJobRepository() });
+  const enq = await svc.enqueueForSoldSnapshot({ organizationId: ORG, soldSnapshotId: "s1" });
+  assert.deepEqual(enq, { status: "not_configured", job: null });
+  const status = await svc.statusForEstimate(ORG, "e1");
+  assert.deepEqual(status, { status: "not_configured" }, "staff see 'not connected', not an empty or synced state");
+  assert.equal(status.jobId, undefined, "retry / customer:job routes require a real job id");
+  console.log("ok: 11 unconfigured organization → not_configured status, no job, item mappings never read");
 }
 
 console.log("\nstudioSalesOrderQueue.test.mjs: ok\n");

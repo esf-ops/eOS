@@ -616,6 +616,53 @@ function edgeChangeSelections(state) {
 }
 
 {
+  // Older publication whose pricing basis was never recorded, with a draft the customer saved
+  // before that rule: the page shows the published total, so only that total may be accepted.
+  const h = harness();
+  const row = await seedApprovedEstimate(h.studioRepo, h.pricing, h.review, {
+    caseId: "acacacac-acac-4cac-8cac-acacacacacac",
+    name: "QF Legacy No-Basis Accept"
+  });
+  const published = await h.qfDigital.publishDigitalEstimate({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: { confirm: true }
+  });
+  const first = await h.pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+  const saved = await h.pubSvc.saveSelections({
+    rawSecret: first.rawSecret,
+    body: { expectedRowVersion: first.state.session.rowVersion, idempotencyKey: "qf-legacy-save-1", selections: edgeChangeSelections(first.state) }
+  });
+  const savedTotal = Number(saved.calculation?.configuredDisplayTotal);
+  const publishedTotal = Number(first.state.estimate?.totals?.estimatedProjectTotal);
+  assert.ok(Number.isFinite(publishedTotal) && Number.isFinite(savedTotal), "a priced draft exists (6b accepts this same draft as configured)");
+
+  const realGetSnapshot = h.deRepo.getSnapshotByPublicationId.bind(h.deRepo);
+  h.deRepo.getSnapshotByPublicationId = async (...args) => {
+    const snap = await realGetSnapshot(...args);
+    if (!snap?.pricing_evidence_json) return snap;
+    const ev = structuredClone(snap.pricing_evidence_json);
+    delete ev.pricingPin;
+    if (ev.calculationSnapshotCopy) {
+      delete ev.calculationSnapshotCopy.pricingBasis;
+      if (ev.calculationSnapshotCopy.internal_ui) delete ev.calculationSnapshotCopy.internal_ui.pricing_basis;
+    }
+    return { ...snap, pricing_evidence_json: ev };
+  };
+
+  const reopened = await h.pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+  const accept = await h.acceptSvc.acceptFinalEstimate({
+    rawSecret: reopened.rawSecret,
+    body: { confirm: true, expectedSessionId: reopened.state.session.id, expectedAcceptMode: "published" }
+  });
+  assert.equal(accept.acceptance.acceptedAsPublished, true, "accepted at the published quote");
+  assert.equal(accept.acceptance.acceptedAsConfigured, false, "the pre-rule draft is never accepted");
+  assert.equal(Number(accept.acceptance.customerDisplayTotal), publishedTotal);
+  console.log("ok: 6c older publication without a pricing basis → accept records the published total, never an old draft");
+}
+
+{
   // Custom slab package: confirm gate → approve → publish → accept, with no cost leakage.
   const h = harness();
   const row = await h.studioRepo.create({
@@ -958,7 +1005,7 @@ async function publishManuallyAdjusted(h, caseId, name) {
     approval: null,
     staleReason: null
   });
-  await h.pricing.calculatePricing({
+  const calculated = await h.pricing.calculatePricing({
     organizationId: ORG,
     estimateId: row.id,
     actorUserId: ACTOR,
@@ -978,6 +1025,13 @@ async function publishManuallyAdjusted(h, caseId, name) {
   });
   const priced = await h.studioRepo.getById(ORG, row.id);
   assert.equal(priced.scope.rooms.find((r) => r.id === "bath").colorTbd, true, "room TBD persisted in scope");
+  // The staff panel rehydrates from this response; without it colors/rooms blank out and a later save erases them.
+  assert.equal(calculated.startingSelections?.colorName, "Project White");
+  assert.equal(
+    calculated.startingSelections?.rooms?.find((r) => r.roomId === "kitchen")?.colorNameOverride,
+    "Calacatta Fioressa",
+    "calculate response carries the saved room colors"
+  );
   await h.review.approveReview({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { confirm: true } });
   const published = await h.qfDigital.publishDigitalEstimate({
     organizationId: ORG,

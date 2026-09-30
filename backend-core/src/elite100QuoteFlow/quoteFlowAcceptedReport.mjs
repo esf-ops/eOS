@@ -49,6 +49,41 @@ function round2(n) {
 }
 
 /**
+ * Frozen accepted room pricing (recorded at acceptance; the same source the QuickBooks
+ * sales order uses). Null for acceptances recorded before it existed.
+ * @param {any} roomPricing
+ */
+function presentAcceptedBreakdown(roomPricing) {
+  if (!roomPricing || !Array.isArray(roomPricing.rooms)) return null;
+  const centsToMoney = (c, fallback) =>
+    Number.isFinite(Number(c)) ? round2(Number(c) / 100) : money(fallback);
+  return {
+    rooms: roomPricing.rooms.map((room) => ({
+      roomName: str(room.roomName || room.roomLabel) || "Room",
+      material: str(room.selectedMaterial),
+      countertop: centsToMoney(room?.countertop?.amountCents, room.countertopAmount),
+      backsplash: centsToMoney(room?.backsplash?.amountCents, room.backsplashAmount),
+      addOns: (Array.isArray(room?.addOns?.lines) ? room.addOns.lines : []).map((l) => ({
+        label: str(l.label) || str(l.category) || "Add-on",
+        amount: centsToMoney(l.amountCents, l.amount)
+      })),
+      roomTotal: centsToMoney(room?.roomTotalDetail?.amountCents, room.roomTotal)
+    })),
+    projectItems: (Array.isArray(roomPricing.projectAddOns) ? roomPricing.projectAddOns : [])
+      .filter((a) => Math.abs(Number(a?.amount) || 0) >= 0.005)
+      .map((a) => ({ label: str(a.label) || "Project item", amount: money(a.amount) })),
+    projectTotal: money(roomPricing.projectTotal)
+  };
+}
+
+/** Quote Flow custom lines store magnitudes; the line type carries the sign. */
+function signedCustomLineAmount(line) {
+  if (!line || line.type === "note") return 0;
+  const magnitude = Math.abs(Number(line.amount) || 0);
+  return line.type === "credit" ? -magnitude : magnitude;
+}
+
+/**
  * Compact acceptance summary — mirrors Studio V2 getCustomerActivity.
  * @param {object|null|undefined} acceptance
  */
@@ -491,11 +526,30 @@ export function buildQuoteFlowAcceptedReport(estimate, acceptance, opts = {}) {
   }
 
   const customerCustomTotal = round2(
-    customerFacingCustom.reduce((s, l) => s + (Number(l.amount) || 0), 0)
+    customerFacingCustom.reduce((s, l) => s + signedCustomLineAmount(l), 0)
   );
   const internalCustomTotal = round2(
-    internalOnlyCustom.reduce((s, l) => s + (Number(l.amount) || 0), 0)
+    internalOnlyCustom.reduce((s, l) => s + signedCustomLineAmount(l), 0)
   );
+  // Component amounts come from the staff calculation (the published estimate). When the
+  // customer accepted different selections, only the accepted total and the before/after
+  // selection changes reflect what was accepted.
+  const publishedTotal = money(presented.publishedBaselineTotal);
+  const acceptedTotal = money(presented.customerDisplayTotal);
+  const breakdownBasis =
+    presented.selectionSource === "customer_configured" &&
+    publishedTotal != null &&
+    acceptedTotal != null &&
+    publishedTotal !== acceptedTotal
+      ? "published"
+      : "accepted";
+  const acceptedBreakdown = presentAcceptedBreakdown(snap.acceptedRoomPricing);
+  const breakdownNotice =
+    breakdownBasis === "published"
+      ? acceptedBreakdown
+        ? "Room and component amounts below are from the published estimate. The accepted breakdown shows what the customer accepted; invoice from it."
+        : "Room and component amounts are from the published estimate. The customer's accepted changes are listed under Customer selections; invoice from the accepted customer total."
+      : null;
 
   const report = {
     purpose:
@@ -539,7 +593,7 @@ export function buildQuoteFlowAcceptedReport(estimate, acceptance, opts = {}) {
       customerFacing: [
         ...customerFacingCustom.map((l) => ({
           label: l.label,
-          amount: money(l.amount),
+          amount: money(signedCustomLineAmount(l)),
           type: l.type,
           visibility: "customer",
           internalOnly: false
@@ -555,7 +609,7 @@ export function buildQuoteFlowAcceptedReport(estimate, acceptance, opts = {}) {
       internalOnly: [
         ...internalOnlyCustom.map((l) => ({
           label: l.label,
-          amount: money(l.amount),
+          amount: money(signedCustomLineAmount(l)),
           type: l.type,
           visibility: "internal",
           internalOnly: true
@@ -571,8 +625,12 @@ export function buildQuoteFlowAcceptedReport(estimate, acceptance, opts = {}) {
       ],
       notes: str(scope.quoteFlowPricing?.notes || scope.estimatorNotes) || null
     },
+    breakdownBasis,
+    breakdownNotice,
+    acceptedBreakdown,
     invoicePreparation: {
       acceptedCustomerTotal: presented.customerDisplayTotal,
+      breakdownBasis,
       materialCountertopTotal: money(materialSubtotal),
       backsplashTotal: money(backsplashSubtotal),
       sinkCutoutTotal: money(cutoutSubtotal),

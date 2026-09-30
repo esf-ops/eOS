@@ -310,7 +310,61 @@ function makeAcceptance(overrides = {}) {
   assert.equal(presented.customerDisplayTotal, 4873);
   assert.equal(presented.publishedBaselineTotal, 4310);
   assert.equal(presented.difference, 563);
-  console.log("ok: configured acceptance totals + difference");
+
+  const estimate = makeEstimate();
+  estimate.scope.quoteFlowPricing.customLineItems[0] = {
+    ...estimate.scope.quoteFlowPricing.customLineItems[0],
+    unitAmount: 150,
+    amount: 150
+  };
+  const built = buildQuoteFlowAcceptedReport(estimate, configured);
+  assert.equal(built.report.breakdownBasis, "published");
+  assert.match(String(built.report.breakdownNotice), /published estimate/i);
+  assert.equal(built.report.invoicePreparation.acceptedCustomerTotal, 4873);
+  assert.equal(built.report.invoicePreparation.customerFacingCustomLineTotal, -150);
+  assert.equal(
+    built.report.lineItems.customerFacing.find((l) => /credit/i.test(l.label)).amount,
+    -150
+  );
+
+  assert.equal(built.report.acceptedBreakdown, null);
+
+  const frozen = structuredClone(configured);
+  frozen.customer_safe_snapshot_json.acceptedRoomPricing = {
+    rooms: [
+      {
+        roomName: "Kitchen",
+        selectedMaterial: "Group Promo",
+        countertop: { amountCents: 450000 },
+        backsplash: { amountCents: 0 },
+        addOns: {
+          lines: [
+            { label: "Sink — upgrade", amountCents: 22000 },
+            { label: "Kitchen sink cutout", amountCents: 20000 }
+          ]
+        },
+        roomTotalDetail: { amountCents: 492000 }
+      }
+    ],
+    projectAddOns: [
+      { label: "Kitchen sink cutout", amount: 0 },
+      { label: "Customer install credit", amount: -47 }
+    ],
+    projectTotal: 4873
+  };
+  const withFrozen = buildQuoteFlowAcceptedReport(estimate, frozen).report.acceptedBreakdown;
+  assert.equal(withFrozen.rooms[0].roomTotal, 4920);
+  assert.deepEqual(
+    withFrozen.rooms[0].addOns.map((a) => a.amount),
+    [220, 200]
+  );
+  assert.deepEqual(withFrozen.projectItems, [{ label: "Customer install credit", amount: -47 }]);
+  assert.equal(withFrozen.projectTotal, 4873);
+
+  const asPublished = buildQuoteFlowAcceptedReport(makeEstimate(), makeAcceptance());
+  assert.equal(asPublished.report.breakdownBasis, "accepted");
+  assert.equal(asPublished.report.breakdownNotice, null);
+  console.log("ok: configured acceptance totals + difference; breakdown basis + signed credits");
 }
 
 {

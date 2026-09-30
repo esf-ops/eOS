@@ -432,6 +432,24 @@ export function createQuoteFlowPricingService(deps = {}) {
    * @param {string|null} actorUserId
    */
   function applyPricingDraftToScope(existingScope, pricingPayload, actorUserId) {
+    const ewa = pricingPayload?.estimateWideAdjustment;
+    if (ewa && typeof ewa === "object" && ewa.active === true) {
+      // The shared normalizer clamps out-of-range values; an estimator typing a negative
+      // percentage must see a refusal, not a silently removed adjustment.
+      const pct = Number(ewa.percentage);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        return {
+          ok: false,
+          issues: [
+            {
+              field: "pricing.estimateWideAdjustment.percentage",
+              message:
+                "Increase by must be between 0% and 100%. Discounts are not supported here — add a customer-facing credit line instead."
+            }
+          ]
+        };
+      }
+    }
     const normalized = normalizeStudioV2PricingPatch({
       existingScope: existingScope && typeof existingScope === "object" ? existingScope : {},
       pricing: pricingPayload,
@@ -1011,6 +1029,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       revision: nextRow.revision ?? null,
       status: nextRow.status || null,
       editablePricing: buildStudioV2EditablePricing(nextRow, { actorUserId, env }),
+      startingSelections: draft.startingSelections,
       customLineItems: draft.customLineItems,
       customLineSummary: draft.customLineSummary,
       edgeStatus: result.edgeStatus || draft.edgeStatus,

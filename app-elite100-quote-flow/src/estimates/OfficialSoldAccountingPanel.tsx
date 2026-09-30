@@ -97,7 +97,8 @@ function SalesOrderStatus(props: {
   if (salesOrder.status === "not_configured") {
     return (
       <p className="qf-muted" data-testid="qf-sold-qb-not-configured">
-        QuickBooks sales orders are not configured for this organization.
+        Not sent to QuickBooks. The sale is recorded; QuickBooks sales orders are not connected for
+        this organization yet.
       </p>
     );
   }
@@ -257,8 +258,8 @@ export default function OfficialSoldAccountingPanel(props: Props) {
       <div className="qf-accepted__head">
         <h3>Sold review and QuickBooks</h3>
         <p className="qf-muted">
-          Staff confirm the accepted estimate, mark it sold, and a QuickBooks sales order is created
-          from the accepted amounts. No invoice is created.
+          Staff confirm the accepted estimate and mark it sold. When QuickBooks is connected, a sales
+          order is created from the accepted amounts. No invoice is created.
         </p>
       </div>
 
@@ -352,8 +353,8 @@ export default function OfficialSoldAccountingPanel(props: Props) {
           </div>
           {confirming ? (
             <p className="qf-muted" data-testid="qf-sold-confirm-copy">
-              This records the sale at the accepted total and queues a QuickBooks sales order. It
-              cannot be undone from Quote Flow.
+              This records the sale at the accepted total and, when QuickBooks is connected, queues a
+              sales order. It cannot be undone from Quote Flow.
             </p>
           ) : null}
         </div>

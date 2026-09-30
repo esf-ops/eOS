@@ -46,6 +46,7 @@ import {
   toPublicRoomPricingDto
 } from "../digitalEstimate/configuration/customerRoomPricingProjection.mjs";
 import { validateFrozenQuoteForAcceptance } from "./frozenQuoteAcceptance.mjs";
+import { resolvePublicationPricingPin } from "../digitalEstimate/configuration/publicationPricingPin.mjs";
 
 function unavailable(message = "Estimate unavailable", code = "not_found") {
   const e = new Error(message);
@@ -903,7 +904,17 @@ export function createStudioFinalAcceptanceService(deps) {
       // offered (view-only publish), so only the exact frozen quote can be accepted.
       let asQuoted = false;
       let activeEnvelope = null;
-      if (configurationRepository?.getActiveEnvelope) {
+      // Pricing that cannot be established (e.g. an older publication with no recorded basis)
+      // is shown to the customer as the published total only; drafts saved before that rule
+      // must never become the accepted total.
+      const pricingSnap =
+        typeof deRepository.getSnapshotByPublicationId === "function"
+          ? await deRepository.getSnapshotByPublicationId(session.organization_id, publication.id)
+          : null;
+      if (pricingSnap && !resolvePublicationPricingPin(pricingSnap.pricing_evidence_json).ok) {
+        asQuoted = true;
+      }
+      if (!asQuoted && configurationRepository?.getActiveEnvelope) {
         activeEnvelope = await configurationRepository.getActiveEnvelope(
           session.organization_id,
           session.publication_id

@@ -36,14 +36,20 @@ function deltaMoney(v: unknown): string {
   if (!Number.isFinite(n)) return "—";
   if (Math.abs(n) < 0.005) return "No change";
   const abs = money(Math.abs(n));
-  return n > 0 ? `+${abs}` : `−${abs.replace("$", "")}`;
+  return n > 0 ? `+${abs}` : `−${abs}`;
 }
 
 type Props = {
   acceptedReport?: QuoteFlowAcceptedReportPayload | null;
 };
 
-function RoomCard({ room }: { room: QuoteFlowAcceptedReportRoom }) {
+function RoomCard({
+  room,
+  publishedBasis
+}: {
+  room: QuoteFlowAcceptedReportRoom;
+  publishedBasis: boolean;
+}) {
   const pieces = Array.isArray(room.pieces) ? room.pieces : [];
   const counterPieces = pieces.filter((p) => !p.isBacksplash);
   return (
@@ -126,7 +132,7 @@ function RoomCard({ room }: { room: QuoteFlowAcceptedReportRoom }) {
           </div>
         ) : null}
         <div>
-          <dt>Room subtotal</dt>
+          <dt>{publishedBasis ? "Room subtotal (published estimate)" : "Room subtotal"}</dt>
           <dd>{money(room.roomSubtotal)}</dd>
         </div>
       </dl>
@@ -196,6 +202,7 @@ export default function OfficialAcceptedReportPanel(props: Props) {
   const header = report?.header || null;
   const invoice = report?.invoicePreparation || null;
   const rooms = Array.isArray(report?.rooms) ? report.rooms : [];
+  const publishedBasis = report?.breakdownBasis === "published";
 
   async function copySummary() {
     if (!header && !invoice) return;
@@ -313,13 +320,69 @@ export default function OfficialAcceptedReportPanel(props: Props) {
             </button>
           </div>
 
+          {report.acceptedBreakdown ? (
+            <div className="qf-accepted__invoice" data-testid="qf-accepted-breakdown">
+              <h4>Accepted breakdown</h4>
+              <dl className="qf-accepted__dl">
+                {(report.acceptedBreakdown.rooms || []).map((room, i) => (
+                  <React.Fragment key={`${room.roomName}-${i}`}>
+                    <div>
+                      <dt>
+                        {room.roomName || "Room"}
+                        {room.material ? ` · ${room.material}` : ""} — countertop
+                      </dt>
+                      <dd>{money(room.countertop)}</dd>
+                    </div>
+                    {Number(room.backsplash) ? (
+                      <div>
+                        <dt>{room.roomName || "Room"} — backsplash</dt>
+                        <dd>{money(room.backsplash)}</dd>
+                      </div>
+                    ) : null}
+                    {(room.addOns || []).map((a, j) => (
+                      <div key={`${a.label}-${j}`}>
+                        <dt>
+                          {room.roomName || "Room"} — {a.label}
+                        </dt>
+                        <dd>{money(a.amount)}</dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>{room.roomName || "Room"} total</dt>
+                      <dd>{money(room.roomTotal)}</dd>
+                    </div>
+                  </React.Fragment>
+                ))}
+                {(report.acceptedBreakdown.projectItems || []).map((a, j) => (
+                  <div key={`${a.label}-${j}`}>
+                    <dt>{a.label}</dt>
+                    <dd>{money(a.amount)}</dd>
+                  </div>
+                ))}
+                <div>
+                  <dt>Accepted total</dt>
+                  <dd>{money(report.acceptedBreakdown.projectTotal)}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : null}
+
           <div data-testid="qf-accepted-rooms">
             <h4>Room breakdown</h4>
+            {publishedBasis && report?.breakdownNotice ? (
+              <p className="qf-muted" data-testid="qf-accepted-breakdown-basis">
+                {report.breakdownNotice}
+              </p>
+            ) : null}
             {rooms.length === 0 ? (
               <p className="qf-muted">No rooms on official scope.</p>
             ) : (
               rooms.map((room) => (
-                <RoomCard key={room.roomId || room.roomName || "room"} room={room} />
+                <RoomCard
+                  key={room.roomId || room.roomName || "room"}
+                  room={room}
+                  publishedBasis={publishedBasis}
+                />
               ))
             )}
           </div>
@@ -344,6 +407,15 @@ export default function OfficialAcceptedReportPanel(props: Props) {
                   <dt>Accepted customer total</dt>
                   <dd>{money(invoice.acceptedCustomerTotal)}</dd>
                 </div>
+                {publishedBasis ? (
+                  <div>
+                    <dt>Component amounts</dt>
+                    <dd data-testid="qf-accepted-invoice-basis">
+                      From the published estimate — they do not include the customer's accepted
+                      changes ({deltaMoney(header?.difference)}).
+                    </dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Material / countertop</dt>
                   <dd>{money(invoice.materialCountertopTotal)}</dd>
@@ -353,11 +425,11 @@ export default function OfficialAcceptedReportPanel(props: Props) {
                   <dd>{money(invoice.backsplashTotal)}</dd>
                 </div>
                 <div>
-                  <dt>Sink / cutout</dt>
+                  <dt>Cutouts</dt>
                   <dd>{money(invoice.sinkCutoutTotal)}</dd>
                 </div>
                 <div>
-                  <dt>Faucet / accessories</dt>
+                  <dt>Sinks / faucets / accessories</dt>
                   <dd>{money(invoice.faucetAccessoriesTotal)}</dd>
                 </div>
                 <div>

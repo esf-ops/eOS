@@ -1124,7 +1124,8 @@ export function createPublicConfigurationService(deps) {
       return {
         lifecycle: "blocked",
         message: pricingBlocked ? PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE : "Configuration unavailable",
-        ...(pricingBlocked ? { blockedReason: "pricing_basis_unestablished" } : {}),
+        // The published total stays acceptable as quoted when only repricing is refused.
+        ...(pricingBlocked ? { blockedReason: "pricing_basis_unestablished", readMode: "baseline" } : {}),
         estimate: baselineEstimate,
         configuration: null,
         session: {

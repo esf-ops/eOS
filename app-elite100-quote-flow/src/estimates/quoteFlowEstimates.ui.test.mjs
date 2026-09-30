@@ -189,7 +189,7 @@ assert.match(api, /customLineItems/);
 {
   const de = readFileSync(join(appRoot, "src/estimates/OfficialDigitalEstimatePanel.tsx"), "utf8");
   assert.match(de, /data-testid="qf-de-customer-preview"/);
-  assert.match(de, /open=\{!isPublished\}/, "preview is expanded before publishing");
+  assert.match(de, /open=\{!isPublished(\s*\|\|[^}]*needs_republish[^}]*)?\}/, "preview is expanded before publishing (and when a republish is needed)");
   assert.match(de, /customerRooms/);
   assert.match(de, /Nothing is sent or\s+published from this preview/);
   for (const label of ["Sink run", "Stove left", "Stove right", "Island", "Vanity"]) {
@@ -268,7 +268,14 @@ assert.match(activityPanel, /Timeline|qf-activity-timeline/);
 assert.match(activityPanel, /Publication history|qf-activity-publications/);
 assert.match(activityPanel, /Not tracked yet/);
 assert.match(activityPanel, /Open link|Copy link/);
-assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email|Create invoice|QuickBooks API/i);
+const activityHandoffNote = activityPanel.match(/data-testid="qf-activity-no-handoff">([\s\S]*?)<\/p>/);
+assert.ok(activityHandoffNote, "Activity points staff to the Handoff tab");
+assert.doesNotMatch(activityHandoffNote[1], /<button|onClick/, "handoff note is text only");
+assert.doesNotMatch(
+  activityPanel.replace(activityHandoffNote[0], ""),
+  /Mark sold|Create handoff|Send email|Create invoice|QuickBooks API/i,
+  "Activity stays read-only: no sold, handoff, email or invoice actions"
+);
 assert.doesNotMatch(activityPanel, /\bV1\b|\bV2\b|Studio V2/);
 const acceptedPanel = readFileSync(
   join(appRoot, "src/estimates/OfficialAcceptedReportPanel.tsx"),
@@ -284,7 +291,14 @@ assert.match(acceptedPanel, /qf-accepted-room-sink|qf-accepted-room-faucet|qf-ac
 assert.match(acceptedPanel, /Invoice preparation summary|qf-accepted-invoice-prep/);
 assert.match(acceptedPanel, /Internal only|qf-accepted__internal-tag/);
 assert.match(acceptedPanel, /Print report|Copy summary/);
-assert.doesNotMatch(acceptedPanel, /Mark sold|Create handoff|Create invoice|sendEmail/i);
+const acceptedNoQbNote = acceptedPanel.match(/data-testid="qf-accepted-no-qb">([\s\S]*?)<\/p>/);
+assert.ok(acceptedNoQbNote, "accepted report says no invoice is created here");
+assert.doesNotMatch(acceptedNoQbNote[1], /<button|onClick/, "no-invoice note is text only");
+assert.doesNotMatch(
+  acceptedPanel.replace(acceptedNoQbNote[0], ""),
+  /Mark sold|Create handoff|Create invoice|sendEmail/i,
+  "accepted report stays read-only: no sold, handoff, invoice or email actions"
+);
 assert.match(activityCss, /\.qf-activity__status-card/);
 assert.match(activityCss, /\.qf-accepted/);
 assert.match(activityCss, /\.qf-accepted__internal-tag/);

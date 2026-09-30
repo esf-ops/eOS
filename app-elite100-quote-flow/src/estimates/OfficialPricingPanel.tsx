@@ -881,7 +881,7 @@ export default function OfficialPricingPanel(props: Props) {
                       ...pricing,
                       estimateWideAdjustment: {
                         ...(ewa || {}),
-                        percentage: Math.max(0, Number(e.target.value) || 0),
+                        percentage: Number(e.target.value) || 0,
                         active: true,
                         source: "manual"
                       }
@@ -889,6 +889,12 @@ export default function OfficialPricingPanel(props: Props) {
                   }
                 />
               </label>
+              {Number(ewa?.percentage) < 0 || Number(ewa?.percentage) > 100 ? (
+                <p className="qf-error" role="alert" data-testid="qf-pricing-ewa-pct-error">
+                  Increase by must be between 0% and 100%. For a discount, add a customer-facing
+                  credit line instead.
+                </p>
+              ) : null}
               <label className="qf-pricing__field">
                 Reason
                 <input
