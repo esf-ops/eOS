@@ -24,12 +24,7 @@ import { resolveQuoteFlowSinkRooms } from "./quoteFlowSinkSelection.mjs";
 import { buildStudioV2EditablePricing } from "../elite100EstimateStudio/studioV2Pricing.mjs";
 import { STUDIO_ESTIMATE_STATUSES } from "../elite100EstimateStudio/studioEstimateTypes.mjs";
 import { scopeFingerprint } from "../elite100EstimateStudio/studioEstimatePricing.mjs";
-import { resolveRoomMaterialGroup } from "../elite100EstimateStudio/studioMaterialInheritance.mjs";
-import { resolvePublishedRoomColorName } from "../elite100EstimateStudio/studioEstimatePublicationAdapter.mjs";
-import {
-  getElite100CustomerMaterial,
-  slugifyElite100ColorName
-} from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
+import { assessRoomColorPriceGroups } from "../elite100EstimateStudio/elite100ColorPriceGroup.mjs";
 
 export { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 
@@ -55,44 +50,21 @@ function checkItem(severity, id, label, detail = "") {
   return { id, label, severity, detail: detail || null, passed: severity === "passed" };
 }
 
-const GROUP_CODE_BY_LABEL = {
-  "Group Promo": "promo",
-  "Group A": "group_a",
-  "Group B": "group_b",
-  "Group C": "group_c",
-  "Group D": "group_d",
-  "Group E": "group_e",
-  "Group F": "group_f",
-  Remnant: "remnant"
-};
-const GROUP_LABEL_BY_CODE = Object.fromEntries(Object.entries(GROUP_CODE_BY_LABEL).map(([k, v]) => [v, k]));
-
 /**
  * Rooms whose published color is an Elite 100 catalog color from a different price group
- * than the room is priced at. The customer sees that color, so the price may be wrong.
+ * than the room is priced at, with no documented price-group exception.
  * @param {object} scope
  */
 export function findRoomColorGroupMismatches(scope) {
-  const projectColorName = scope?.colorTbd ? null : String(scope?.colorName || "").trim() || null;
-  const rooms = Array.isArray(scope?.rooms) ? scope.rooms.filter((r) => r && r.included !== false) : [];
-  const out = [];
-  for (const room of rooms) {
-    if (String(room.slabPackageId ?? "").trim()) continue;
-    const roomMaterial = resolveRoomMaterialGroup(scope, room);
-    const colorName = resolvePublishedRoomColorName({ projectColorName, room, roomMaterial, slabPackageLabel: null });
-    if (!colorName) continue;
-    const mat = getElite100CustomerMaterial(`e100-${slugifyElite100ColorName(colorName)}`);
-    const pricedCode = GROUP_CODE_BY_LABEL[roomMaterial.group];
-    if (!mat || !pricedCode || mat.pricingGroupCode === pricedCode) continue;
-    out.push({
-      roomId: room.id || null,
-      roomName: String(room.name || room.id || "Room"),
+  return assessRoomColorPriceGroups(scope)
+    .filter((r) => r.status === "conflict")
+    .map(({ roomId, roomName, colorName, colorGroupLabel, pricedGroup }) => ({
+      roomId,
+      roomName,
       colorName,
-      colorGroupLabel: GROUP_LABEL_BY_CODE[mat.pricingGroupCode] || mat.pricingGroupCode,
-      pricedGroup: roomMaterial.group
-    });
-  }
-  return out;
+      colorGroupLabel,
+      pricedGroup
+    }));
 }
 
 /**
@@ -353,15 +325,34 @@ export function assessQuoteFlowReviewReadiness(row, opts = {}) {
     );
   }
 
-  const colorMismatches = findRoomColorGroupMismatches(scope);
-  if (colorMismatches.length) {
+  const colorGroups = assessRoomColorPriceGroups(scope);
+  const colorConflicts = colorGroups.filter((r) => r.status === "conflict");
+  const colorExceptions = colorGroups.filter((r) => r.status === "exception");
+  if (colorConflicts.length) {
+    checklist.push(
+      checkItem(
+        "blocker",
+        "color_price_group",
+        "Colors match their price groups",
+        `${colorConflicts
+          .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
+          .join("; ")}. Save Pricing to apply the color's group and recalculate, or have an authorized estimator record a price-group exception.`
+      )
+    );
+  } else if (colorGroups.length) {
+    checklist.push(checkItem("passed", "color_price_group", "Colors match their price groups"));
+  }
+  if (colorExceptions.length) {
     checklist.push(
       checkItem(
         "warning",
-        "color_price_group",
-        "Colors match their price groups",
-        colorMismatches
-          .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
+        "price_group_exception",
+        "Documented price-group exception",
+        colorExceptions
+          .map(
+            (m) =>
+              `${m.roomName}: ${m.colorName} (${m.colorGroupLabel}) priced as ${m.pricedGroup} — ${m.exception?.reason} (applied ${String(m.exception?.appliedAt || "").slice(0, 10)})`
+          )
           .join("; ")
       )
     );

@@ -78,10 +78,10 @@ function row(totals, customLineItems = []) {
   assert.equal(m[0].roomName, "Kitchen");
   assert.equal(m[0].colorGroupLabel, "Group C");
   const r = assessQuoteFlowReviewReadiness({ ...row({ exactTotal: 1, displayTotal: 1 }), scope: { ...scope, customLineItems: [] } });
-  assert.ok(r.warnings.some((w) => w.id === "color_price_group"));
-  assert.ok(!r.blockers.some((w) => w.id === "color_price_group"), "warning, not a blocker");
+  assert.ok(r.blockers.some((w) => w.id === "color_price_group"), "an undocumented conflict blocks approval");
+  assert.equal(r.canApprove, false);
   assert.equal(findRoomColorGroupMismatches({ ...scope, materialGroup: "Group C" }).length, 0);
-  console.log("ok: review warns when a room's color belongs to another price group");
+  console.log("ok: review blocks when a room's color belongs to another price group");
 }
 
 console.log("\nquoteFlowReviewSummary.test.mjs — passed\n");

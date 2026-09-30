@@ -328,6 +328,7 @@ export type QuoteFlowPricingPayload = {
       slabPackageId?: string | null;
       colorNameOverride?: string | null;
       colorTbd?: boolean;
+      priceGroupException?: { group: string | null; reason: string; appliedAt: string | null } | null;
       edgeProfileToken?: string | null;
       includeBacksplash?: boolean;
       backsplashSqft?: number;
@@ -335,6 +336,20 @@ export type QuoteFlowPricingPayload = {
       hasWaterfallGeometry?: boolean;
     }>;
   };
+  /** Elite 100 colors carry an authoritative price group (Brain enforces it on save). */
+  colorPriceGroups?: {
+    colors: Array<{ colorName: string; group: string }>;
+    rooms: Array<{
+      roomId: string | null;
+      roomName: string;
+      colorName: string;
+      colorGroupLabel: string;
+      pricedGroup: string;
+      status: "matches" | "exception" | "conflict";
+    }>;
+    canApplyException: boolean;
+  };
+  colorPriceGroupNotices?: string[];
   vanityPrograms?: QuoteFlowVanityProgram[];
   sinkSelections?: {
     rooms: QuoteFlowSinkRoom[];

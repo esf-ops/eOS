@@ -707,6 +707,9 @@ export function buildStudioPricingRuleEvidence(calc, estimate) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const adj = calc?.totals?.estimateWideAdjustment || e100?.totals?.estimateWideAdjustment || null;
   const account = calc?.account || e100?.account || {};
+  const scopeRoomsById = new Map(
+    (Array.isArray(scope.rooms) ? scope.rooms : []).filter((r) => r && typeof r === "object").map((r) => [str(r.id), r])
+  );
   return {
     schema: 1,
     pricingEngine: str(calc?.pricingEngine || snap.pricingEngine) || null,
@@ -727,7 +730,8 @@ export function buildStudioPricingRuleEvidence(calc, estimate) {
       materialUseTaxPercent: Number.isFinite(Number(r.materialUseTaxPercent))
         ? Number(r.materialUseTaxPercent)
         : null,
-      vanityProgram: Boolean(r.bundled)
+      vanityProgram: Boolean(r.bundled),
+      priceGroupException: Boolean(scopeRoomsById.get(str(r.roomId))?.priceGroupException)
     })),
     accountRules: {
       wattsTrusted: account.wattsTrusted === true || snap.accountRuleResult?.wattsTrusted === true,

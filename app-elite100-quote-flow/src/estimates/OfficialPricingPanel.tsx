@@ -71,12 +71,33 @@ type StartingRoomSelection = {
   slabPackageId: string;
   colorNameOverride: string;
   colorTbd: boolean;
+  /** Documented price-group exception (Brain allows it only for authorized estimators). */
+  exceptionOn: boolean;
+  exceptionGroup: string;
+  exceptionReason: string;
+  hadException: boolean;
   edgeProfileToken: string;
   includeBacksplash: boolean;
   backsplashSqft: number;
   hasSinkCutout: boolean;
   hasWaterfallGeometry: boolean;
 };
+
+/** Mirrors Brain's Elite 100 color key so the pick list and the saved color agree. */
+function colorKey(name: string): string {
+  return String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " ")
+    .replace(/[''`]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function groupLabel(group: string): string {
+  return GROUP_OPTIONS.find((o) => o.value === group)?.label || group;
+}
 
 type StartingSelectionsState = {
   colorName: string;
@@ -238,6 +259,9 @@ function pricingFingerprint(
           slabPackageId: r.slabPackageId,
           colorNameOverride: r.colorNameOverride,
           colorTbd: r.colorTbd,
+          exceptionOn: r.exceptionOn,
+          exceptionGroup: r.exceptionGroup,
+          exceptionReason: r.exceptionReason,
           edgeProfileToken: r.edgeProfileToken,
           includeBacksplash: r.includeBacksplash
         }))
@@ -443,6 +467,9 @@ export default function OfficialPricingPanel(props: Props) {
   /** Unsaved sink decisions by room; only changed rooms are sent to Brain. */
   const [sinkEdits, setSinkEdits] = useState<Record<string, QuoteFlowSinkSelectionInput>>({});
   const [orphanedPackageRooms, setOrphanedPackageRooms] = useState<string[]>([]);
+  const [colorCatalog, setColorCatalog] = useState<Array<{ colorName: string; group: string }>>([]);
+  const [canApplyException, setCanApplyException] = useState(false);
+  const [colorConflicts, setColorConflicts] = useState<string[]>([]);
   const [slabCalculated, setSlabCalculated] = useState<Record<string, QuoteFlowSlabPackage | undefined>>({});
   const [slabRules, setSlabRules] = useState<{ costMultiplier: number | null; defaultWastePercent: number }>({
     costMultiplier: null,
@@ -451,6 +478,12 @@ export default function OfficialPricingPanel(props: Props) {
 
   const dirty =
     pricingFingerprint(pricing, customLines, selections, vanityElections, slabPackages, sinkEdits) !== savedFp;
+  const colorGroupByKey = useMemo(
+    () => new Map(colorCatalog.map((c) => [colorKey(c.colorName), c.group])),
+    [colorCatalog]
+  );
+  const colorGroupFor = (name: string) => colorGroupByKey.get(colorKey(name)) || null;
+  const estimateColorGroup = selections.colorTbd ? null : colorGroupFor(selections.colorName);
   const slabRoomNames = useMemo(() => {
     const out: Record<string, string[]> = {};
     for (const r of selections.rooms) {
@@ -483,6 +516,10 @@ export default function OfficialPricingPanel(props: Props) {
             slabPackageId: String(r.slabPackageId || ""),
             colorNameOverride: String(r.colorNameOverride || ""),
             colorTbd: r.colorTbd === true || (!r.colorNameOverride && Boolean(r.materialGroupOverride)),
+            exceptionOn: Boolean(r.priceGroupException?.group),
+            exceptionGroup: String(r.priceGroupException?.group || ""),
+            exceptionReason: String(r.priceGroupException?.reason || ""),
+            hadException: Boolean(r.priceGroupException?.group),
             edgeProfileToken: String(r.edgeProfileToken || ""),
             includeBacksplash: r.includeBacksplash === true,
             backsplashSqft: Number(r.backsplashSqft) || 0,
@@ -504,6 +541,13 @@ export default function OfficialPricingPanel(props: Props) {
         }
       : savedSelections;
     setOrphanedPackageRooms(orphanedRooms.map((r) => r.roomName || r.roomId));
+    setColorCatalog(Array.isArray(payload.colorPriceGroups?.colors) ? payload.colorPriceGroups.colors : []);
+    setCanApplyException(payload.colorPriceGroups?.canApplyException === true);
+    setColorConflicts(
+      (payload.colorPriceGroups?.rooms || [])
+        .filter((r) => r.status === "conflict")
+        .map((r) => `${r.roomName}: ${r.colorName} is ${r.colorGroupLabel} but priced as ${r.pricedGroup}`)
+    );
     setPricing(next);
     setCustomLines(lines);
     setSelections(nextSelections);
@@ -602,7 +646,7 @@ export default function OfficialPricingPanel(props: Props) {
   function draftBody() {
     return {
       pricingBasis: pricing.pricingBasis,
-      materialGroup: pricing.materialGroup,
+      materialGroup: estimateColorGroup || pricing.materialGroup,
       estimateWideAdjustment: pricing.estimateWideAdjustment,
       ...(pricing.internalMarkupEditable
         ? { internalMarkupPercent: pricing.internalMarkupPercent }
@@ -617,6 +661,13 @@ export default function OfficialPricingPanel(props: Props) {
         slabPackageId: r.slabPackageId || null,
         colorNameOverride: r.colorTbd ? "" : r.colorNameOverride,
         colorTbd: r.colorTbd,
+        ...(canApplyException && (r.exceptionOn || r.hadException)
+          ? {
+              priceGroupException: r.exceptionOn
+                ? { group: r.exceptionGroup, reason: r.exceptionReason }
+                : null
+            }
+          : {}),
         edgeProfileToken: r.edgeProfileToken || null,
         includeBacksplash: r.includeBacksplash
       })),
@@ -657,7 +708,7 @@ export default function OfficialPricingPanel(props: Props) {
     try {
       const res = await patchQuoteFlowEstimatePricing(authToken, estimateId, draftBody());
       applyPayload(res);
-      setNotice("Pricing draft saved.");
+      setNotice(["Pricing draft saved.", ...(res.colorPriceGroupNotices || [])].join(" "));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -672,7 +723,7 @@ export default function OfficialPricingPanel(props: Props) {
     try {
       const res = await calculateQuoteFlowEstimatePricing(authToken, estimateId, draftBody());
       applyPayload(res);
-      setNotice("Pricing calculated.");
+      setNotice(["Pricing calculated.", ...(res.colorPriceGroupNotices || [])].join(" "));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -785,6 +836,13 @@ export default function OfficialPricingPanel(props: Props) {
         </p>
       ) : null}
 
+      {colorConflicts.length ? (
+        <div className="qf-error-box" role="alert" data-testid="qf-pricing-color-group-conflict">
+          {colorConflicts.join("; ")}. Elite 100 colors are priced at their own group — save pricing to apply it,
+          then recalculate. Review approval is blocked until then.
+        </div>
+      ) : null}
+
       {scopeChangedSinceCalculation ? (
         <div className="qf-pricing__stale" data-testid="qf-pricing-scope-changed" role="status">
           Scope changed since last calculation
@@ -828,8 +886,9 @@ export default function OfficialPricingPanel(props: Props) {
         <label className="qf-pricing__field">
           Price group
           <select
-            value={pricing.materialGroup || "Group Promo"}
-            disabled={busy}
+            value={estimateColorGroup || pricing.materialGroup || "Group Promo"}
+            disabled={busy || Boolean(estimateColorGroup)}
+            title={estimateColorGroup ? `Set by ${selections.colorName} (Elite 100 ${groupLabel(estimateColorGroup)})` : undefined}
             aria-label="Price group"
             data-testid="qf-pricing-price-group"
             onChange={(e) => {
@@ -941,6 +1000,7 @@ export default function OfficialPricingPanel(props: Props) {
             Exact color
             <input
               type="text"
+              list="qf-elite100-colors"
               value={selections.colorTbd ? "" : selections.colorName}
               disabled={busy || selections.colorTbd}
               placeholder="Calacatta Fioressa"
@@ -950,7 +1010,19 @@ export default function OfficialPricingPanel(props: Props) {
                 setNotice(null);
               }}
             />
+            {estimateColorGroup ? (
+              <span className="qf-muted" data-testid="qf-pricing-color-group">
+                Elite 100 {groupLabel(estimateColorGroup)} — sets the estimate price group
+              </span>
+            ) : null}
           </label>
+          <datalist id="qf-elite100-colors" data-testid="qf-pricing-color-options">
+            {colorCatalog.map((c) => (
+              <option key={c.colorName} value={c.colorName}>
+                {`${c.colorName} · ${groupLabel(c.group)}`}
+              </option>
+            ))}
+          </datalist>
           <label className="qf-pricing__check">
             <input
               type="checkbox"
@@ -1009,7 +1081,19 @@ export default function OfficialPricingPanel(props: Props) {
         ) : null}
         {selections.rooms.length > 0 ? (
           <ul className="qf-pricing__room-selections" data-testid="qf-pricing-room-selections">
-            {selections.rooms.map((room) => (
+            {selections.rooms.map((room) => {
+              const roomColor = room.colorTbd
+                ? ""
+                : room.colorNameOverride || (selections.colorTbd ? "" : selections.colorName);
+              const roomColorGroup = room.slabPackageId ? null : colorGroupFor(roomColor);
+              const setRoom = (patch: Partial<StartingRoomSelection>) => {
+                setSelections({
+                  ...selections,
+                  rooms: selections.rooms.map((r) => (r.roomId === room.roomId ? { ...r, ...patch } : r))
+                });
+                setNotice(null);
+              };
+              return (
               <li key={room.roomId} data-testid="qf-pricing-room-selection-row">
                 <h4>{room.roomName || room.roomId}</h4>
                 <div className="qf-pricing__controls">
@@ -1041,20 +1125,18 @@ export default function OfficialPricingPanel(props: Props) {
                   <label className="qf-pricing__field">
                     Material group override
                     <select
-                      value={room.materialGroupOverride}
-                      disabled={busy}
+                      value={
+                        room.exceptionOn && room.exceptionGroup
+                          ? room.exceptionGroup
+                          : roomColorGroup
+                            ? room.colorNameOverride
+                              ? roomColorGroup
+                              : ""
+                            : room.materialGroupOverride
+                      }
+                      disabled={busy || Boolean(roomColorGroup)}
                       data-testid="qf-pricing-room-material-group"
-                      onChange={(e) => {
-                        setSelections({
-                          ...selections,
-                          rooms: selections.rooms.map((r) =>
-                            r.roomId === room.roomId
-                              ? { ...r, materialGroupOverride: e.target.value }
-                              : r
-                          )
-                        });
-                        setNotice(null);
-                      }}
+                      onChange={(e) => setRoom({ materialGroupOverride: e.target.value })}
                     >
                       <option value="">Inherit estimate default</option>
                       {GROUP_OPTIONS.map((o) => (
@@ -1070,23 +1152,68 @@ export default function OfficialPricingPanel(props: Props) {
                     Color override
                     <input
                       type="text"
+                      list="qf-elite100-colors"
                       value={room.colorTbd ? "" : room.colorNameOverride}
                       disabled={busy || room.colorTbd}
                       data-testid="qf-pricing-room-color"
-                      onChange={(e) => {
-                        setSelections({
-                          ...selections,
-                          rooms: selections.rooms.map((r) =>
-                            r.roomId === room.roomId
-                              ? { ...r, colorNameOverride: e.target.value }
-                              : r
-                          )
-                        });
-                        setNotice(null);
-                      }}
+                      onChange={(e) => setRoom({ colorNameOverride: e.target.value })}
                     />
                   </label>
                   )}
+                  {roomColorGroup ? (
+                    <div className="qf-pricing__field" data-testid="qf-pricing-room-color-group">
+                      <span className="qf-muted">
+                        {room.exceptionOn && room.exceptionGroup
+                          ? `Priced as ${groupLabel(room.exceptionGroup)} under a documented exception — ${roomColor} is Elite 100 ${groupLabel(roomColorGroup)}.`
+                          : `Priced at ${groupLabel(roomColorGroup)} — the Elite 100 group for ${roomColor}.`}
+                      </span>
+                      {canApplyException ? (
+                        <>
+                          <label className="qf-pricing__check">
+                            <input
+                              type="checkbox"
+                              checked={room.exceptionOn}
+                              disabled={busy}
+                              data-testid="qf-pricing-room-group-exception"
+                              onChange={(e) => setRoom({ exceptionOn: e.target.checked })}
+                            />
+                            Price-group exception
+                          </label>
+                          {room.exceptionOn ? (
+                            <>
+                              <select
+                                value={room.exceptionGroup}
+                                disabled={busy}
+                                aria-label="Exception price group"
+                                data-testid="qf-pricing-room-group-exception-group"
+                                onChange={(e) => setRoom({ exceptionGroup: e.target.value })}
+                              >
+                                <option value="">Choose group…</option>
+                                {GROUP_OPTIONS.filter((o) => o.value !== roomColorGroup).map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={room.exceptionReason}
+                                disabled={busy}
+                                placeholder="Reason (required, e.g. contract or account agreement)"
+                                aria-label="Exception reason"
+                                data-testid="qf-pricing-room-group-exception-reason"
+                                onChange={(e) => setRoom({ exceptionReason: e.target.value })}
+                              />
+                            </>
+                          ) : null}
+                        </>
+                      ) : room.hadException ? (
+                        <span className="qf-muted" data-testid="qf-pricing-room-group-exception-readonly">
+                          Exception reason: {room.exceptionReason}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <label className="qf-pricing__field">
                     Room edge profile
                     <select
@@ -1149,7 +1276,8 @@ export default function OfficialPricingPanel(props: Props) {
                   ) : null}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         ) : (
           <p className="qf-muted">No rooms on official scope yet.</p>

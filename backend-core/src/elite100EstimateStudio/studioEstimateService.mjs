@@ -23,6 +23,7 @@ import {
   normalizeRunCutouts
 } from "../takeoff/takeoffCutoutScope.mjs";
 import { normalizeVanityQuotedDepth } from "../elite100QuoteFlow/quoteFlowVanityDepth.mjs";
+import { assessRoomColorPriceGroups } from "./elite100ColorPriceGroup.mjs";
 import {
   attachDraftPieceGeometry,
   buildGeometryAuthoritySummary,
@@ -1928,6 +1929,19 @@ export function createStudioEstimateService(deps = {}) {
           err.statusCode = 422;
           err.code = "unresolved_items";
           err.details = unresolved;
+          throw err;
+        }
+
+        const colorConflicts = assessRoomColorPriceGroups(row.scope).filter((r) => r.status === "conflict");
+        if (colorConflicts.length) {
+          const err = new Error(
+            `${colorConflicts
+              .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
+              .join("; ")}. Apply the color's price group and recalculate, or record a documented price-group exception.`
+          );
+          err.statusCode = 422;
+          err.code = "color_price_group_conflict";
+          err.details = colorConflicts;
           throw err;
         }
 

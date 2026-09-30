@@ -194,6 +194,11 @@ export function pinForNewPublication({ pricingBasis = null, pricingRuleEvidence 
       blocked.push(`vanity_program_room:${where}`);
       continue;
     }
+    // Priced off its color's catalog group by an estimator's documented exception.
+    if (room?.priceGroupException) {
+      blocked.push(`price_group_exception:${where}`);
+      continue;
+    }
     const k = pinGroupKey(room?.materialGroup);
     if (!k || !basis) {
       blocked.push(`unknown_material_group:${where}`);
@@ -335,6 +340,7 @@ const BLOCKED_REASON_LABELS = {
   no_cutout_rate: "a missing cutout rate",
   no_cutout_rates: "no cutout rates",
   vanity_program_room: "a Vanity Program bundled room",
+  price_group_exception: "a room priced under a documented price-group exception",
   unknown_material_group: "a room with an unrecognized material group",
   material_rate_defaulted: "a room whose material rate was defaulted",
   room_rate_not_reproducible: "a room rate the rate table cannot explain",

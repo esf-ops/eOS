@@ -461,4 +461,19 @@ console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + 
   console.log("ok: presenter estimate name + open edge LF summary");
 }
 
+{
+  // Elite 100 color picks drive the price group; a different group needs a documented exception.
+  assert.match(pricingPanel, /<datalist id="qf-elite100-colors"/);
+  assert.equal((pricingPanel.match(/list="qf-elite100-colors"/g) || []).length, 2, "estimate + room color inputs");
+  assert.match(pricingPanel, /disabled=\{busy \|\| Boolean\(estimateColorGroup\)\}/);
+  assert.match(pricingPanel, /disabled=\{busy \|\| Boolean\(roomColorGroup\)\}/);
+  assert.match(pricingPanel, /data-testid="qf-pricing-color-group-conflict"/);
+  assert.match(pricingPanel, /data-testid="qf-pricing-room-group-exception-reason"/);
+  // Exception controls render only for estimators Brain says may apply them.
+  assert.match(pricingPanel, /\{canApplyException \? \(/);
+  assert.match(pricingPanel, /canApplyException && \(r\.exceptionOn \|\| r\.hadException\)/);
+  assert.match(pricingPanel, /colorPriceGroupNotices/);
+  console.log("ok: pricing UI locks the group to the Elite 100 color and gates exceptions");
+}
+
 console.log("\nquoteFlowEstimates.ui.test.mjs: ok\n");

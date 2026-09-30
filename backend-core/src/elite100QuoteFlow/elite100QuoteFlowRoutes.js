@@ -74,6 +74,15 @@ const jsonParser = express.json({ limit: "256kb" });
 /** Set Scope may include a full reviewed TakeoffResult payload. */
 const setScopeJsonParser = express.json({ limit: "4mb" });
 
+/** Server-resolved identity for pricing permission checks (never from the request body). */
+function pricingActor(req) {
+  return {
+    id: req.user?.id ?? null,
+    role: req.user?.role ?? req.eosProfile?.role ?? null,
+    email: req.user?.email ?? null
+  };
+}
+
 /**
  * @param {import("express").Express} app
  * @param {{
@@ -1208,7 +1217,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         const result = await quoteFlowPricingService.getPricing({
           organizationId,
           estimateId: decodeURIComponent(String(req.params.estimateId || "")),
-          actorUserId: req.user?.id ?? null
+          actorUserId: req.user?.id ?? null,
+          actor: pricingActor(req)
         });
         res.json(result);
       } catch (e) {
@@ -1230,6 +1240,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         const result = await quoteFlowPricingService.patchPricing({
           organizationId,
           actorUserId: req.user?.id ?? null,
+          actor: pricingActor(req),
           estimateId: decodeURIComponent(String(req.params.estimateId || "")),
           body
         });
@@ -1239,6 +1250,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
             action: "estimates.patch_pricing",
             userId: req.user?.id ?? null,
             estimateId: result.estimateId ?? null,
+            priceGroupExceptionsApplied: result.priceGroupExceptionsApplied ?? 0,
             at: new Date().toISOString()
           })
         );
@@ -1262,6 +1274,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         const result = await quoteFlowPricingService.calculatePricing({
           organizationId,
           actorUserId: req.user?.id ?? null,
+          actor: pricingActor(req),
           estimateId: decodeURIComponent(String(req.params.estimateId || "")),
           body
         });

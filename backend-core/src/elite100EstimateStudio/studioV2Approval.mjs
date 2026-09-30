@@ -14,6 +14,7 @@ import {
 import { assessStudioV2ScopeEditability } from "./studioV2ScopeEditor.mjs";
 import { buildStudioV2CalculationResult } from "./studioV2WorkingDraft.mjs";
 import { buildStudioV2RevisionAffordance } from "./studioV2Revision.mjs";
+import { assessRoomColorPriceGroups } from "./elite100ColorPriceGroup.mjs";
 
 function str(v, max = 240) {
   return String(v ?? "")
@@ -172,6 +173,13 @@ export function assessStudioV2ApprovalReadiness(row) {
     blockers.push({
       code: String(u?.code || "unresolved_items"),
       message: String(u?.message || "Unresolved item blocks approval")
+    });
+  }
+
+  for (const m of assessRoomColorPriceGroups(scope).filter((r) => r.status === "conflict")) {
+    blockers.push({
+      code: "color_price_group_conflict",
+      message: `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}.`
     });
   }
 

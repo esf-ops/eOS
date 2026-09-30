@@ -50,6 +50,12 @@ import {
   SLAB_PACKAGE_COST_MULTIPLIER,
   SLAB_PACKAGE_DEFAULT_WASTE_PERCENT
 } from "../elite100EstimateStudio/elite100SlabPackagePricing.mjs";
+import {
+  applyElite100ColorPriceGroups,
+  assessRoomColorPriceGroups,
+  canApplyQuoteFlowPriceGroupException,
+  listElite100ColorPriceGroups
+} from "../elite100EstimateStudio/elite100ColorPriceGroup.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -430,8 +436,9 @@ export function createQuoteFlowPricingService(deps = {}) {
    * @param {object} existingScope
    * @param {object} pricingPayload
    * @param {string|null} actorUserId
+   * @param {{ id?: string|null, role?: string|null, email?: string|null }|null} [actor]
    */
-  function applyPricingDraftToScope(existingScope, pricingPayload, actorUserId) {
+  function applyPricingDraftToScope(existingScope, pricingPayload, actorUserId, actor = null) {
     const ewa = pricingPayload?.estimateWideAdjustment;
     if (ewa && typeof ewa === "object" && ewa.active === true) {
       // The shared normalizer clamps out-of-range values; an estimator typing a negative
@@ -554,6 +561,38 @@ export function createQuoteFlowPricingService(deps = {}) {
         });
       }
     }
+
+    const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+    const touchedRoomIds = new Set();
+    /** @type {Map<string, object|null>} */
+    const exceptionPatches = new Map();
+    for (const r of Array.isArray(pricingPayload.roomSelections) ? pricingPayload.roomSelections : []) {
+      const id = String(r?.roomId || "").trim();
+      if (!id || !r || typeof r !== "object") continue;
+      if (["colorNameOverride", "colorTbd", "materialGroupOverride", "priceGroupException"].some((k) => has(r, k))) {
+        touchedRoomIds.add(id);
+      }
+      if (has(r, "priceGroupException")) {
+        exceptionPatches.set(
+          id,
+          r.priceGroupException && typeof r.priceGroupException === "object" ? r.priceGroupException : null
+        );
+      }
+    }
+    const colorGroups = applyElite100ColorPriceGroups(nextScope, {
+      estimateColorTouched: ["colorName", "colorTbd", "materialGroup", "priceGroup"].some((k) =>
+        has(pricingPayload, k)
+      ),
+      touchedRoomIds,
+      exceptionPatches,
+      actor: actor || (actorUserId ? { id: actorUserId } : null),
+      env
+    });
+    if (!colorGroups.ok) {
+      return { ok: false, issues: colorGroups.issues };
+    }
+    nextScope = colorGroups.scope;
+
     const slabRefs = validateRoomSlabElections(nextScope);
     if (!slabRefs.ok) return { ok: false, issues: slabRefs.issues };
 
@@ -595,6 +634,8 @@ export function createQuoteFlowPricingService(deps = {}) {
     return {
       ok: true,
       scope: nextScope,
+      colorPriceGroupNotices: colorGroups.notices,
+      priceGroupExceptionsApplied: colorGroups.exceptionsApplied,
       customLineItems: readQuoteFlowCustomLineItems(nextScope),
       customLineSummary: summarizeQuoteFlowCustomLineItems(
         readQuoteFlowCustomLineItems(nextScope)
@@ -602,7 +643,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     };
   }
 
-  function presentPricingDraft(row, editablePricing) {
+  function presentPricingDraft(row, editablePricing, actor = null) {
     const customLineItems = readQuoteFlowCustomLineItems(row?.scope || {});
     const customLineSummary = summarizeQuoteFlowCustomLineItems(customLineItems);
     const scope = row?.scope && typeof row.scope === "object" ? row.scope : {};
@@ -629,6 +670,14 @@ export function createQuoteFlowPricingService(deps = {}) {
           slabPackageId: String(room?.slabPackageId ?? "").trim() || null,
           colorNameOverride: room?.colorNameOverride || null,
           colorTbd: room?.colorTbd === true,
+          priceGroupException:
+            room?.priceGroupException && typeof room.priceGroupException === "object"
+              ? {
+                  group: room.priceGroupException.group || null,
+                  reason: room.priceGroupException.reason || "",
+                  appliedAt: room.priceGroupException.appliedAt || null
+                }
+              : null,
           edgeProfileToken: edgeTokens[0] || scope.edgeProfileToken || null,
           includeBacksplash: room?.includeBacksplash === true,
           backsplashSqft: Number(room?.backsplashSqft) || 0,
@@ -663,6 +712,11 @@ export function createQuoteFlowPricingService(deps = {}) {
         openEdgeLf: buildScopeSummary(row).openEdgeLf
       }),
       startingSelections,
+      colorPriceGroups: {
+        colors: listElite100ColorPriceGroups(),
+        rooms: assessRoomColorPriceGroups(scope),
+        canApplyException: canApplyQuoteFlowPriceGroupException(actor, env)
+      },
       vanityPrograms: resolveGovernedVanityPrograms({
         scope: stampOpenEdgeLfOntoScopeForPricing(scope),
         calculationSnapshot: row?.calculationSnapshot || null
@@ -755,7 +809,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     return notes;
   }
 
-  async function getPricing({ organizationId, estimateId, actorUserId = null } = {}) {
+  async function getPricing({ organizationId, estimateId, actorUserId = null, actor = null } = {}) {
     const row = await loadEstimateRow(organizationId, estimateId);
     assertScoped(row);
     const editablePricing = buildStudioV2EditablePricing(row, {
@@ -765,7 +819,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     const lastCalculation = presentQuoteFlowPricingResult(row);
     const staleReason = String(row.staleReason || "").trim() || null;
     const scopeChangedSinceCalculation = /scope changed/i.test(String(staleReason || ""));
-    const draft = presentPricingDraft(row, editablePricing);
+    const draft = presentPricingDraft(row, editablePricing, actor);
     return {
       ok: true,
       estimateId: row.id || estimateId,
@@ -779,6 +833,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
       startingSelections: draft.startingSelections,
+      colorPriceGroups: draft.colorPriceGroups,
       vanityPrograms: draft.vanityPrograms,
       sinkSelections: draft.sinkSelections,
       slabPackages: draft.slabPackages,
@@ -795,7 +850,8 @@ export function createQuoteFlowPricingService(deps = {}) {
     organizationId,
     estimateId,
     body = {},
-    actorUserId = null
+    actorUserId = null,
+    actor = null
   } = {}) {
     if (!estimateRepository?.update) {
       throw createQuoteFlowError("takeoff_unavailable", {
@@ -823,13 +879,14 @@ export function createQuoteFlowPricingService(deps = {}) {
     const applied = applyPricingDraftToScope(
       row.scope && typeof row.scope === "object" ? row.scope : {},
       pricingPayload,
-      actorUserId
+      actorUserId,
+      actor
     );
     if (!applied.ok) {
       const first = applied.issues?.[0];
       throw createQuoteFlowError("pricing_invalid", {
         message: first?.message || "Pricing settings could not be saved.",
-        statusCode: 422,
+        statusCode: first?.code === "price_group_exception_forbidden" ? 403 : 422,
         diagnostic: { issues: applied.issues }
       });
     }
@@ -868,7 +925,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       actorUserId,
       env
     });
-    const draft = presentPricingDraft(updated, editablePricing);
+    const draft = presentPricingDraft(updated, editablePricing, actor);
     return {
       ok: true,
       message: "Pricing draft saved.",
@@ -880,6 +937,9 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
       startingSelections: draft.startingSelections,
+      colorPriceGroups: draft.colorPriceGroups,
+      colorPriceGroupNotices: applied.colorPriceGroupNotices || [],
+      priceGroupExceptionsApplied: applied.priceGroupExceptionsApplied || 0,
       vanityPrograms: draft.vanityPrograms,
       sinkSelections: draft.sinkSelections,
       slabPackages: draft.slabPackages,
@@ -897,7 +957,8 @@ export function createQuoteFlowPricingService(deps = {}) {
     organizationId,
     estimateId,
     body = {},
-    actorUserId = null
+    actorUserId = null,
+    actor = null
   } = {}) {
     if (!estimateRepository?.update) {
       throw createQuoteFlowError("takeoff_unavailable", {
@@ -925,13 +986,14 @@ export function createQuoteFlowPricingService(deps = {}) {
       const applied = applyPricingDraftToScope(
         row.scope && typeof row.scope === "object" ? row.scope : {},
         pricingPayload,
-        actorUserId
+        actorUserId,
+        actor
       );
       if (!applied.ok) {
         const first = applied.issues?.[0];
         throw createQuoteFlowError("pricing_invalid", {
           message: first?.message || "Pricing settings are invalid.",
-          statusCode: 422,
+          statusCode: first?.code === "price_group_exception_forbidden" ? 403 : 422,
           diagnostic: { issues: applied.issues }
         });
       }
@@ -1020,7 +1082,7 @@ export function createQuoteFlowPricingService(deps = {}) {
 
     const result = presentQuoteFlowPricingResult(nextRow, calc);
     const notes = buildWarnings(nextRow, result);
-    const draft = presentPricingDraft(nextRow, editablePricing);
+    const draft = presentPricingDraft(nextRow, editablePricing, actor);
     return {
       ok: true,
       message: "Pricing calculated.",
@@ -1030,6 +1092,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       status: nextRow.status || null,
       editablePricing: buildStudioV2EditablePricing(nextRow, { actorUserId, env }),
       startingSelections: draft.startingSelections,
+      colorPriceGroups: draft.colorPriceGroups,
       customLineItems: draft.customLineItems,
       customLineSummary: draft.customLineSummary,
       edgeStatus: result.edgeStatus || draft.edgeStatus,
