@@ -38,6 +38,10 @@ import { createStudioSecurePlanViewerService } from "../elite100EstimateStudio/s
 import { normalizeStartTakeoffAttachmentKeys } from "./quoteFlowTakeoffPacket.mjs";
 import { resolveStudioLifecycleRepositoryForRoutes } from "../elite100EstimateStudio/studioLifecycleRepositoryFactory.mjs";
 import {
+  attachQuoteFlowSoldRoutes,
+  attachSalesOrderAgentRoutes
+} from "../elite100EstimateStudio/qbSalesOrder/studioSalesOrderRoutes.js";
+import {
   approveAndBuildEstimate,
   getLatestTakeoffResult,
   getTakeoffWorkspace,
@@ -49,6 +53,7 @@ import {
   createSupabaseDigitalEstimateRepository
 } from "../digitalEstimate/digitalEstimateRepository.mjs";
 import { createDigitalEstimateConfigurationStack } from "../digitalEstimate/configuration/configurationFactory.mjs";
+import { buildPricingBasisReview } from "../digitalEstimate/configuration/pricingBasisReview.mjs";
 import { createConfigurationStudioService } from "../digitalEstimate/configuration/configurationStudioService.mjs";
 import { isDigitalEstimateConfigurationEnabled } from "../digitalEstimate/configuration/configurationConfig.mjs";
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
@@ -149,6 +154,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   /** @type {object|null} */
   let wiredStudioDigitalEstimateService = deps.studioDigitalEstimateService || null;
   /** @type {object|null} */
+  let soldEstimateRepository =
+    deps.studioEstimateRepository || deps.studioEstimateService?.repository || null;
+  /** @type {object|null} */
   let lifecycleRepository = deps.lifecycleRepository || null;
   if (!lifecycleRepository) {
     try {
@@ -181,6 +189,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       createStudioEstimateQueueService({ env, getSupabase });
     const estimateRepository =
       deps.studioEstimateRepository || studioEstimateService.repository || null;
+    soldEstimateRepository = soldEstimateRepository || estimateRepository;
 
     if (!quoteFlowService) {
       const sharedInboxService =
@@ -408,6 +417,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       typeof e.diagnostic === "object"
     ) {
       safe.diagnostic = e.diagnostic;
+    }
+    if (typeof e?.staffDetail === "string" && e.staffDetail && safe.code === code) {
+      safe.error = e.staffDetail;
     }
     // Prefer Shared Inbox wording for known mailbox codes.
     if (status >= 500 || safe.code.startsWith("mailbox_") || safe.code === "message_not_found") {
@@ -1460,8 +1472,48 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/digital-estimate/pricing-basis-review",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const deRepository =
+          wiredDigitalEstimateRepository ||
+          (typeof getSupabase === "function" && getSupabase()
+            ? createSupabaseDigitalEstimateRepository({ db: getSupabase() })
+            : null);
+        if (!deRepository?.listActivePublicationsWithoutPricingPin) {
+          return res.status(503).json({ ok: false, error: "Review unavailable.", code: "review_unavailable" });
+        }
+        const review = await buildPricingBasisReview({ organizationId, deRepository });
+        res.json({ ok: true, review });
+      } catch (e) {
+        console.error("[elite100-quote-flow] pricing-basis-review failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load pricing basis review.");
+      }
+    }
+  );
+
+  attachQuoteFlowSoldRoutes(app, {
+    staffStack,
+    orgIdFor,
+    getSupabase,
+    env,
+    lifecycleRepository,
+    estimateRepository: soldEstimateRepository,
+    soldReviewService: deps.soldReviewService || null,
+    salesOrderService: deps.salesOrderService || null
+  });
+  attachSalesOrderAgentRoutes(app, {
+    getSupabase,
+    env,
+    salesOrderService: deps.salesOrderService || null
+  });
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate|activity|accepted-report"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate|activity|accepted-report|pricing-basis-review|sold|sales-order|qb-sales-order-agent"
   );
   return { mounted: true, reason: "ok" };
 }

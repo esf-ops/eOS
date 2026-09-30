@@ -93,11 +93,41 @@ const ROOM_OWNED_FABRICATION_KEYS = Object.freeze({
  * @param {Record<string, number>|null|undefined} addOns
  * @param {Array<{ roomId: string, roomName: string, roomType?: string }>} rooms
  */
-export function normalizeFabricationAddOnsForSnapshot(addOns, rooms = []) {
+export function normalizeFabricationAddOnsForSnapshot(addOns, rooms = [], sinkLines = null) {
   const src = addOns && typeof addOns === "object" ? addOns : {};
   const out = [];
   let i = 0;
+  // Calculator room sink lines are the authority when present: they name the
+  // room that owns each cutout/sink and the product actually priced, so the
+  // estimate-wide sink keys and the guessed customer-provided line are skipped.
+  const roomSinkLines = Array.isArray(sinkLines) ? sinkLines : null;
+  const roomSinkProductPriced = Boolean(
+    roomSinkLines?.some((l) => String(l?.lineKey || "").startsWith("fab-sink-product-"))
+  );
+  const skipKeys = new Set(
+    roomSinkLines
+      ? ["qty-sink", "qty-bar", ...(roomSinkProductPriced ? ["qty-ss", "qty-blanco", "qty-v-rect", "qty-v-oval"] : [])]
+      : []
+  );
+  for (const line of roomSinkLines || []) {
+    const amountCents = Math.trunc(Number(line?.amountCents));
+    if (!Number.isFinite(amountCents) || !line?.lineKey || !line?.label) continue;
+    out.push({
+      lineKey: String(line.lineKey),
+      label: String(line.label),
+      name: String(line.label),
+      amountCents,
+      customerFacing: true,
+      customer_facing: true,
+      roomId: line.roomId ? String(line.roomId) : null,
+      roomName: line.roomName ? String(line.roomName) : null,
+      category: line.category || "sink",
+      quantity: Math.max(1, Math.floor(Number(line.quantity) || 1)),
+      unit: "ea"
+    });
+  }
   for (const [key, qtyRaw] of Object.entries(src)) {
+    if (skipKeys.has(key)) continue;
     const qty = Math.max(0, Math.floor(Number(qtyRaw) || 0));
     if (qty <= 0) continue;
     const unit = PROTOTYPE_ADDON_UNIT_PRICES[key];
@@ -133,7 +163,8 @@ export function normalizeFabricationAddOnsForSnapshot(addOns, rooms = []) {
   }
   // When a cutout exists without an ESF sink product, freeze a customer-safe
   // $0 "Customer-provided sink" line so Original shows the sink product row.
-  const hasCutout = Number(src["qty-sink"] || 0) > 0 || Number(src["qty-bar"] || 0) > 0;
+  const hasCutout =
+    !roomSinkLines && (Number(src["qty-sink"] || 0) > 0 || Number(src["qty-bar"] || 0) > 0);
   const hasEsfSink =
     Number(src["qty-ss"] || 0) > 0 ||
     Number(src["qty-blanco"] || 0) > 0 ||
@@ -170,12 +201,21 @@ export function normalizeFabricationAddOnsForSnapshot(addOns, rooms = []) {
  */
 export const ROOM_PRICING_SNAPSHOT_VERSION = "v2";
 export const COUNTERTOP_BACKSPLASH_PRICING_SOURCE = "published_allocation_v1";
+/** Same largest-remainder allocation, weighted by calculator-priced room stone cents. */
+export const CALCULATOR_WEIGHTED_PRICING_SOURCE = "calculator_weighted_allocation_v1";
 export const ADD_ONS_NOT_ATTRIBUTABLE = "not_currently_attributable";
 export { INTERNAL_CUSTOM_LINE_ALLOCATION_VERSION };
 
 function slugRoomId(name, index) {
   const base = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return base || `room-${index + 1}`;
+}
+
+function readPricedWeights(room) {
+  const ct = Number(room?.pricedCountertopCents);
+  const bs = Number(room?.pricedBacksplashCents);
+  if (!Number.isFinite(ct) || !Number.isFinite(bs) || ct < 0 || bs < 0) return null;
+  return { countertop: ct, backsplash: bs };
 }
 
 function normalizeGeometry(room) {
@@ -234,7 +274,7 @@ export function buildRoomPricingPublishSnapshot(args) {
     roomType: String(room?.roomType || room?.type || "")
   }));
   const fabricationLines = normalizeSnapshotCustomLines(
-    normalizeFabricationAddOnsForSnapshot(args?.fabricationAddOns, roomIdentity)
+    normalizeFabricationAddOnsForSnapshot(args?.fabricationAddOns, roomIdentity, args?.fabricationSinkLines ?? null)
   );
   const allCustomLines = [
     ...normalizeSnapshotCustomLines(args?.customLineItems),
@@ -252,21 +292,31 @@ export function buildRoomPricingPublishSnapshot(args) {
   const stonePoolCents = totalCents - customerFacingTotalCents - internalOnlyTotalCents;
 
   const geometries = rooms.map(normalizeGeometry);
-  const roomWeights = geometries.map((g) => g.countertopSf + g.backsplashSf);
+  // Calculator-priced weights (Studio v4) when every room carries them; SF otherwise.
+  const pricedWeights = rooms.map(readPricedWeights);
+  const usePricedWeights =
+    rooms.length > 0 &&
+    pricedWeights.every(Boolean) &&
+    pricedWeights.reduce((s, w) => s + w.countertop + w.backsplash, 0) > 0;
+  const splitWeights = usePricedWeights
+    ? pricedWeights.map((w) => ({ countertop: w.countertop, backsplash: w.backsplash }))
+    : geometries.map((g) => ({ countertop: g.countertopSf, backsplash: g.backsplashSf }));
+  const roomWeights = splitWeights.map((w) => w.countertop + w.backsplash);
   const roomShares = rooms.length ? allocateProportionally(stonePoolCents, roomWeights) : [];
 
   const roomSnapshots = rooms.map((room, idx) => {
     const geometry = geometries[idx];
+    const weights = splitWeights[idx];
     const roomStoneCents = roomShares[idx] ?? 0;
     const [countertopAmountCents, backsplashAmountCentsRaw] = allocateProportionally(roomStoneCents, [
-      geometry.countertopSf,
-      geometry.backsplashSf
+      weights.countertop,
+      weights.backsplash
     ]);
     const originalBacksplashMode = resolveOriginalBacksplashMode({
       backsplashHeightMode: room?.backsplashHeightMode,
       backsplashSf: geometry.backsplashSf
     });
-    const backsplashAmountCents = geometry.backsplashSf > 0 ? backsplashAmountCentsRaw : 0;
+    const backsplashAmountCents = weights.backsplash > 0 ? backsplashAmountCentsRaw : 0;
 
     return {
       roomId: String(room?.id || room?.roomKey || slugRoomId(room?.name, idx)),
@@ -276,14 +326,19 @@ export function buildRoomPricingPublishSnapshot(args) {
       addOnsAmountCents: 0,
       roomTotalCents: 0, // finalized below after custom-line attachment
       customerFacingLines: [],
-      selectedMaterialLabel: room?.materialGroup ? String(room.materialGroup) : null,
+      selectedMaterialLabel:
+        room?.materialLabel || room?.materialGroup
+          ? String(room.materialLabel || room.materialGroup)
+          : null,
       selectedMaterialGroup: room?.materialGroup ? String(room.materialGroup) : null,
       originalSinkLabel: null,
       originalFaucetLabel: null,
       originalEdgeLabel: null,
       originalBacksplashMode,
       reviewRequiredFlags: [],
-      pricingSourceVersion: COUNTERTOP_BACKSPLASH_PRICING_SOURCE,
+      pricingSourceVersion: usePricedWeights
+        ? CALCULATOR_WEIGHTED_PRICING_SOURCE
+        : COUNTERTOP_BACKSPLASH_PRICING_SOURCE,
       addOnsAttributionStatus: ADD_ONS_NOT_ATTRIBUTABLE
     };
   });
@@ -313,6 +368,9 @@ export function buildRoomPricingPublishSnapshot(args) {
     };
     if (room) {
       room.customerFacingLines.push(frozen);
+      if (frozen.category === "sink" && isFabrication && !room.originalSinkLabel) {
+        room.originalSinkLabel = String(frozen.label).replace(/^Sink — /, "");
+      }
       room.addOnsAmountCents += line.amountCents;
       room.addOnsAttributionStatus = "published_fabrication_and_custom_lines_v1";
     } else {

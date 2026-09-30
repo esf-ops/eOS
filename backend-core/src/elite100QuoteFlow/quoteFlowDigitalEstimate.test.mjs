@@ -302,6 +302,10 @@ function harness(customLines = []) {
   const previewJson = JSON.stringify(ready.customerPreview || {}).toLowerCase();
   assert.equal(previewJson.includes("exactinternaltotal"), false);
   assert.equal(previewJson.includes("shop scrap"), false);
+  assert.ok(Number(ready.customerPreview?.customerDisplayTotal) > 0, "preview carries the frozen customer total");
+  assert.ok(ready.customerPreview?.roomCount > 0, "preview carries the customer rooms");
+  assert.equal(ready.customerPreview.customerRooms.length, ready.customerPreview.roomCount);
+  assert.equal(typeof ready.customerPreview.customerRooms[0].roomTotal, "number");
   console.log("ok: ready state excludes internal-only from customer preview");
 
   const published = await digital.publishDigitalEstimate({
@@ -393,6 +397,39 @@ function harness(customLines = []) {
   assert.equal(republished.ok, true);
   assert.equal(repo.peek(EST).scope.quoteFlowDigitalEstimate?.status, "published");
   console.log("ok: republish after re-approval succeeds");
+
+  const recorded = repo.peek(EST).scope.quoteFlowDigitalEstimate;
+  assert.equal(recorded.customerCanChangeOnline, true);
+  assert.equal(republished.onlineChanges.customerCanChangeOnline, true);
+  const blockedMessage =
+    "Published without online changes: Online changes cannot reproduce this estimate's pricing: an estimate-wide adjustment (manual) [estimate_wide_adjustment:manual].";
+  await repo.update(ORG, EST, {
+    scope: {
+      ...repo.peek(EST).scope,
+      quoteFlowDigitalEstimate: {
+        ...recorded,
+        customerCanChangeOnline: false,
+        onlineChangesBlockedMessage: blockedMessage
+      }
+    }
+  });
+  const viewOnly = await digital.getDigitalEstimate({ organizationId: ORG, estimateId: EST });
+  assert.deepEqual(viewOnly.onlineChanges, {
+    customerCanChangeOnline: false,
+    message: blockedMessage
+  });
+  await repo.update(ORG, EST, {
+    scope: {
+      ...repo.peek(EST).scope,
+      quoteFlowDigitalEstimate: {
+        ...repo.peek(EST).scope.quoteFlowDigitalEstimate,
+        publicationId: "some-older-publication"
+      }
+    }
+  });
+  const otherPublication = await digital.getDigitalEstimate({ organizationId: ORG, estimateId: EST });
+  assert.equal(otherPublication.onlineChanges.customerCanChangeOnline, true);
+  console.log("ok: view-only (online changes blocked) state persists for staff and only for its publication");
 
   const src = readFileSync(join(__dirname, "quoteFlowDigitalEstimate.mjs"), "utf8");
   assert.match(src, /createStudioEstimateDigitalEstimateService|studioDigitalEstimateService\.publish/);

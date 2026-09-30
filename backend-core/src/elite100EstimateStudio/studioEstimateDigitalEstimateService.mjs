@@ -23,8 +23,11 @@ import {
   assessStudioEstimatePublicationReadiness,
   buildSyntheticQuoteHeaderFromStudioEstimate,
   hashConfigurationEnvelope,
+  resolvePublishedRoomColorName,
+  resolveRoomBaselineMaterialId,
   studioEstimatePublicationFamilyRoot
 } from "./studioEstimatePublicationAdapter.mjs";
+import { resolveRoomMaterialGroup } from "./studioMaterialInheritance.mjs";
 import {
   inferCustomerChoiceGroupsFromEnvelopeOptions,
   inferFriendlyChoiceFlags,
@@ -38,13 +41,16 @@ import {
 } from "./studioEstimatePublicationSource.mjs";
 import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 import { buildSafeStudioPublicationSummary } from "./studioPublicationSummary.mjs";
+import { scopeRoomSinkDecision } from "./elite100RoomPricingStudioAdapter.mjs";
 import {
   listElite100CustomerMaterials,
   getElite100CustomerMaterial,
-  pickDefaultMaterialForGroup
+  pickDefaultMaterialForGroup,
+  slugifyElite100ColorName
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 import { GROUP_CODE_DISPLAY_NAMES } from "../digitalEstimate/configuration/approvedPricingFixtures.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
+import { resolvePublicationPricingPin } from "../digitalEstimate/configuration/publicationPricingPin.mjs";
 import {
   buildDefaultRoomProductOptions,
   inferRoomEligibilityType,
@@ -79,6 +85,28 @@ function deError(message, code, statusCode = 400) {
   err.code = code;
   err.statusCode = statusCode;
   return err;
+}
+
+const PRICING_PIN_BLOCK_CODES = new Set(["pricing_rules_not_reproducible", "pricing_pin_invalid"]);
+
+/** The publication's frozen pin blocks online repricing → `{ code, reason }`, else null. */
+async function publicationPricingPinBlock(deRepository, organizationId, publicationId) {
+  if (typeof deRepository?.getSnapshotByPublicationId !== "function") return null;
+  const snap = await deRepository.getSnapshotByPublicationId(organizationId, publicationId);
+  const resolved = resolvePublicationPricingPin(snap?.pricing_evidence_json);
+  return !resolved.ok && PRICING_PIN_BLOCK_CODES.has(resolved.code)
+    ? { code: resolved.code, reason: resolved.reason }
+    : null;
+}
+
+/** Staff-facing envelope result for a publication published without online changes. */
+function pricingBlockedEnvelope(block) {
+  return {
+    configured: false,
+    reason: block.code,
+    message: `Published without online changes: ${block.reason} The customer sees the published total and is asked to contact Elite for changes.`,
+    customerCanChangeOnline: false
+  };
 }
 
 function rejectCallerAuthority(body) {
@@ -818,10 +846,37 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       (g) => String(g.group_key || g.groupKey) === "material_by_room"
     );
     const options = [];
+    // Custom slab package rooms are priced from confirmed slabs; a customer swap to
+    // a collection color or extra stone area needs estimator revision, not an
+    // invented Elite 100 delta.
+    const slabRoomKeys = new Set(
+      rooms
+        .filter((r) => String(r.slabPackageId ?? "").trim())
+        .map((r) => String(r.id || r.name))
+    );
+    const isSlabStoneOption = (opt) =>
+      slabRoomKeys.has(String(opt?.compatibilityJson?.roomKey ?? "")) &&
+      /^(material|backsplash|sidesplash):/.test(String(opt?.optionKey || ""));
 
+    const scopeForColors = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+    const projectColorName = scopeForColors.colorTbd ? null : strOrNull(scopeForColors.colorName);
     if (materialIdsToPublish.length && rooms.length && materialGroupRow?.id) {
       for (const room of rooms) {
         const roomKey = String(room.id || room.name);
+        if (slabRoomKeys.has(roomKey)) continue;
+        const roomMaterial = resolveRoomMaterialGroup(scopeForColors, room);
+        const roomGroupCode = scopeMaterialGroupToCode(roomMaterial.group) || baselineGroupCode;
+        const roomFallback =
+          strOrNull(cfg.includedMaterialId || cfg.defaultMaterialId) ||
+          pickDefaultMaterialForGroup(roomGroupCode)?.materialId ||
+          includedId;
+        const roomBaseline = resolveRoomBaselineMaterialId({
+          colorName: resolvePublishedRoomColorName({ projectColorName, room, roomMaterial, slabPackageLabel: null }),
+          roomGroupCode,
+          findMaterial: getElite100CustomerMaterial,
+          slugify: slugifyElite100ColorName,
+          fallbackMaterialId: roomFallback
+        });
         for (const materialId of materialIdsToPublish) {
           const mat = getElite100CustomerMaterial(materialId);
           if (!mat || !mat.customerVisible) {
@@ -838,7 +893,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           ) {
             continue;
           }
-          const isDefault = Boolean(includedId && materialId === includedId);
+          const isDefault = Boolean(roomBaseline.materialId && materialId === roomBaseline.materialId);
           options.push({
             groupId: materialGroupRow.id,
             optionKey: `material:${roomKey}:${materialId}`,
@@ -899,12 +954,27 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     }
 
     if (roomChoicesGroup?.id && rooms.length) {
+      const calcRoomsById = new Map(
+        (Array.isArray(estimate.calculationSnapshot?.elite100?.rooms)
+          ? estimate.calculationSnapshot.elite100.rooms
+          : []
+        ).map((cr) => [String(cr.roomId), cr])
+      );
       const roomRows = rooms.map((room) => {
         const roomKey = String(room.id || room.name);
+        const calcRoom = calcRoomsById.get(String(room.id)) || null;
         return {
           roomKey,
           displayName: room.name || roomKey,
           roomType: inferRoomEligibilityType(room),
+          staffSinkDecision: scopeRoomSinkDecision(estimate.scope, String(room.id)),
+          sinkIncludedInVanityProgram: calcRoom?.vanityProgram?.qualifies === true,
+          sinkOpeningCount: calcRoom
+            ? (Array.isArray(calcRoom.sinks) ? calcRoom.sinks : []).reduce(
+                (s, sink) => s + Math.max(0, Math.floor(Number(sink?.quantity) || 0)),
+                0
+              )
+            : null,
           includeBacksplash: room.includeBacksplash,
           backsplashHeightMode: room.backsplashHeightMode,
           backsplashHeightIn: room.backsplashHeightIn,
@@ -927,6 +997,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           : undefined
       });
       for (const opt of seeded) {
+        if (isSlabStoneOption(opt)) continue;
         const priced = resolveOptionSellPriceFromCatalog(
           opt.optionKey,
           opt.compatibilityJson || {}
@@ -1033,6 +1104,14 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       optionCountBefore = null;
     }
 
+    const pricingBlock = await publicationPricingPinBlock(deRepository, organizationId, publicationId);
+    if (pricingBlock) {
+      throw deError(
+        `Online changes cannot be enabled for this publication: ${pricingBlock.reason} Republish from Studio to reprice.`,
+        pricingBlock.code,
+        409
+      );
+    }
     if (typeof assertWithinBudget === "function") assertWithinBudget(budgetMark);
     const repaired = await applyConfigurationEnvelope({
       organizationId,
@@ -1307,9 +1386,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             503
           );
         }
+        const reusePricingBlock = intendsConfigure
+          ? await publicationPricingPinBlock(deRepository, organizationId, existing.id)
+          : null;
         /** @type {object|null} */
         let repairMeta = null;
-        if (intendsConfigure && configurationStudioService) {
+        if (intendsConfigure && configurationStudioService && !reusePricingBlock) {
           // Always rebuild the active envelope on interactive reuse/repair —
           // skipping when an (possibly stale) active envelope already exists left
           // public /selections reading contaminated option keys / saved state.
@@ -1342,7 +1424,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             elapsedMs: Date.now() - t0
           })
         );
-        const staffNotice = repairMeta?.envelopeRebuilt
+        const staffNotice = reusePricingBlock
+          ? pricingBlockedEnvelope(reusePricingBlock).message
+          : repairMeta?.envelopeRebuilt
           ? linkMeta.customerUrl
             ? "Digital Estimate configuration repaired. The customer link is unchanged."
             : "Digital Estimate configuration repaired. Use Replace Link if a customer URL is missing."
@@ -1359,7 +1443,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           customerUrl: linkMeta.customerUrl,
           linkStatus: linkMeta.linkStatus,
           readiness: readiness.readiness,
-          envelope: intendsConfigure
+          envelope: reusePricingBlock
+            ? pricingBlockedEnvelope(reusePricingBlock)
+            : intendsConfigure
             ? {
                 configured: true,
                 repaired: true,
@@ -1405,6 +1491,26 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         estimate,
         sourceQuoteFingerprint: freezeProbe.sourceQuoteFingerprint
       });
+      const sameRevisionPricingBlock = sameRevisionPub
+        ? await publicationPricingPinBlock(deRepository, organizationId, sameRevisionPub.id)
+        : null;
+      if (sameRevisionPub && sameRevisionPricingBlock) {
+        const linkMeta = await linkMetaForPublication(organizationId, sameRevisionPub);
+        mark("build_response");
+        return {
+          ok: true,
+          reused: true,
+          correlationId,
+          phases,
+          publication: staffPublicationView(sameRevisionPub, linkMeta),
+          accessToken: null,
+          customerUrl: linkMeta.customerUrl,
+          linkStatus: linkMeta.linkStatus,
+          readiness: readiness.readiness,
+          envelope: pricingBlockedEnvelope(sameRevisionPricingBlock),
+          staffNotice: pricingBlockedEnvelope(sameRevisionPricingBlock).message
+        };
+      }
       if (sameRevisionPub) {
         const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
         if (intendsConfigure && !configurationStudioService) {
@@ -1574,8 +1680,16 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       }
       mark("create_publication");
 
-      const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+      let intendsConfigure = configurationIntendsCustomerConfigure(configuration);
       let envelope = { configured: false, reason: "document_only" };
+      const pricingBlock = intendsConfigure
+        ? await publicationPricingPinBlock(deRepository, organizationId, result.publication.id)
+        : null;
+      if (pricingBlock) {
+        // Publish view-only: online changes would reprice with rules the pin cannot carry.
+        intendsConfigure = false;
+        envelope = pricingBlockedEnvelope(pricingBlock);
+      }
       if (intendsConfigure) {
         try {
           assertWithinBudget("activate_envelope");

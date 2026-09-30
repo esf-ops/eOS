@@ -9,6 +9,8 @@ import {
   normalizePublicationStatus
 } from "./studioPublicationSummary.mjs";
 
+const FUTURE_VALID_THROUGH = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
 console.log("\nstudioPublicationSummary.test.mjs\n");
 
 const estimate = { id: "est-1", revision: 2, status: "approved" };
@@ -35,7 +37,7 @@ const estimate = { id: "est-1", revision: 2, status: "approved" };
     status: "active",
     revisionNumber: 2,
     publishedAt: "2026-07-24T12:00:00Z",
-    pricingValidThrough: "2026-08-22",
+    pricingValidThrough: FUTURE_VALID_THROUGH,
     customerUrl: "https://example.test/de/abc",
     linkStatus: "active"
   };

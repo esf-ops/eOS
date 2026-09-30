@@ -29,7 +29,7 @@ export function publishedScopeIncludesSinkCutout(args) {
     }
     if (!key.startsWith(`sink:${roomKey}:`)) continue;
     const mode = key.split(":")[2] || "";
-    if (mode !== "customer_provided" && mode !== "customer" && mode !== "stock") continue;
+    if (mode !== "customer_provided" && mode !== "customer" && mode !== "stock" && mode !== "esf") continue;
     const included = Boolean(opt?.included_in_baseline ?? opt?.includedInBaseline);
     const defaultQty = Number(opt?.default_qty ?? opt?.defaultQty ?? 0);
     if (included || defaultQty > 0) return true;
@@ -65,6 +65,25 @@ export function publishedScopeIncludesSinkCutout(args) {
   }
 
   return false;
+}
+
+/**
+ * The catalog sink staff published for a room (baseline `sink:<room>:esf:<id>`
+ * option), or null when the published sink is customer-provided / none.
+ * @param {string} roomKey
+ * @param {Array<object>|null|undefined} envelopeOptions
+ * @returns {string|null}
+ */
+export function publishedCatalogSinkProductId(roomKey, envelopeOptions) {
+  const prefix = `sink:${String(roomKey || "").trim()}:esf:`;
+  for (const opt of envelopeOptions || []) {
+    const key = String(opt?.option_key || opt?.optionKey || "");
+    if (!key.startsWith(prefix)) continue;
+    const included = Boolean(opt?.included_in_baseline ?? opt?.includedInBaseline);
+    const defaultQty = Number(opt?.default_qty ?? opt?.defaultQty ?? 0);
+    if (included || defaultQty > 0) return key.slice(prefix.length) || null;
+  }
+  return null;
 }
 
 /**

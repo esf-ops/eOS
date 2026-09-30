@@ -14,8 +14,7 @@ import {
 } from "./currentConfigDeltaEngine.mjs";
 import {
   buildTrustedConfigurationContext,
-  rejectClientAuthoritativeEconomics,
-  serverApprovedOptionCatalog
+  rejectClientAuthoritativeEconomics
 } from "./configurationTrustedContext.mjs";
 import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
@@ -275,7 +274,7 @@ export function createAmendmentStudioService(deps) {
       };
     });
 
-    const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
+    const catalog = new Map(ctx.optionCatalogInternal.map((o) => [o.optionKey, o]));
     const calcOptions = [];
     for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
       if (key.startsWith("material:")) continue;
@@ -331,7 +330,7 @@ export function createAmendmentStudioService(deps) {
       rooms,
       frozenBaseRates: ctx.frozenBaseRates,
       authorizedMaterialMarkup: { bps: markupBps },
-      materialTaxPolicy: { bps: 200 },
+      materialTaxPolicy: { bps: ctx.materialTaxPolicy.bps },
       options: calcOptions,
       baseline: {
         exactTotal: ctx.baselineDisplayTotal,
@@ -687,7 +686,7 @@ export function createAmendmentStudioService(deps) {
         publishedAt,
         pricingValidThrough,
         totals: {
-          estimatedProjectTotal: Math.round(Number(configuredTotal)),
+          estimatedProjectTotal: Math.round(Number(configuredTotal) * 100) / 100,
           currency: "USD",
           rounding: "integer_usd"
         },
@@ -717,7 +716,7 @@ export function createAmendmentStudioService(deps) {
         reviewRequestId: amd.review_request_id,
         priorPublicationId: amd.source_publication_id,
         amendmentCalculationFingerprint: amd.final_calculation_fingerprint,
-        customerDisplayTotal: Math.round(Number(configuredTotal)),
+        customerDisplayTotal: Math.round(Number(configuredTotal) * 100) / 100,
         // Do not include internal rates in customer path; keep internal evidence server-side only
         internalEvidenceRef: true
       };

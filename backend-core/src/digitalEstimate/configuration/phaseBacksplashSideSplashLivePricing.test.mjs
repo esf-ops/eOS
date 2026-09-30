@@ -97,6 +97,7 @@ function eliteHeader() {
       materialProgramDefault: "elite_100",
       totals: { retail: 5000, wholesale: 4600, estimated_sqft: 46 },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 5000,
         estimate_rooms: [ROOM_EVIDENCE],
@@ -127,7 +128,7 @@ async function seed() {
     materialProgramDefault: "elite_100",
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
-      internal_ui: { estimate_rooms: [ROOM_EVIDENCE] }
+      internal_ui: { pricing_basis: "direct", estimate_rooms: [ROOM_EVIDENCE] }
     }
   };
   snap.customer_snapshot_json = {

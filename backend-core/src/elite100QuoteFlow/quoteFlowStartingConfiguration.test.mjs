@@ -189,4 +189,34 @@ function confirmedFromBody(body) {
   console.log("ok: backsplash defaults/rules remain intact via seed projection");
 }
 
+{
+  const cfg = patchStartingConfiguration(emptyStartingConfiguration(), {
+    quote: { materialGroup: "Group B", colorName: "Project White", colorTbd: false },
+    rooms: [
+      { roomId: "old-kitchen-id", roomName: "Kitchen", materialGroup: "Group C", colorName: "Calacatta Fioressa" },
+      { roomId: "r-vanity", roomName: "Primary Bath", colorTbd: true },
+      { roomId: "gone", roomName: "Laundry", colorName: "Nope" }
+    ]
+  });
+  const scope = applyStartingConfigurationToScope(
+    {
+      rooms: [
+        { id: "r-kitchen-new", name: "Kitchen", pieces: [] },
+        { id: "r-vanity", name: "Primary Bath", pieces: [] }
+      ],
+      addOns: {}
+    },
+    cfg
+  );
+  const kitchen = scope.rooms.find((r) => r.id === "r-kitchen-new");
+  assert.equal(kitchen.colorNameOverride, "Calacatta Fioressa", "re-extracted room id matched by unique name");
+  assert.equal(kitchen.materialGroupOverride, "Group C");
+  const vanity = scope.rooms.find((r) => r.id === "r-vanity");
+  assert.equal(vanity.colorTbd, true, "room-level TBD carried into scope");
+  assert.equal(vanity.colorNameOverride, null);
+  const unmatched = scope.customerRequestedWarnings.find((w) => w.code === "starting_configuration_room_unmatched");
+  assert.deepEqual(unmatched?.roomIds, ["gone"], "unmatched room is reported, not silently dropped");
+  console.log("ok: Set Scope room colors survive room-id drift; room TBD carried; unmatched rooms reported");
+}
+
 console.log("\nAll quoteFlowStartingConfiguration tests passed.\n");

@@ -8,12 +8,16 @@ import {
   ELITE100_CONFIG_DELTA_ENGINE_ID
 } from "./currentConfigDeltaEngine.mjs";
 import { resolveMaterialRateCents } from "./elite100ConfigDeltaEngineV2.mjs";
+import { checkConfigurationSessionBinding, SESSION_MISMATCH_MESSAGE } from "./sessionBinding.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import {
   buildTrustedConfigurationContext,
-  rejectClientAuthoritativeEconomics,
-  serverApprovedOptionCatalog
+  rejectClientAuthoritativeEconomics
 } from "./configurationTrustedContext.mjs";
+import {
+  PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE,
+  resolvePublicationPricingPin
+} from "./publicationPricingPin.mjs";
 import { enrichElite100MaterialsWithCustomerImages } from "./elite100CustomerImageResolver.mjs";
 import {
   edgeProfileDisplayLabel,
@@ -86,9 +90,56 @@ import {
   sideSplashPieceDisplayName
 } from "../catalog/customerFacingCopy.mjs";
 import {
+  publishedCatalogSinkProductId,
   publishedScopeIncludesSinkCutout,
   sinkCutoutBaselineFlags
 } from "./sinkCutoutBaseline.mjs";
+
+/**
+ * Frozen price of the catalog sink staff published in a room: the amount the
+ * customer already pays inside the published total (never today's catalog).
+ * @returns {{ unitCents: number, quantity: number, label: string }|null}
+ */
+function publishedCatalogSinkPrice(roomKey, roomName, productId, publishedRoomPricing) {
+  const name = String(roomName || "").trim().toLowerCase();
+  for (const room of Array.isArray(publishedRoomPricing?.rooms) ? publishedRoomPricing.rooms : []) {
+    const id = String(room?.roomId || "").trim();
+    if (id !== roomKey && !(name && String(room?.roomName || "").trim().toLowerCase() === name)) continue;
+    for (const line of Array.isArray(room?.customerFacingLines) ? room.customerFacingLines : []) {
+      if (!String(line?.lineKey || "").startsWith("fab-sink-product-")) continue;
+      const quantity = Math.max(1, Math.floor(Number(line.quantity) || 1));
+      const amountCents = Math.trunc(Number(line.amountCents));
+      if (!Number.isFinite(amountCents)) continue;
+      return {
+        unitCents: Math.round(amountCents / quantity),
+        quantity,
+        label: String(line.label || "").replace(/^Sink — /, "") || productId
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Room → frozen staff-published catalog sink, for option price labels.
+ * @returns {Map<string, { productId: string, unitCents: number, quantity: number }>}
+ */
+function resolvePublishedCatalogSinks(envelopeOptions, ctx) {
+  const out = new Map();
+  const roomPricing =
+    ctx?.customerSnapshot?.roomPricing && typeof ctx.customerSnapshot.roomPricing === "object"
+      ? ctx.customerSnapshot.roomPricing
+      : null;
+  if (!roomPricing) return out;
+  for (const room of ctx?.rooms || []) {
+    const roomKey = String(room?.roomKey || "");
+    const productId = roomKey ? publishedCatalogSinkProductId(roomKey, envelopeOptions) : null;
+    if (!productId) continue;
+    const price = publishedCatalogSinkPrice(roomKey, room.displayName, productId, roomPricing);
+    if (price) out.set(roomKey, { productId, unitCents: price.unitCents, quantity: price.quantity });
+  }
+  return out;
+}
 import {
   buildQuoteLibraryCustomerConfigProjection
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
@@ -145,6 +196,16 @@ function exchangeUnavailable(reason) {
   const e = unavailable("Estimate unavailable", "DE-EXCHANGE-404");
   e.exchangeReason = reason;
   return e;
+}
+
+const PRICING_BLOCK_CODES = new Set([
+  "pricing_basis_unestablished",
+  "pricing_pin_invalid",
+  "pricing_rules_not_reproducible"
+]);
+
+function hasPricingBasisBlocker(ctx) {
+  return (ctx?.blockers || []).some((b) => PRICING_BLOCK_CODES.has(b.code));
 }
 
 function configUnavailable(message = "Configuration unavailable") {
@@ -547,6 +608,22 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     sell = edgeEffect.visibleDelta;
   }
 
+  // Sinks in a room where staff published a catalog sink: the published sink is
+  // included; alternatives show the difference from it (the save prices the same).
+  if (optionKey.startsWith("sink:") && ctx?.publishedSinks instanceof Map) {
+    const parsedSink = parseProductOptionKey(optionKey);
+    const published = parsedSink?.roomKey ? ctx.publishedSinks.get(parsedSink.roomKey) : null;
+    if (published && parsedSink.productId !== published.productId) {
+      if (parsedSink.mode === "esf" && sell != null) {
+        treatment = "delta";
+        sell = ((Math.round(Number(sell) * 100) - published.unitCents) * published.quantity) / 100;
+      } else if (parsedSink.mode === "customer_provided" || parsedSink.mode === "customer") {
+        treatment = "delta";
+        sell = -(published.unitCents * published.quantity) / 100;
+      }
+    }
+  }
+
   let sideSplashEffect = null;
   if (optionKey.startsWith("sidesplash:") || compat.role === "sidesplash_selection") {
     const parsed = parseProductOptionKey(optionKey);
@@ -858,7 +935,8 @@ function resolveConfiguredRoomChoiceAuthority(
  *   env?: NodeJS.ProcessEnv,
  *   deRepository: any,
  *   configurationRepository: any,
- *   pricingPolicyRepository?: any
+ *   pricingPolicyRepository?: any,
+ *   lifecycleRepository?: { getAcceptanceByPublication: Function } | null
  * }} deps
  */
 export function createPublicConfigurationService(deps) {
@@ -866,9 +944,29 @@ export function createPublicConfigurationService(deps) {
     deRepository,
     configurationRepository,
     pricingPolicyRepository = null,
+    lifecycleRepository = null,
     getSupabase = null
   } = deps;
   const env = deps.env ?? process.env;
+
+  /** Accepted configuration is immutable; lookup failure must not reopen it. */
+  async function assertConfigurationNotAccepted(organizationId, publicationId) {
+    if (!lifecycleRepository?.getAcceptanceByPublication) return;
+    let acceptance;
+    try {
+      acceptance = await lifecycleRepository.getAcceptanceByPublication(organizationId, publicationId);
+    } catch {
+      throw safeFail("persistence_failed", "Unable to save right now. Please try again.", 503);
+    }
+    if (acceptance) {
+      throw safeFail(
+        "configuration_locked",
+        "This estimate has already been accepted. Please contact Elite to request changes.",
+        423,
+        { recoverable: false, lifecycleFatal: false }
+      );
+    }
+  }
 
   async function resolvePublicationFromRawToken(rawToken) {
     const token = String(rawToken ?? "").trim();
@@ -967,6 +1065,23 @@ export function createPublicConfigurationService(deps) {
         activeEnvelope,
         publication
       );
+      // Published without an envelope because its pricing cannot be reproduced online.
+      if (lifecycle === "blocked" && !activeEnvelope && includeBaseline) {
+        const pinResolution = resolvePublicationPricingPin(snap.pricing_evidence_json);
+        if (!pinResolution.ok && PRICING_BLOCK_CODES.has(pinResolution.code)) {
+          return {
+            lifecycle: "blocked",
+            message: PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE,
+            blockedReason: "pricing_basis_unestablished",
+            estimate: baselineEstimate,
+            configuration: null,
+            readMode: "baseline",
+            session: session
+              ? { id: session.id, status: "blocked", rowVersion: session.row_version, expiresAt: session.expires_at }
+              : null
+          };
+        }
+      }
       return {
         lifecycle,
         message:
@@ -1005,9 +1120,11 @@ export function createPublicConfigurationService(deps) {
       pricingPolicyRepository
     });
     if (!ctx.canConfigure) {
+      const pricingBlocked = hasPricingBasisBlocker(ctx);
       return {
         lifecycle: "blocked",
-        message: "Configuration unavailable",
+        message: pricingBlocked ? PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE : "Configuration unavailable",
+        ...(pricingBlocked ? { blockedReason: "pricing_basis_unestablished" } : {}),
         estimate: baselineEstimate,
         configuration: null,
         session: {
@@ -1054,7 +1171,8 @@ export function createPublicConfigurationService(deps) {
       rooms: ctx.rooms || [],
       pricingBasis: ctx.pricingBasis || "direct",
       edgeLinearFeetTotal: Number(ctx.edgeLinearFeetTotal) || 0,
-      edgeOptionEffects: Array.isArray(ctx.edgeOptionEffects) ? ctx.edgeOptionEffects : []
+      edgeOptionEffects: Array.isArray(ctx.edgeOptionEffects) ? ctx.edgeOptionEffects : [],
+      publishedSinks: resolvePublishedCatalogSinks(graph?.options || [], ctx)
     };
     let options = (graph?.options || [])
       .filter((o) => o.is_active_in_envelope !== false)
@@ -1275,6 +1393,7 @@ export function createPublicConfigurationService(deps) {
           sourceDisplayName: r.displayName,
           baselineMaterialLabel: r.baselineMaterialLabel,
           baselineColorLabel: r.colorLabel || null,
+          customSlabPackage: r.customSlabPackage === true,
           // Measurements verified — numeric SF never projected publicly.
           measurementsLocked: true,
           measurementStatus: "Measurements verified by estimator",
@@ -1495,6 +1614,12 @@ export function createPublicConfigurationService(deps) {
       if (session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
         throw sessionRecoverable("session_invalid", "Please refresh and try again", "session_expired");
       }
+      if (checkConfigurationSessionBinding(session, body) === "session_mismatch") {
+        throw safeFail("session_mismatch", SESSION_MISMATCH_MESSAGE, 409, {
+          diagnosticCode: "DE-SESSION-MISMATCH",
+          recoverable: true
+        });
+      }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409, {
           diagnosticCode: "DE-CONFIGURATION-STALE",
@@ -1526,6 +1651,7 @@ export function createPublicConfigurationService(deps) {
       if (isPricingExpired(publication.pricing_valid_through)) {
         throw publicationLifecycle("publication_expired", "Pricing has expired", 410);
       }
+      await assertConfigurationNotAccepted(session.organization_id, publication.id);
 
       const activeEnvelope = await configurationRepository.getActiveEnvelope(
         session.organization_id,
@@ -1565,6 +1691,11 @@ export function createPublicConfigurationService(deps) {
         deRepository,
         pricingPolicyRepository
       });
+      if (hasPricingBasisBlocker(ctx)) {
+        const e = safeFail("pricing_basis_unestablished", PRICING_BASIS_UNESTABLISHED_CUSTOMER_MESSAGE, 409);
+        e.recoverable = false;
+        throw e;
+      }
       if (!ctx.canConfigure) throw configUnavailable();
       if (ctx.baselineDisplayTotal == null || !Number.isFinite(Number(ctx.baselineDisplayTotal))) {
         throw safeFail(
@@ -1653,7 +1784,9 @@ export function createPublicConfigurationService(deps) {
           const key = String(item.optionKey || item.option_key || "");
           const qty = Number(item.quantity ?? item.qty ?? 0);
           const remapped = key.startsWith("edge:") ? remapLegacyEdgeOptionKey(key) : key;
-          const opt = findEnvelopeOptionForSelectionKey(options, remapped, id);
+          const opt =
+            findEnvelopeOptionForSelectionKey(options, remapped, id) ||
+            (remapped !== key ? findEnvelopeOptionForSelectionKey(options, key, id) : null);
           if (!opt) {
             if (!(qty > 0)) continue;
             const priorQty = Number(priorSelections[remapped] || priorSelections[key] || 0);
@@ -1694,7 +1827,9 @@ export function createPublicConfigurationService(deps) {
         for (const [k, qtyRaw] of Object.entries(split.quantities || {})) {
           const remapped = k.startsWith("edge:") ? remapLegacyEdgeOptionKey(k) : k;
           const qty = Number(qtyRaw) || 0;
-          const opt = findEnvelopeOptionForSelectionKey(options, remapped, null);
+          const opt =
+            findEnvelopeOptionForSelectionKey(options, remapped, null) ||
+            (remapped !== k ? findEnvelopeOptionForSelectionKey(options, k, null) : null);
           if (!opt) {
             if (!(qty > 0)) continue;
             const priorQty = Number(priorSelections[remapped] || priorSelections[k] || 0);
@@ -2068,7 +2203,7 @@ export function createPublicConfigurationService(deps) {
 
       const edgeLfTotal = rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0);
       const pricingBasis = ctx.pricingBasis || "direct";
-      const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
+      const catalog = new Map(ctx.optionCatalogInternal.map((o) => [o.optionKey, o]));
 
       // Strip / reject sink-specific accessories that are incompatible with the current sink mode.
       // Orphans under No sink / Customer-provided are zeroed (not charged). Incompatible ESF pairs 422.
@@ -2147,6 +2282,18 @@ export function createPublicConfigurationService(deps) {
             customerSnapshot: ctx.customerSnapshot || null
           });
           const cutoutBaseline = sinkCutoutBaselineFlags(cutoutAlreadyPublished);
+          // Staff-published catalog sink: its frozen price is already inside the
+          // published total, so a switch is priced as the difference only.
+          const publishedSinkId = publishedCatalogSinkProductId(roomKey, options);
+          const publishedSink = publishedSinkId
+            ? publishedCatalogSinkPrice(roomKey, roomName, publishedSinkId, publishedRoomPricing)
+            : null;
+          if (publishedSinkId && !publishedSink) {
+            throw safeFail("requires_estimator_review", "Elite will confirm this sink change and price.", 422, {
+              selectionKey: String(key).slice(0, 160),
+              diagnosticCode: "DE-SINK-BASELINE-MISSING"
+            });
+          }
 
           if (parsed.mode === "none") continue;
 
@@ -2159,9 +2306,11 @@ export function createPublicConfigurationService(deps) {
             );
             calcOptions.push({
               optionKey: key,
-              displayLabel: "Customer-provided sink",
+              displayLabel: publishedSink
+                ? `Customer-provided sink (replaces ${publishedSink.label})`
+                : "Customer-provided sink",
               quantity: 1,
-              sellPrice: 0,
+              sellPrice: publishedSink ? -(publishedSink.unitCents * publishedSink.quantity) / 100 : 0,
               pricingMode: "per_each",
               customerPriceTreatment: "absolute",
               availabilityState: "active",
@@ -2253,7 +2402,11 @@ export function createPublicConfigurationService(deps) {
             const roomsOk = Array.isArray(resolved.product.roomEligibility)
               ? resolved.product.roomEligibility
               : [];
-            if (roomsOk.length && !productMatchesRoomType(roomsOk, roomType)) {
+            if (
+              roomsOk.length &&
+              !productMatchesRoomType(roomsOk, roomType) &&
+              parsed.productId !== publishedSinkId
+            ) {
               throw safeFail("invalid_selection", "That sink is not available for this room", 422, {
                 selectionKey: String(key).slice(0, 160),
                 diagnosticCode: "DE-SAVE"
@@ -2268,17 +2421,27 @@ export function createPublicConfigurationService(deps) {
               const sinkName = finishLabel
                 ? `${resolved.product.displayName} · ${finishLabel}`
                 : resolved.product.displayName;
+              const isPublishedSink = publishedSink && parsed.productId === publishedSinkId;
               calcOptions.push({
                 optionKey: key,
-                displayLabel: `ESF Sink — ${sinkName}`,
+                displayLabel:
+                  publishedSink && !isPublishedSink
+                    ? `ESF Sink — ${sinkName} (replaces ${publishedSink.label})`
+                    : `ESF Sink — ${sinkName}`,
                 quantity: 1,
-                sellPrice: resolved.sellPrice,
+                sellPrice: publishedSink
+                  ? isPublishedSink
+                    ? publishedSink.unitCents / 100
+                    : (Math.round(Number(resolved.sellPrice) * 100) - publishedSink.unitCents) *
+                      publishedSink.quantity /
+                      100
+                  : resolved.sellPrice,
                 pricingMode: "per_each",
                 customerPriceTreatment: "absolute",
                 availabilityState: "active",
-                includedInBaseline: false,
-                defaultQty: 0,
-                baselineQuantity: 0
+                includedInBaseline: Boolean(isPublishedSink),
+                defaultQty: isPublishedSink ? 1 : 0,
+                baselineQuantity: isPublishedSink ? 1 : 0
               });
             }
             const cutoutKey = cutoutKeyForSinkSelection(roomType, resolved.product);
@@ -2620,7 +2783,7 @@ export function createPublicConfigurationService(deps) {
         lockedScope: { edgeLinearFeetTotal: edgeLfTotal },
         frozenBaseRates: ctx.frozenBaseRates,
         authorizedMaterialMarkup: { bps: markupBps },
-        materialTaxPolicy: { bps: 200 },
+        materialTaxPolicy: { bps: ctx.materialTaxPolicy.bps },
         options: calcOptions,
         // Distinct per customer selection payload (color IDs), not only material group.
         selectionFingerprint: normalized.selectionHash,

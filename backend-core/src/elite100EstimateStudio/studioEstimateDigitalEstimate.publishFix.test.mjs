@@ -27,6 +27,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const FUTURE_VALID_THROUGH = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CASE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const TAKEOFF_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -288,12 +289,12 @@ console.log("\nstudioEstimateDigitalEstimate.publishFix.test.mjs\n");
   const row = approvedEstimateRow();
   await seedApproved(studioRepo, row);
   const configuration = {
-    pricingValidThrough: "2026-08-18",
+    pricingValidThrough: FUTURE_VALID_THROUGH,
     allowedOptionKeys: ["qty-sink"]
   };
   const readiness = await svc.assessReadiness(ORG, row.id, configuration);
   assert.equal(readiness.readiness.eligible, true, readiness.readiness.message);
-  assert.equal(readiness.readiness.details.pricingValidThrough, "2026-08-18");
+  assert.equal(readiness.readiness.details.pricingValidThrough, FUTURE_VALID_THROUGH);
 
   const published = await svc.publish({
     organizationId: ORG,

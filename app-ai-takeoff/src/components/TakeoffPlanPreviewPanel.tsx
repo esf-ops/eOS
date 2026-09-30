@@ -56,13 +56,18 @@ export default function TakeoffPlanPreviewPanel({
     [file]
   );
 
+  /** 1 = fit width. Images scale in a scrollable frame; PDFs use the viewer's #zoom. */
+  const [zoom, setZoom] = useState(1);
+
   const pdfPreviewUrl = useMemo(() => {
     if (!signedUrl || previewMode !== "pdf") return signedUrl;
-    const page = Number(focusPage);
-    if (!Number.isFinite(page) || page < 1) return signedUrl;
     const base = signedUrl.split("#")[0];
-    return `${base}#page=${Math.floor(page)}`;
-  }, [signedUrl, previewMode, focusPage]);
+    const frag: string[] = [];
+    const page = Number(focusPage);
+    if (Number.isFinite(page) && page >= 1) frag.push(`page=${Math.floor(page)}`);
+    frag.push(zoom === 1 ? "view=FitH" : `zoom=${Math.round(zoom * 100)}`);
+    return `${base}#${frag.join("&")}`;
+  }, [signedUrl, previewMode, focusPage, zoom]);
 
   useEffect(() => {
     if (!file || !token || file.status === "archived") {
@@ -135,7 +140,7 @@ export default function TakeoffPlanPreviewPanel({
     };
   }, [file?.quoteFileId, file?.status, token, refreshKey]);
 
-  const handleOpenPlan = useCallback(async () => {
+  const handleOpenPlan = useCallback(async (separateWindow = false) => {
     if (!file || !token) return;
     setOpening(true);
     setError(null);
@@ -152,7 +157,12 @@ export default function TakeoffPlanPreviewPanel({
         });
         setSignedUrl(url);
       }
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (separateWindow) {
+        // Named popup (reused on repeat clicks) so staff can park it on a second monitor.
+        window.open(url, "eliteos-plan-drawing", "popup,noopener,noreferrer,width=1200,height=900");
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     } catch (e) {
       setError(e instanceof LabApiError ? e.message : "Could not open plan.");
     } finally {
@@ -194,14 +204,50 @@ export default function TakeoffPlanPreviewPanel({
           <h2 className="plan-preview-title">Plan preview</h2>
           <p className="plan-preview-filename">{file.originalFilename}</p>
         </div>
-        <button
-          type="button"
-          className="btn secondary btn-sm plan-preview-open-btn"
-          disabled={opening || !token}
-          onClick={() => void handleOpenPlan()}
-        >
-          {opening ? "Opening…" : "Open plan"}
-        </button>
+        <div className="plan-preview-toolbar" role="toolbar" aria-label="Drawing controls">
+          {previewMode === "image" || previewMode === "pdf" ? (
+            <>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                data-testid="plan-preview-zoom-out"
+                aria-label="Zoom out"
+                disabled={zoom <= 0.5}
+                onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                data-testid="plan-preview-zoom-fit"
+                aria-label="Fit to width"
+                onClick={() => setZoom(1)}
+              >
+                {zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%`}
+              </button>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                data-testid="plan-preview-zoom-in"
+                aria-label="Zoom in"
+                disabled={zoom >= 4}
+                onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.25) * 100) / 100))}
+              >
+                +
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="btn secondary btn-sm plan-preview-open-btn"
+            data-testid="plan-preview-separate-window"
+            disabled={opening || !token}
+            onClick={() => void handleOpenPlan(true)}
+          >
+            {opening ? "Opening…" : "Separate window"}
+          </button>
+        </div>
       </header>
 
       {loading ? (
@@ -225,11 +271,15 @@ export default function TakeoffPlanPreviewPanel({
       ) : null}
 
       {!loading && !error && signedUrl && previewMode === "image" ? (
-        <div className="plan-preview-frame plan-preview-frame--image">
+        <div className="plan-preview-frame plan-preview-frame--image plan-preview-frame--zoomable">
           <img
             src={signedUrl}
             alt={`Plan: ${file.originalFilename}`}
             className="plan-preview-img"
+            data-testid="plan-preview-img"
+            style={
+              zoom === 1 ? undefined : { width: `${zoom * 100}%`, maxWidth: "none", maxHeight: "none" }
+            }
           />
         </div>
       ) : null}
@@ -237,6 +287,7 @@ export default function TakeoffPlanPreviewPanel({
       {!loading && !error && signedUrl && previewMode === "pdf" ? (
         <div className="plan-preview-frame plan-preview-frame--pdf">
           <object
+            key={pdfPreviewUrl || signedUrl}
             data={pdfPreviewUrl || signedUrl}
             type="application/pdf"
             className="plan-preview-object"

@@ -148,13 +148,14 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     );
   }
   if (scope.quoteFlowScopeEdited === true || scope.quoteFlowManualEdits === true) {
+    // updatedAt also moves on acceptance, sold and pricing writes, so it is only a last resort.
+    const editedAt =
+      (typeof scope.quoteFlowScopeEditedAt === "string" && scope.quoteFlowScopeEditedAt) ||
+      (!row.staleReason && row.calculationSnapshot?.calculatedAt) ||
+      row.updatedAt ||
+      null;
     timeline.push(
-      timelineEvent(
-        "scope_edited",
-        "Official scope edited",
-        row.updatedAt || null,
-        "Manual edits on official scope."
-      )
+      timelineEvent("scope_edited", "Official scope edited", editedAt, "Manual edits on official scope.")
     );
   } else if (isOfficialScopeSet(row)) {
     timeline.push(
@@ -298,19 +299,44 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
   }
 
   if (acceptancePresented?.acceptedAt) {
+    const acceptedTotal = Number(acceptancePresented.customerDisplayTotal);
+    const totalText = Number.isFinite(acceptedTotal)
+      ? ` for $${acceptedTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : "";
+    const how =
+      acceptancePresented.acceptanceMode === "as_quoted"
+        ? "Accepted as quoted (online changes were not offered)"
+        : acceptancePresented.selectionSource === "customer_configured"
+          ? "Accepted with customer-configured selections"
+          : "Accepted as published";
     timeline.push(
       timelineEvent(
         "customer_accepted",
         "Customer accepted Digital Estimate",
         acceptancePresented.acceptedAt,
-        acceptancePresented.selectionSource === "customer_configured"
-          ? "Accepted with customer-configured selections."
-          : "Accepted as published.",
+        `${how}${totalText}.`,
         {
           publicationId: acceptancePresented.publicationId || null,
           customerDisplayTotal: acceptancePresented.customerDisplayTotal,
-          selectionSource: acceptancePresented.selectionSource
+          selectionSource: acceptancePresented.selectionSource,
+          acceptanceMode: acceptancePresented.acceptanceMode || null
         }
+      )
+    );
+  }
+
+  const sold = opts.soldSnapshot && typeof opts.soldSnapshot === "object" ? opts.soldSnapshot : null;
+  const soldAt = sold ? sold.sold_at || sold.soldAt || null : null;
+  if (soldAt) {
+    const soldTotal = Number(sold.customer_display_total ?? sold.customerDisplayTotal);
+    timeline.push(
+      timelineEvent(
+        "marked_sold",
+        "Marked sold",
+        soldAt,
+        Number.isFinite(soldTotal)
+          ? `Sold at $${soldTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+          : null
       )
     );
   }
@@ -656,6 +682,16 @@ export function createQuoteFlowActivityService(deps = {}) {
       selectionReview
     });
 
+    /** @type {object|null} */
+    let soldSnapshot = null;
+    if (acceptance && lifecycleRepository?.getSoldSnapshotForEstimate) {
+      try {
+        soldSnapshot = await lifecycleRepository.getSoldSnapshotForEstimate(organizationId, row.id || estimateId);
+      } catch {
+        soldSnapshot = null;
+      }
+    }
+
     return buildQuoteFlowActivityPayload(row, {
       publications,
       activePublication,
@@ -663,6 +699,7 @@ export function createQuoteFlowActivityService(deps = {}) {
       publicationEvents,
       selectionReview,
       acceptance,
+      soldSnapshot,
       acceptedReport,
       actorUserId,
       env,

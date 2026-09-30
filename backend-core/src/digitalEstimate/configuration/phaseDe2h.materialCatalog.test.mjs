@@ -75,6 +75,7 @@ function eliteHeader(group = "Group B") {
       materialProgramDefault: "elite_100",
       totals: { retail: 5000, wholesale: 4500, estimated_sqft: 40 },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 5000,
         estimate_rooms: [
@@ -270,6 +271,7 @@ function eliteHeader(group = "Group B") {
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
       internal_ui: {
+        pricing_basis: "direct",
         estimate_rooms: [
           { id: "kitchen", name: "Kitchen", countertopSqft: 40, materialGroup: "group_b", colorName: "Alabaster" }
         ]

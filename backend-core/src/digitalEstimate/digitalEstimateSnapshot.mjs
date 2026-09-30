@@ -11,6 +11,7 @@ import {
 import { sha256CanonicalJson } from "./digitalEstimateToken.mjs";
 import { buildRoomPricingPublishSnapshot } from "./configuration/roomPricingPublishSnapshot.mjs";
 import { dollarsToCents } from "./configuration/money.mjs";
+import { pinForNewPublication } from "./configuration/publicationPricingPin.mjs";
 
 /**
  * @param {{
@@ -30,7 +31,7 @@ export function buildPublicationFreezePayloads(input) {
   const iu =
     snapshot.internal_ui && typeof snapshot.internal_ui === "object" ? snapshot.internal_ui : {};
 
-  const customerDisplayTotal = Math.round(Number(iu.customer_display_total));
+  const customerDisplayTotal = Math.round(Number(iu.customer_display_total) * 100) / 100;
   const printSnap =
     iu.customer_estimate_print_snapshot && typeof iu.customer_estimate_print_snapshot === "object"
       ? iu.customer_estimate_print_snapshot
@@ -60,7 +61,7 @@ export function buildPublicationFreezePayloads(input) {
     totals: {
       estimatedProjectTotal: customerDisplayTotal,
       currency: "USD",
-      rounding: "integer_usd"
+      rounding: "exact_cents"
     },
     notes,
     disclosures: {
@@ -87,10 +88,16 @@ export function buildPublicationFreezePayloads(input) {
     materialProgramDefault: iu.material_program_default ?? snapshot.materialProgramDefault ?? null,
     calculationSnapshotCopy: snapshot,
     customerDisplayTotal,
-    printSnapshotFinalRounded: printSnap ? Math.round(Number(printSnap.finalRounded)) : null,
+    printSnapshotFinalRounded: printSnap ? Math.round(Number(printSnap.finalRounded) * 100) / 100 : null,
     calculationEngineVersion: input.calculationEngineVersion || DIGITAL_ESTIMATE_ENGINE_VERSION,
     termsDisclosureVersion: input.termsDisclosureVersion || DIGITAL_ESTIMATE_TERMS_VERSION,
-    frozenAt: input.publishedAt
+    frozenAt: input.publishedAt,
+    // Customer changes on this publication are priced from this pin only (never the current
+    // schedule). Internal evidence; never projected to public DTOs.
+    pricingPin: pinForNewPublication({
+      pricingBasis: iu.pricing_basis ?? snapshot.pricingBasis ?? null,
+      pricingRuleEvidence: snapshot.pricingRuleEvidence ?? null
+    })
   };
 
   const sourceQuoteFingerprint = sha256CanonicalJson({
@@ -130,6 +137,7 @@ function buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, publis
       // Estimator fabrication quantities (sink cutout, ESF sink, cooktop, …)
       // freeze as named Original Add-ons so the customer hierarchy is complete.
       fabricationAddOns,
+      fabricationSinkLines: Array.isArray(iu.fabrication_sink_lines) ? iu.fabrication_sink_lines : null,
       customerDisplayTotalCents: dollarsToCents(Number(customerDisplayTotal) || 0),
       createdAt: publishedAt || null
     });

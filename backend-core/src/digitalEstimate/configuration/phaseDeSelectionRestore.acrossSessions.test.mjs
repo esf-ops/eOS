@@ -12,6 +12,8 @@ import { createConfigurationStudioService } from "./configurationStudioService.m
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ESF_DIRECT_PRICE_PER_SQFT } from "../../quotes/quoteCalculator.js";
+import { ELITE100_CUTOUT_RATES } from "../../elite100EstimateStudio/elite100RoomPricingCalculator.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -55,7 +57,17 @@ async function seedPublication(opts = {}) {
       materialGroup: "Group Promo",
       materialProgramDefault: "elite_100",
       totals: { retail: 8361, wholesale: 8000, estimated_sqft: 68 },
+      pricingRuleEvidence: {
+        schema: 1,
+        pricingBasis: "direct",
+        materialRateTable: { ...ESF_DIRECT_PRICE_PER_SQFT },
+        materialUseTaxPercent: 2,
+        cutoutRates: { ...ELITE100_CUTOUT_RATES },
+        rooms: [{ roomKey: roomId, materialGroup: "Group Promo", ratePerSf: ESF_DIRECT_PRICE_PER_SQFT["Group Promo"], rateSource: "elite100_v4_fallback_table", materialUseTaxPercent: 2 }],
+        accountRules: { wattsTrusted: false, spahnTrusted: false, estimateWideAdjustmentPercent: 0 }
+      },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 8361,
         estimate_rooms: [
@@ -308,7 +320,11 @@ async function seedPublication(opts = {}) {
     join(__dirname, "../../../../app-digital-estimate/src/App.tsx"),
     "utf8"
   );
-  assert.ok(app.includes("key={configState.session?.id"));
+  assert.ok(
+    app.includes("configState.estimate?.quoteNumber") && app.includes("configState.estimate?.revisionNumber"),
+    "ConfigurationView remounts per publication revision, not per session (recovery keeps unsaved choices)"
+  );
+  assert.ok(!app.includes("key={configState.session?.id"));
   console.log("ok: view-model / App prefer persisted draft over baseline Carrara");
 }
 

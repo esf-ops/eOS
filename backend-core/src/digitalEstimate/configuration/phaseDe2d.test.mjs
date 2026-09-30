@@ -34,6 +34,9 @@ import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationP
 import { calculateAndPersistConfigurationDelta } from "./configurationCalculationService.mjs";
 import { ELITE100_CONFIG_DELTA_ENGINE_ID } from "./currentConfigDeltaEngine.mjs";
 import { ELITE100_ESTIMATE_STUDIO_HEAD_SLUG } from "../../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
+import { pinForNewPublication } from "./publicationPricingPin.mjs";
+import { ESF_DIRECT_PRICE_PER_SQFT } from "../../quotes/quoteCalculator.js";
+import { ELITE100_CUTOUT_RATES } from "../../elite100EstimateStudio/elite100RoomPricingCalculator.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -58,12 +61,28 @@ function evidenceWithRooms(rooms) {
     materialProgramDefault: "elite_100",
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
-      internal_ui: { estimate_rooms: rooms }
+      internal_ui: { pricing_basis: "direct", estimate_rooms: rooms }
     }
   };
 }
 
-function seedPublicationPair(deRepo, cfgRepo, overrides = {}) {
+/** Pin frozen from a Studio calculation of 10 SF Group B at $85 with the given account rules. */
+function pinnedFromCalculation(accountRules) {
+  return pinForNewPublication({
+    pricingBasis: "direct",
+    pricingRuleEvidence: {
+      schema: 1,
+      pricingBasis: "direct",
+      materialRateTable: { ...ESF_DIRECT_PRICE_PER_SQFT },
+      materialUseTaxPercent: 2,
+      cutoutRates: { ...ELITE100_CUTOUT_RATES },
+      rooms: [{ roomKey: "kitchen", materialGroup: "Group B", ratePerSf: 85, rateSource: "elite100_v4_fallback_table", materialUseTaxPercent: 2 }],
+      accountRules
+    }
+  });
+}
+
+function seedPublicationPair(deRepo, cfgRepo, overrides = {}, { pricingPin = null } = {}) {
   const publication = {
     id: PUB,
     organization_id: ORG,
@@ -87,14 +106,17 @@ function seedPublicationPair(deRepo, cfgRepo, overrides = {}) {
       project: { customerName: "Acme Cabinets", name: "Kitchen remodel" },
       totals: { estimatedProjectTotal: 870 }
     },
-    pricing_evidence_json: evidenceWithRooms([
-      {
-        id: "kitchen",
-        name: "Kitchen",
-        countertopSqft: 10,
-        materialGroup: "group_b"
-      }
-    ]),
+    pricing_evidence_json: {
+      ...evidenceWithRooms([
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          countertopSqft: 10,
+          materialGroup: "group_b"
+        }
+      ]),
+      ...(pricingPin ? { pricingPin } : {})
+    },
     customer_snapshot_hash: publication.customer_snapshot_hash,
     pricing_evidence_hash: publication.pricing_evidence_hash
   };
@@ -382,7 +404,9 @@ function createDualDeRepo() {
   const seeded = pricing.seedConfirmedElite100Fixtures(ORG);
   await pricing.addAccountGroupMember(ORG, seeded.wattsAccountGroupId, WATTS_ACCT);
   const cfgRepo = createInMemoryConfigurationRepository({ pricingPolicyRepository: pricing });
-  seedPublicationPair(deRepo, cfgRepo);
+  seedPublicationPair(deRepo, cfgRepo, {}, {
+    pricingPin: pinnedFromCalculation({ wattsTrusted: true, spahnTrusted: false, estimateWideAdjustmentPercent: 0 })
+  });
   deRepo.seedQuoteHeader({ id: QUOTE, organization_id: ORG, partner_account_id: WATTS_ACCT });
 
   const svc = createConfigurationStudioService({
@@ -412,7 +436,15 @@ function createDualDeRepo() {
   const seeded = pricing.seedConfirmedElite100Fixtures(ORG);
   await pricing.addAccountGroupMember(ORG, seeded.spahnAccountGroupId, SPAHN_ACCT);
   const cfgRepo = createInMemoryConfigurationRepository({ pricingPolicyRepository: pricing });
-  seedPublicationPair(deRepo, cfgRepo);
+  seedPublicationPair(deRepo, cfgRepo, {}, {
+    pricingPin: pinnedFromCalculation({
+      wattsTrusted: false,
+      spahnTrusted: true,
+      estimateWideAdjustmentPercent: 3,
+      estimateWideAdjustmentSource: "trusted_account_rule",
+      accountAdjustmentAmount: 26.1
+    })
+  });
   deRepo.seedQuoteHeader({ id: QUOTE, organization_id: ORG, partner_account_id: SPAHN_ACCT });
   const svc = createConfigurationStudioService({
     deRepository: deRepo,
@@ -445,6 +477,52 @@ function createDualDeRepo() {
   assert.equal(withOption.internalPreview.spahnAdjustment, 6);
   assert.equal(withOption.internalPreview.configuredExactTotal, 1076);
   console.log("ok: Spahn trusted +3% on selection delta only");
+}
+
+// --- Trusted-account rules come from the pin, never current membership ---
+{
+  // Pinned without Spahn, then the account joins Spahn later: no 3% on customer changes.
+  const deRepo = createDualDeRepo();
+  const pricing = createInMemoryPricingPolicyRepository();
+  const seeded = pricing.seedConfirmedElite100Fixtures(ORG);
+  await pricing.addAccountGroupMember(ORG, seeded.spahnAccountGroupId, SPAHN_ACCT);
+  const cfgRepo = createInMemoryConfigurationRepository({ pricingPolicyRepository: pricing });
+  seedPublicationPair(deRepo, cfgRepo, {}, {
+    pricingPin: pinnedFromCalculation({ wattsTrusted: false, spahnTrusted: false, estimateWideAdjustmentPercent: 0 })
+  });
+  deRepo.seedQuoteHeader({ id: QUOTE, organization_id: ORG, partner_account_id: SPAHN_ACCT });
+  const svc = createConfigurationStudioService({ deRepository: deRepo, configurationRepository: cfgRepo, pricingPolicyRepository: pricing });
+  const draft = await svc.createDraft(ORG, PILOT_ID, PUB, {});
+  const withOption = await svc.preview(
+    ORG,
+    draft.envelope.id,
+    { roomSelections: { kitchen: "group_b" }, optionQuantities: { "qty-sink": 1 } },
+    PILOT_ID
+  );
+  assert.equal(withOption.internalPreview.exactDelta, 200);
+  assert.equal(withOption.internalPreview.spahnAdjustment, 0);
+
+  // A manual estimate-wide % is not extended to customer changes: blocked, contact Elite.
+  const manualPin = pinnedFromCalculation({
+    wattsTrusted: false,
+    spahnTrusted: false,
+    estimateWideAdjustmentPercent: 5,
+    estimateWideAdjustmentSource: "manual",
+    accountAdjustmentAmount: 43.5
+  });
+  assert.deepEqual(manualPin.repricingBlockedReasons, ["estimate_wide_adjustment:manual"]);
+
+  // Legacy (pre-pin) publication for a trusted account: the account pricing used is unknown.
+  const deRepo2 = createDualDeRepo();
+  const cfgRepo2 = createInMemoryConfigurationRepository({ pricingPolicyRepository: pricing });
+  seedPublicationPair(deRepo2, cfgRepo2);
+  deRepo2.seedQuoteHeader({ id: QUOTE, organization_id: ORG, partner_account_id: WATTS_ACCT });
+  const svc2 = createConfigurationStudioService({ deRepository: deRepo2, configurationRepository: cfgRepo2, pricingPolicyRepository: pricing });
+  await assert.rejects(
+    () => svc2.createDraft(ORG, PILOT_ID, PUB, {}),
+    (e) => e.statusCode === 422 && /account pricing it used was not recorded/.test(e.message)
+  );
+  console.log("ok: account rules come only from the pin; manual adjustment and legacy trusted-account publications block");
 }
 
 // --- Cross-org denial ---

@@ -272,7 +272,8 @@ function makeStore(initialRows) {
   assert.match(routes, /digital-estimate/);
   assert.doesNotMatch(routes, /markSold|approveWorkingDraft|takeoff-finish/);
   const reviewSrc = readFileSync(join(__dirname, "quoteFlowReview.mjs"), "utf8");
-  assert.doesNotMatch(reviewSrc, /publishApproved\(|markSold\(|from ["'].*digitalEstimate/);
+  // The read-only material catalog is the only digitalEstimate module review may import.
+  assert.doesNotMatch(reviewSrc, /publishApproved\(|markSold\(|from ["'].*digitalEstimate\/(?!configuration\/elite100CustomerMaterialCatalog\.mjs["'])/);
   assert.doesNotMatch(reviewSrc, /studioDigitalEstimate|publishDigital/);
   console.log("ok: route/source contracts; no DE publish / sold");
 }

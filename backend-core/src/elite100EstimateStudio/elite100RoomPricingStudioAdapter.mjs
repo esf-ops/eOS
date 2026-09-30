@@ -257,6 +257,7 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
       // Estimator-owned commercial adjustment — calculator already honors this field.
       // Must be forwarded; dropping it silently zeroes accountAdjustment on every V4 calc.
       estimateWideAdjustment: normalizeEstimateWideAdjustment(src.estimateWideAdjustment),
+      slabPackages: Array.isArray(src.slabPackages) ? src.slabPackages : [],
       rooms,
       customLines
     },
@@ -302,6 +303,27 @@ export function scopeVanityProgramElection(scope, roomId) {
   };
 }
 
+/**
+ * The estimator's sink decision for a room (`roomConfigurations[roomId].sink`):
+ * a specific ESF catalog product, or an explicit customer-provided sink.
+ * Null when staff has not decided.
+ * @param {object} scope
+ * @param {string} roomId
+ * @returns {{ mode: "catalog", productId: string } | { mode: "customer_provided", productId: null } | null}
+ */
+export function scopeRoomSinkDecision(scope, roomId) {
+  const cfg = scope?.roomConfigurations?.[String(roomId)]?.sink;
+  if (!cfg || typeof cfg !== "object") return null;
+  if (cfg.mode === "catalog") {
+    const productId = String(cfg.productId ?? "").trim();
+    return productId ? { mode: "catalog", productId } : null;
+  }
+  if (cfg.mode === "customer_provided") return { mode: "customer_provided", productId: null };
+  return null;
+}
+
+const RETIRED_SINK_PRODUCT_KEYS = Object.freeze(["qty-ss", "qty-blanco", "qty-v-rect", "qty-v-oval"]);
+
 export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
   const src = scope || {};
   const rooms = includedRooms(src);
@@ -321,6 +343,8 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     const mat = resolveRoomMaterialGroup(src, room);
     const cfg = ensureRoom(roomId);
     cfg.materialGroup = mat.group;
+    const slabPackageId = String(room.slabPackageId ?? "").trim();
+    if (slabPackageId) cfg.slabPackageId = slabPackageId;
     if (roomHasBacksplashSelected(room)) {
       const heightIn = Number(room.backsplashHeightIn) > 0 ? Number(room.backsplashHeightIn) : 4;
       cfg.backsplash = { selected: true, heightIn };
@@ -531,6 +555,15 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
       if (targetRoomId) ensureRoom(targetRoomId).cutouts.electricalOutletQuantity = outletQty;
     }
   }
+  // Staff sink decision: a chosen catalog product is priced on each of the room's
+  // sink openings (one cutout per opening, charged once, plus the product price).
+  const catalogSinkRoomIds = new Set();
+  for (const [roomId, cfg] of Object.entries(configRooms)) {
+    const decision = scopeRoomSinkDecision(src, roomId);
+    if (decision?.mode !== "catalog" || !cfg.sinks.length) continue;
+    cfg.sinks = cfg.sinks.map((sink) => ({ ...sink, productId: decision.productId }));
+    catalogSinkRoomIds.add(roomId);
+  }
   for (const key of RETIRED_ADDON_KEYS) {
     const qty = Math.max(0, Math.floor(Number(addOns[key]) || 0));
     if (qty <= 0) continue;
@@ -541,6 +574,13 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
       isKitchenRetired ? defaultKitchenRoomId : defaultVanityRoomId,
       isKitchenRetired ? ambiguousKitchen : ambiguousVanity
     );
+    if (RETIRED_SINK_PRODUCT_KEYS.includes(key) && catalogSinkRoomIds.has(String(targetRoomId))) {
+      warnings.push({
+        code: "adapter_retired_sink_replaced_by_catalog_sink",
+        message: `Studio add-on "${key}" was replaced by the sink chosen for room "${targetRoomId}".`
+      });
+      continue;
+    }
     extraCustomLines.push({
       id: `adapter-${key}`,
       description: `${unit?.name || key} (legacy retired SKU)`,
@@ -748,10 +788,15 @@ function buildActiveReviewSummary(result) {
   return {
     countertopMaterialGroups,
     countertopMaterialTotal: sumLineItemsLabeled("Countertop Material"),
+    slabPackageTotal: round2(
+      (result?.customerFacing?.slabPackages || []).reduce((s, p) => s + (Number(p.total) || 0), 0)
+    ),
     materialTaxTotal: sumLineItemsLabeled("Material Use Tax"),
     backsplashPresent,
     backsplashTotal: sumLineItemsLabeled("Backsplash"),
     fabricationTotal,
+    // Sink products (same dollars as in fabricationTotal), shown on their own line.
+    sinkProductsTotal: sumLineItemsLabeled("Sinks"),
     // Typed cutout charges for estimator display (same dollars as in fabricationTotal).
     cutoutLines: (() => {
       const byLabel = new Map();
@@ -787,9 +832,11 @@ export function mergePricedCutoutsIntoFabricationAddOns(scopeAddOns, pricedRooms
   let vanityBar = 0;
   let cooktop = 0;
   let outlet = 0;
+  let pricedCutoutRooms = 0;
   for (const room of Array.isArray(pricedRooms) ? pricedRooms : []) {
     const c = room?.cutouts && typeof room.cutouts === "object" ? room.cutouts : null;
     if (!c) continue;
+    pricedCutoutRooms += 1;
     kitchenSink += Math.max(0, Math.floor(Number(c.kitchenSinkQty) || 0));
     vanityBar += Math.max(0, Math.floor(Number(c.vanitySinkQty) || 0));
     cooktop += Math.max(0, Math.floor(Number(c.cooktopQty) || 0));
@@ -799,6 +846,12 @@ export function mergePricedCutoutsIntoFabricationAddOns(scopeAddOns, pricedRooms
   // existing scope.addOns (covers non-priced / empty-room edge cases).
   if (kitchenSink > 0) addOns["qty-sink"] = kitchenSink;
   if (vanityBar > 0) addOns["qty-bar"] = vanityBar;
+  // Sink cutouts the calculator did not charge (e.g. included in a Vanity Program
+  // bundle) must not be frozen as named charges.
+  if (pricedCutoutRooms > 0) {
+    if (kitchenSink === 0) delete addOns["qty-sink"];
+    if (vanityBar === 0) delete addOns["qty-bar"];
+  }
   if (cooktop > 0) addOns["qty-cook"] = cooktop;
   if (outlet > 0) addOns["qty-outlet"] = outlet;
   return addOns;
@@ -857,6 +910,7 @@ export async function calculateStudioEstimateV4(params = {}) {
     // diagnostics/audit. Never required by v3-shaped consumers above.
     elite100: {
       rooms: result.rooms,
+      slabPackages: result.slabPackages || [],
       estimateCustomLines: result.estimateCustomLines,
       customerFacing: result.customerFacing,
       snapshot: result.snapshot,

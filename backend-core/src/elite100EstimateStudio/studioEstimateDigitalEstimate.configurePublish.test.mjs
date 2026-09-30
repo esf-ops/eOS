@@ -21,6 +21,7 @@ import {
   buildCustomerChoiceConfiguration
 } from "./studioCustomerChoiceOptions.mjs";
 import { decideConfigurationView } from "../../../app-digital-estimate/src/configurationBootstrap.ts";
+import { withRealV4RateEvidence } from "./studioV4CalcTestEvidence.mjs";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CASE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -47,7 +48,7 @@ function allChoiceConfig() {
   return buildCustomerChoiceConfiguration(flags, []);
 }
 
-function approvedRow(fingerprint) {
+function approvedRowBase(fingerprint) {
   const id = randomUUID();
   return {
     id,
@@ -96,6 +97,12 @@ function approvedRow(fingerprint) {
     staleReason: null,
     supersededAt: null
   };
+}
+
+const V4_RATE_EVIDENCE = (await withRealV4RateEvidence({}, approvedRowBase("fp").scope)).elite100;
+function approvedRow(fingerprint) {
+  const row = approvedRowBase(fingerprint);
+  return { ...row, calculationSnapshot: row.calculationSnapshot && { elite100: V4_RATE_EVIDENCE, ...row.calculationSnapshot } };
 }
 
 async function harness() {
@@ -521,6 +528,67 @@ console.log("\nstudioEstimateDigitalEstimate.configurePublish.test.mjs\n");
     "prior publication restored to active"
   );
   console.log("ok: failed configure publish preserves previous working link");
+}
+
+// Pricing online repricing cannot reproduce (a manual estimate-wide %) still publishes view-only: no envelope, published total shown, customer asked to contact Elite for changes.
+{
+  const { studioRepo, deRepo, cfgRepo, svc, pubSvc } = await harness();
+  const row = approvedRow("fp-cfg-manual-adj");
+  row.calculationSnapshot = {
+    ...row.calculationSnapshot,
+    totals: {
+      ...row.calculationSnapshot.totals,
+      accountAdjustment: 398.14,
+      estimateWideAdjustment: { percentage: 5, reason: "builder discount", source: "manual" }
+    }
+  };
+  await studioRepo.create({ ...row, createdByUserId: ACTOR });
+  await studioRepo.update(
+    ORG,
+    row.id,
+    {
+      status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+      calculationSnapshot: row.calculationSnapshot,
+      approval: row.approval,
+      pricingEngine: "quoteCalculator",
+      pricingVersion: 2
+    },
+    ACTOR
+  );
+  const published = await svc.publish({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: { confirm: true, idempotencyKey: "cfg-manual-adj", configuration: allChoiceConfig() }
+  });
+  assert.equal(published.ok, true);
+  assert.ok(published.accessToken);
+  assert.equal(published.envelope.configured, false);
+  assert.equal(published.envelope.reason, "pricing_rules_not_reproducible");
+  assert.equal(published.envelope.customerCanChangeOnline, false);
+  assert.match(published.envelope.message, /estimate_wide_adjustment:manual/);
+  assert.equal(await cfgRepo.getActiveEnvelope(ORG, published.publication.id), null);
+  const pub = await deRepo.getPublication(ORG, published.publication.id);
+  assert.equal(pub.status, "active", "publication stays live, not revoked");
+
+  const exchange = await pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+  assert.equal(exchange.state.lifecycle, "blocked");
+  assert.match(exchange.state.message, /contact Elite/i);
+  assert.equal(exchange.state.configuration, null);
+  assert.equal(exchange.state.estimate.totals.estimatedProjectTotal, 8361, "published total shown unchanged");
+
+  // Republishing reuses the same view-only publication instead of failing a repair.
+  const again = await svc.publish({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: { confirm: true, idempotencyKey: "cfg-manual-adj", configuration: allChoiceConfig() }
+  });
+  assert.equal(again.ok, true);
+  assert.equal(again.publication.id, published.publication.id);
+  assert.equal(again.envelope.reason, "pricing_rules_not_reproducible");
+  assert.match(again.staffNotice, /without online changes/);
+  console.log("ok: unreproducible pricing publishes view-only with the contact-Elite message; republish reuses it");
 }
 
 console.log("\nAll configure-publish tests passed.\n");

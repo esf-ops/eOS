@@ -20,6 +20,7 @@ import { createStudioEstimateService } from "./studioEstimateService.mjs";
 import { createStudioEstimateDigitalEstimateService } from "./studioEstimateDigitalEstimateService.mjs";
 import { createStudioV2Service } from "./studioV2Service.mjs";
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
+import { withRealV4RateEvidence } from "./studioV4CalcTestEvidence.mjs";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ACTOR = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -40,7 +41,7 @@ const ENV_ON = {
   NODE_ENV: "development"
 };
 
-const fakeCalc = {
+const fakeCalcBase = {
   fingerprint: "v2-repair-fp",
   calculatedAt: "2026-08-03T18:00:00.000Z",
   pricingVersion: 4,
@@ -50,6 +51,7 @@ const fakeCalc = {
   unresolvedItems: [],
   fabrication: { customLineItems: [] }
 };
+const fakeCalc = await withRealV4RateEvidence(fakeCalcBase, approvedScope());
 
 function approvedScope() {
   return {

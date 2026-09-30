@@ -158,6 +158,57 @@ assert.match(pricingPanel, /qf-pricing-edge-status|Edge profile|Pending/);
 assert.match(pricingPanel, /Included \/ no charge/);
 assert.match(pricingPanel, /Net custom adjustment/);
 assert.match(api, /customLineItems/);
+{
+  const slab = readFileSync(join(appRoot, "src/estimates/CustomSlabPackagesSection.tsx"), "utf8");
+  assert.match(pricingPanel, /qf-pricing-room-material-source/);
+  assert.match(pricingPanel, /Elite 100 collection/);
+  assert.match(pricingPanel, /slabPackageId: r\.slabPackageId \|\| null/);
+  assert.match(pricingPanel, /<CustomSlabPackagesSection/);
+  for (const id of ["slab-length", "slab-width", "slab-cost", "slab-confirmed", "slab-use-suggested", "slab-override-reason", "slab-waste"]) {
+    assert.match(slab, new RegExp(`qf-pricing-${id}`));
+  }
+  assert.match(slab, /not a cutting layout/);
+  assert.match(slab, /<details>/, "uncommon slab settings stay under expandable details");
+  assert.doesNotMatch(slab, /fetch\(|apiFetch|Math\.ceil|\* 2\.25/, "slab pricing stays server-side");
+  assert.match(api, /slabPackages\?: QuoteFlowSlabPackageInput\[\]/);
+  console.log("ok: custom slab package UI wired (server-priced, confirm + override reason)");
+}
+{
+  const sinks = readFileSync(join(appRoot, "src/estimates/SinkSelectionsSection.tsx"), "utf8");
+  assert.match(pricingPanel, /<SinkSelectionsSection/);
+  assert.match(pricingPanel, /sinkSelections: Object\.values\(sinkEdits\)/, "only changed rooms are sent");
+  assert.doesNotMatch(pricingPanel, /assign a supplied sink product via custom/, "old custom-line sink hint removed");
+  for (const id of ["qf-pricing-sinks", "qf-pricing-sink-select", "qf-pricing-sink-program-type", "qf-pricing-sink-required"]) {
+    assert.match(sinks, new RegExp(id));
+  }
+  assert.match(sinks, /Customer-provided sink/);
+  assert.doesNotMatch(sinks, /fetch\(|apiFetch/, "sink choices are validated and priced by Brain");
+  assert.match(api, /sinkSelections\?: QuoteFlowSinkSelectionInput\[\]/);
+  console.log("ok: staff sink selection UI wired (per room, program sink type, Brain-validated)");
+}
+{
+  const de = readFileSync(join(appRoot, "src/estimates/OfficialDigitalEstimatePanel.tsx"), "utf8");
+  assert.match(de, /data-testid="qf-de-customer-preview"/);
+  assert.match(de, /open=\{!isPublished\}/, "preview is expanded before publishing");
+  assert.match(de, /customerRooms/);
+  assert.match(de, /Nothing is sent or\s+published from this preview/);
+  for (const label of ["Sink run", "Stove left", "Stove right", "Island", "Vanity"]) {
+    assert.match(editor, new RegExp(`"${label}"`));
+  }
+  assert.match(editor, /list="qf-scope-piece-labels"/, "standard labels are suggestions; custom text still allowed");
+  assert.match(editor, /VANITY_DEPTH_DEFAULT_IN = 22\.5/);
+  assert.match(editor, /qf-scope-vanity-depth-apply/);
+  assert.match(editor, /qf-scope-vanity-depth-revert/);
+  assert.match(editor, /extractedDepthIn/, "extracted depth is preserved");
+  const planPanel = readFileSync(
+    join(appRoot, "../app-ai-takeoff/src/components/TakeoffPlanPreviewPanel.tsx"),
+    "utf8"
+  );
+  for (const id of ["plan-preview-zoom-in", "plan-preview-zoom-out", "plan-preview-zoom-fit", "plan-preview-separate-window"]) {
+    assert.match(planPanel, new RegExp(id));
+  }
+  console.log("ok: customer preview, standard piece labels, vanity depth default, drawing zoom/window");
+}
 assert.match(styles, /qf-pricing__custom-lines|qf-pricing__line-row/);
 assert.match(page, /OfficialReviewPanel/);
 assert.match(page, /qf-estimates-section-review/);
@@ -238,7 +289,20 @@ assert.match(activityCss, /\.qf-activity__status-card/);
 assert.match(activityCss, /\.qf-accepted/);
 assert.match(activityCss, /\.qf-accepted__internal-tag/);
 assert.match(page, /key: "activity"[\s\S]*active: true/);
-assert.match(page, /key: "handoff"[\s\S]*active: false/);
+assert.match(page, /key: "handoff"[\s\S]*active: true/);
+assert.match(page, /OfficialSoldAccountingPanel/);
+{
+  const soldPanel = readFileSync(join(appRoot, "src/estimates/OfficialSoldAccountingPanel.tsx"), "utf8");
+  assert.match(soldPanel, /qf-sold-checklist/);
+  assert.match(soldPanel, /qf-sold-confirm/, "Mark Sold requires an explicit confirmation step");
+  assert.match(soldPanel, /qf-sold-qb-status/);
+  assert.match(soldPanel, /qf-sold-qb-ref/);
+  assert.match(soldPanel, /qf-sold-qb-candidates/);
+  assert.match(soldPanel, /No invoice is created/);
+  assert.doesNotMatch(soldPanel, /Create invoice|InvoiceAdd|sendEmail/i);
+  assert.match(api, /\/mark-sold/);
+  assert.match(api, /\/sales-order\/customer-job/);
+}
 assert.match(api, /selectionReview|QuoteFlowActivitySelectionReview/);
 assert.match(api, /accepted-report|fetchQuoteFlowAcceptedReport/);
 console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + Activity tabs; no Takeoff/V1/V2");

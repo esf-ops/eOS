@@ -115,4 +115,20 @@ assert.ok(viewSrc.includes("All changes saved") || viewSrc.includes("Saving…")
 assert.ok(vmSrc.includes("normalizePricingGroupLabel"));
 console.log("ok: regression anchors present");
 
+// A rolled-back save must never read as "All changes saved" (Marshal: 401 save looked saved).
+assert.match(viewSrc, /setLastSaveReverted\(true\);\s*\/\/ Cleared pending[^\n]*\n\s*setSaveState\("saved"\)/);
+assert.match(viewSrc, /setSaveError\(null\);\s*setLastSaveReverted\(false\);/);
+assert.equal(
+  (viewSrc.match(/lastSaveReverted && \(saveState === "idle" \|\| saveState === "saved"\)/g) || []).length,
+  2,
+  "both save-status surfaces show the not-saved message before 'All changes saved'",
+);
+assert.match(viewSrc, /const sessionLost =[\s\S]{0,300}err\.status === 401/);
+assert.ok(viewSrc.includes("because your session ended. Reload this page to keep editing"));
+// Session recovery swaps the session mid-save; remounting would discard the retry's outcome.
+const appSrc = readFileSync(join(__dirname, "App.tsx"), "utf8");
+assert.doesNotMatch(appSrc, /<ConfigurationView[\s\S]{0,80}key=\{configState\.session/);
+assert.match(appSrc, /<ConfigurationView\s+key=\{`\$\{configState\.estimate\?\.quoteNumber/);
+console.log("ok: failed save shows 'last change wasn't saved', not 'All changes saved'");
+
 console.log("\nphaseCspSelectionConflictSaveUi.ui.test.mjs PASSED\n");

@@ -284,27 +284,23 @@ console.log("\nstudioEstimateService.test.mjs\n");
   console.log("ok: approve idempotent for same calculation snapshot");
   console.log("ok: unresolved commercial items block approval");
 
-  await service.updateScope({
+  // Approved revisions are immutable: a scope edit forks an editable draft and
+  // the approved revision stays approved (and active) until the draft publishes.
+  const stale = await service.updateScope({
     organizationId: ORG_A,
     estimateId: priced2b.id,
     actorUserId: "user-1",
     body: { materialGroup: "Group B" }
   });
-  const stale = await service.getOrCreateForCase({
-    organizationId: ORG_A,
-    intakeCaseId: "case-1",
-    takeoffJobId: "job-1",
-    actorUserId: "user-1"
-  });
-  assert.notEqual(stale.status, STUDIO_ESTIMATE_STATUSES.APPROVED);
+  assert.equal(stale.status, STUDIO_ESTIMATE_STATUSES.DRAFT);
   assert.ok(stale.staleReason);
   assert.notEqual(stale.id, priced2b.id, "scope change after approval opens a new revision");
   assert.equal(stale.revision, Number(priced2b.revision || 1) + 1);
   const history = await repo.listByIntakeCase(ORG_A, "case-1");
   const prior = history.find((r) => r.id === priced2b.id);
-  assert.equal(prior?.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED);
+  assert.equal(prior?.status, STUDIO_ESTIMATE_STATUSES.APPROVED);
   assert.equal(prior?.approval?.calculationFingerprint, approved.approval.calculationFingerprint);
-  console.log("ok: approval becomes stale after scope change; approved snapshot preserved");
+  console.log("ok: scope change after approval forks a draft; approved snapshot preserved unchanged");
 
   // Approve while Takeoff snapshot is still result-1, then flip snapshot.
   const priced3 = await service.calculate({

@@ -33,6 +33,8 @@ import {
   setConfigurationSessionCookie
 } from "./publicConfigurationSession.mjs";
 import { readSafeSyntheticPilotConfig } from "../syntheticPilotGuard.mjs";
+import { SESSION_MISMATCH_MESSAGE } from "./sessionBinding.mjs";
+import { resolveStudioLifecycleRepositoryForRoutes } from "../../elite100EstimateStudio/studioLifecycleRepositoryFactory.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -68,7 +70,8 @@ const SAFE_PUBLIC_ERROR_CODES = new Set([
   "publication_unavailable",
   "publication_superseded",
   "persistence_failed",
-  "no_current_review_request"
+  "no_current_review_request",
+  "configuration_locked"
 ]);
 
 const SAFE_DIAGNOSTIC_CODES = new Set([
@@ -155,6 +158,28 @@ function safeDiagnosticCode(e, status, safeCode) {
   return "DE-STATE";
 }
 
+/**
+ * Injected stacks (tests) opt in via deps.lifecycleRepository. Supabase mounts always
+ * enforce the lock; if lifecycle persistence cannot be resolved, saves fail closed.
+ */
+function resolveAcceptanceLockRepository(deps, env) {
+  if (deps.lifecycleRepository) return deps.lifecycleRepository;
+  if (deps.configurationRepository) return null;
+  try {
+    return resolveStudioLifecycleRepositoryForRoutes({ env, getSupabase: deps.getSupabase });
+  } catch (e) {
+    console.error(
+      "[digital-estimate-public-config] acceptance lock repository unavailable",
+      e?.code || "error"
+    );
+    return {
+      async getAcceptanceByPublication() {
+        throw e;
+      }
+    };
+  }
+}
+
 function publicError(res, e, stageHint = "token_exchange") {
   let status = Number(e?.statusCode) || 0;
   // Selection-stage failures without an explicit status must not become lifecycle 404s.
@@ -163,7 +188,9 @@ function publicError(res, e, stageHint = "token_exchange") {
   }
   const code = e?.code || (stageHint === "selection" ? "persistence_failed" : "not_found");
   let message = "Estimate unavailable";
-  if (code === "origin_rejected" || code === "origin_not_configured") {
+  if (code === "configuration_locked") {
+    message = "This estimate has already been accepted. Please contact Elite to request changes.";
+  } else if (code === "origin_rejected" || code === "origin_not_configured") {
     message = "Configuration unavailable";
   } else if (
     code === "session_required" ||
@@ -171,6 +198,8 @@ function publicError(res, e, stageHint = "token_exchange") {
     code === "session_invalid"
   ) {
     message = "Please refresh and try again";
+  } else if (code === "session_mismatch") {
+    message = SESSION_MISMATCH_MESSAGE;
   } else if (status === 409 || code === "row_version_conflict" || code === "stale_configuration") {
     message = "This estimate changed in another session. We restored the latest saved version.";
   } else if (
@@ -346,6 +375,7 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     deRepository,
     configurationRepository,
     pricingPolicyRepository,
+    lifecycleRepository: resolveAcceptanceLockRepository(deps, env),
     getSupabase
   });
 

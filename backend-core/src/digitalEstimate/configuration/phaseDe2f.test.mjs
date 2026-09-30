@@ -37,6 +37,25 @@ import { maybeAttachDigitalEstimateReviewRequestRoutes } from "./reviewRequestRo
 import { maybeAttachDigitalEstimateAmendmentRoutes } from "./amendmentRoutes.js";
 import { generateConfigurationSessionSecret } from "./publicConfigurationSession.mjs";
 import { resetDigitalEstimatePublicRateLimitsForTests } from "../digitalEstimateRateLimit.mjs";
+import { pinForNewPublication, resolvePublicationPricingPin } from "./publicationPricingPin.mjs";
+import { ESF_DIRECT_PRICE_PER_SQFT } from "../../quotes/quoteCalculator.js";
+import { ELITE100_CUTOUT_RATES } from "../../elite100EstimateStudio/elite100RoomPricingCalculator.mjs";
+
+// Publication calculated with a Pricing Admin override (Group B $88, not the $85 default).
+const SOURCE_PIN = pinForNewPublication({
+  pricingBasis: "direct",
+  pricingRuleEvidence: {
+    schema: 1,
+    pricingBasis: "direct",
+    materialRateTable: { ...ESF_DIRECT_PRICE_PER_SQFT },
+    materialUseTaxPercent: 2,
+    cutoutRates: { ...ELITE100_CUTOUT_RATES },
+    rooms: [
+      { roomKey: "kitchen", materialGroup: "Group B", ratePerSf: 88, rateSource: "pricing_admin_override", materialUseTaxPercent: 2 }
+    ],
+    accountRules: { wattsTrusted: false, spahnTrusted: false, estimateWideAdjustmentPercent: 0 }
+  }
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -82,6 +101,7 @@ function eliteHeader() {
       materialProgramDefault: "elite_100",
       totals: { retail: 870, wholesale: 800, estimated_sqft: 10 },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 870,
         customer_estimate_customer_facing_notes: "Thank you.",
@@ -112,9 +132,11 @@ async function seedStack() {
   const snap = deRepo._dump().snapshots[0];
   snap.pricing_evidence_json = {
     materialProgramDefault: "elite_100",
+    pricingPin: SOURCE_PIN,
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
       internal_ui: {
+        pricing_basis: "direct",
         estimate_rooms: [
           { id: "kitchen", name: "Kitchen", countertopSqft: 10, materialGroup: "group_b" }
         ]
@@ -552,6 +574,18 @@ async function openConfiguredSession(stack) {
   );
   assert.equal(again.reused, true);
   assert.equal(again.accessToken, null);
+
+  // The replacement publication keeps the source's pricing basis and pin byte-for-byte;
+  // repricing only happens through a staff Studio republish.
+  const newSnap = stack.deRepo._dump().snapshots.find((s) => s.publication_id === active[0].id);
+  assert.ok(newSnap, "replacement publication has its own snapshot");
+  assert.notEqual(newSnap.publication_id, oldPubId);
+  assert.deepEqual(newSnap.pricing_evidence_json.pricingPin, SOURCE_PIN);
+  assert.equal(newSnap.pricing_evidence_json.calculationSnapshotCopy.internal_ui.pricing_basis, "direct");
+  const resolved = resolvePublicationPricingPin(newSnap.pricing_evidence_json);
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.pin.rates.direct.group_b, 88);
+  assert.equal(resolved.pin.rateSetId, SOURCE_PIN.rateSetId);
 
   // No quote_headers mutation API on DE repository
   assert.equal(typeof stack.deRepo.insertQuoteHeader, "undefined");

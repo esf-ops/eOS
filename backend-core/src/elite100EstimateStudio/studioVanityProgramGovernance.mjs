@@ -248,7 +248,11 @@ export function buildVanityProgramScopePatch(input = {}) {
     [roomId]: {
       ...existing,
       vanityProgram: input.apply === true
-        ? { applyProgram: true, useStandardPricing: false }
+        ? {
+            applyProgram: true,
+            useStandardPricing: false,
+            ...(existing.vanityProgram?.sinkType ? { sinkType: existing.vanityProgram.sinkType } : {})
+          }
         : { applyProgram: false, useStandardPricing: true }
     }
   };

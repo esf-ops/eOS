@@ -114,6 +114,8 @@ class ConfiguratorErrorBoundary extends Component<
   }
 }
 
+const LAST_CHANGE_NOT_SAVED = "Your last change wasn’t saved. Your previous estimate is shown.";
+
 export function ConfigurationView(props: Props) {
   return (
     <ConfiguratorErrorBoundary>
@@ -667,8 +669,9 @@ function ProductCards({
               role === "sink" ? sinkBowlLabel(p) : null,
               role === "sink" ? sinkDimensionLabel(p) : null,
             ].filter(Boolean);
-            const priceLabel =
-              p.visibleDelta != null && Number.isFinite(Number(p.visibleDelta))
+            const priceLabel = p.includedInBaseline
+              ? "Included"
+              : p.visibleDelta != null && Number.isFinite(Number(p.visibleDelta))
                 ? Number(p.visibleDelta) >= 0
                   ? `+$${Math.round(Number(p.visibleDelta)).toLocaleString("en-US")}`
                   : `−$${Math.round(Math.abs(Number(p.visibleDelta))).toLocaleString("en-US")}`
@@ -838,6 +841,7 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
             : fromCatalog?.variants) || [],
         visibleSellPrice: o.visibleSellPrice ?? null,
         visibleDelta: o.visibleDelta ?? null,
+        includedInBaseline: Boolean(o.includedInBaseline),
       };
       const images = resolveProductImageFields(product);
       product.imageUrl = images.thumbnailUrl || fromCatalog?.imageUrl || o.imageAssetRef || null;
@@ -1395,8 +1399,9 @@ function formatMoneyLabel(n: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(Number(n)));
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.round(Number(n) * 100) / 100);
 }
 
 function formatSignedMoney(n: number | null | undefined): string {
@@ -1700,7 +1705,9 @@ function CustomerRoomCard({
   onEdgeChange?: (optionKey: string) => void;
   catalogPermissions?: Record<string, boolean> | null;
 }) {
-  const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
+  const color =
+    room.colors.find((c) => c.id === room.selectedColorId) ||
+    (room.selectedColorId || !room.selectedColorName ? room.colors[0] : undefined);
   const has = (role: string) => room.choiceOptions.some((c) => c.role === role);
   const hasSideSplash = room.sideSplashPieces.length > 0;
   const allowed = (key: string) =>
@@ -1788,7 +1795,16 @@ function CustomerRoomCard({
       </header>
 
       <div className="mt-5 grid gap-2.5 pl-2" data-testid="de-room-selections">
-        {allowed("material") || color ? (
+        {room.customSlabPackage && !color ? (
+          <SelectionRow
+            label="Material"
+            value={room.selectedColorName || room.baselineLabel || "Custom slab"}
+            detail="Custom slab selection. Contact Elite to change the material."
+            readOnly
+            onClick={() => {}}
+            testId="de-custom-slab-material"
+          />
+        ) : allowed("material") || color ? (
           <SelectionRow
             label="Material"
             value={color?.name || room.selectedColorName || "Choose a material"}
@@ -2087,10 +2103,13 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   /** Last server-confirmed calculation — authoritative Your estimate source. */
   const [savedCalc, setSavedCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
+  const sessionIdRef = useRef<string | null>(state.session?.id ?? null);
+  if (state.session?.id) sessionIdRef.current = state.session.id;
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved" | "error">(
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastSaveReverted, setLastSaveReverted] = useState(false);
   const [accessoryNotice, setAccessoryNotice] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<{ roomId: string; kind: Exclude<ModalKind, null> } | null>(
     null,
@@ -2173,7 +2192,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         if (alive && r.reviewRequest) setReviewRequest(r.reviewRequest);
       })
       .catch(() => undefined);
-    void fetchCurrentFinalAcceptance()
+    void fetchCurrentFinalAcceptance(sessionIdRef.current)
       .then((r) => {
         if (alive && r.acceptance) setFinalAcceptance(r.acceptance);
       })
@@ -2393,6 +2412,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     saveInFlightRef.current = true;
     setSaveState("saving");
     setSaveError(null);
+    setLastSaveReverted(false);
     const seq = ++requestSeq.n;
     const effectiveQty = opts?.qtyOverride || qtyRef.current;
     const effectiveProductDrafts = opts?.productDraftsOverride || productDraftsRef.current;
@@ -2430,6 +2450,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       const result = await saveConfigurationSelections({
         items,
         expectedRowVersion: rowVersionRef.current,
+        ...(sessionIdRef.current ? { expectedSessionId: sessionIdRef.current } : {}),
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
         customerInfoDraft: effectiveInfo,
         roomLabelDrafts: effectiveLabels,
@@ -2518,6 +2539,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         (err.code === "session_required" ||
           err.code === "session_not_found" ||
           err.code === "session_invalid" ||
+          err.code === "session_mismatch" ||
           err.diagnosticCode === "DE-COOKIE" ||
           err.status === 401)
       ) {
@@ -2525,6 +2547,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           const recovered = await exchangeFragmentToken(accessToken);
           if (recovered.lifecycle === "active" && recovered.configuration) {
             onState(recovered);
+            if (recovered.session?.id) sessionIdRef.current = recovered.session.id;
             const recoveredVersion = recovered.session?.rowVersion;
             if (recoveredVersion != null) {
               setRowVersion(recoveredVersion);
@@ -2609,8 +2632,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       setProductDrafts({ ...savedProductDrafts });
       productDraftsRef.current = { ...savedProductDrafts };
       setLatestCalc(savedCalc);
-      const restoreMsg =
-        err.code === "selection_unavailable" ||
+      const sessionLost =
+        err.status === 401 ||
+        err.code === "session_required" ||
+        err.code === "session_not_found" ||
+        err.code === "session_invalid" ||
+        err.diagnosticCode === "DE-COOKIE";
+      const restoreMsg = sessionLost
+        ? "Your change wasn’t saved because your session ended. Reload this page to keep editing. Your previous estimate is shown."
+        : err.code === "selection_unavailable" ||
         err.code === "invalid_selection" ||
         err.code === "unknown_option" ||
         err.code === "option_not_allowed" ||
@@ -2624,6 +2654,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               ? err.message
               : "We couldn’t save your change. Your previous estimate has been restored. Please try again.";
       setSaveError(restoreMsg);
+      setLastSaveReverted(true);
       // Cleared pending — UI returns to saved state; error banner remains until dismissed.
       setSaveState("saved");
       pendingSaveRef.current = false;
@@ -2652,6 +2683,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       }
       const result = await submitReviewRequest({
         expectedRowVersion: reviewRowVersion,
+        ...(sessionIdRef.current ? { expectedSessionId: sessionIdRef.current } : {}),
         idempotencyKey: `review-${formId}-${reviewRequest?.requestReference || "new"}`,
         customerNote: note || undefined,
       });
@@ -2681,6 +2713,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       const result = await submitFinalAcceptance({
         confirm: true,
         confirmation: "accept_final_estimate",
+        expectedRowVersion: rowVersionRef.current,
+        expectedSessionId: sessionIdRef.current || "",
+        ...(acceptMode ? { expectedAcceptMode: acceptMode } : {}),
       });
       setFinalAcceptance(result.acceptance);
       setAcceptOpen(false);
@@ -3264,6 +3299,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         >
           {saveError ? (
             <span className="block text-destructive">{saveError}</span>
+          ) : lastSaveReverted && (saveState === "idle" || saveState === "saved") ? (
+            <span className="block text-destructive">{LAST_CHANGE_NOT_SAVED}</span>
           ) : saveState === "idle" || saveState === "saved" ? (
             "All changes saved"
           ) : null}
@@ -3465,9 +3502,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           >
             {saveError
               ? saveError
-              : saveState === "idle" || saveState === "saved"
-                ? "All changes saved"
-                : null}
+              : lastSaveReverted && (saveState === "idle" || saveState === "saved")
+                ? LAST_CHANGE_NOT_SAVED
+                : saveState === "idle" || saveState === "saved"
+                  ? "All changes saved"
+                  : null}
             {!saveError && saveState === "unsaved" ? "Saving…" : null}
             {!saveError && saveState === "saving" ? "Saving…" : null}
           </p>

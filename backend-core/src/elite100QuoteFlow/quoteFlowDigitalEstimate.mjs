@@ -116,7 +116,10 @@ export function buildQuoteFlowCustomerPublishPreview(row, opts = {}) {
     });
   }
 
-  const customerLines = Array.isArray(publicDto?.lineItems) ? publicDto.lineItems : [];
+  const dtoEstimate =
+    publicDto?.estimate && typeof publicDto.estimate === "object" ? publicDto.estimate : publicDto || {};
+  const customerLines = Array.isArray(dtoEstimate.lineItems) ? dtoEstimate.lineItems : [];
+  const customerRoomsDto = Array.isArray(dtoEstimate.rooms) ? dtoEstimate.rooms : [];
   const customLines = readQuoteFlowCustomLineItems(row?.scope || {});
   const internalLabels = customLines
     .filter((l) => l.visibility === "internal" && l.type !== "note")
@@ -144,11 +147,29 @@ export function buildQuoteFlowCustomerPublishPreview(row, opts = {}) {
 
   return {
     customerDisplayTotal:
-      publicDto?.totals?.customerDisplayTotal ??
-      freeze.customerSnapshot?.totals?.customerDisplayTotal ??
+      dtoEstimate.totals?.estimatedProjectTotal ??
+      freeze.customerSnapshot?.totals?.estimatedProjectTotal ??
       null,
     lineItems: customerLines,
-    roomCount: Array.isArray(publicDto?.rooms) ? publicDto.rooms.length : 0,
+    roomCount: customerRoomsDto.length,
+    /** Exactly the public room projection the customer page renders. */
+    customerRooms: customerRoomsDto.map((r, i) => {
+      const pricingRooms = Array.isArray(dtoEstimate.roomPricing?.rooms) ? dtoEstimate.roomPricing.rooms : [];
+      const priced =
+        pricingRooms.find((p) => p?.roomName && p.roomName === r?.name) || pricingRooms[i] || null;
+      return {
+        name: r?.name ?? null,
+        materialLabel: r?.materialLabel ?? null,
+        colorLabel: r?.colorLabel ?? null,
+        summaryLines: Array.isArray(r?.summaryLines) ? r.summaryLines : [],
+        countertopAmount: priced ? Number(priced.countertopAmount) || 0 : null,
+        roomTotal: priced ? Number(priced.roomTotal) || 0 : null,
+        addOnLines: (Array.isArray(priced?.addOnLines) ? priced.addOnLines : []).map((l) => ({
+          label: String(l?.label || ""),
+          amount: Number(l?.displayAmount ?? l?.amount) || 0
+        }))
+      };
+    }),
     sourceQuoteFingerprint: freeze.sourceQuoteFingerprint || null,
     edgeLinearFeetTotal: Math.round(edgeLinearFeetTotal * 100) / 100,
     rooms: rooms.map((r) => ({
@@ -597,6 +618,13 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
     const row = await loadEstimateRow(organizationId, estimateId);
     assertScoped(row);
     const activePublication = await loadActivePublication(organizationId, estimateId);
+    const recorded = row?.scope?.quoteFlowDigitalEstimate || null;
+    const activePublicationId =
+      activePublication?.id || activePublication?.publicationId || recorded?.publicationId || null;
+    const onlineChangesBlocked =
+      recorded?.customerCanChangeOnline === false &&
+      Boolean(activePublicationId) &&
+      recorded.publicationId === activePublicationId;
     const assessed = assessQuoteFlowDigitalEstimateReadiness(row, {
       actorUserId,
       env,
@@ -630,6 +658,7 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
             customerDisplayTotal: assessed.customerPreview.customerDisplayTotal,
             lineItems: assessed.customerPreview.lineItems,
             roomCount: assessed.customerPreview.roomCount,
+            customerRooms: assessed.customerPreview.customerRooms || [],
             edgeLinearFeetTotal: assessed.customerPreview.edgeLinearFeetTotal ?? null
           }
         : null,
@@ -651,6 +680,14 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
             }
           : null,
       quoteFlowDigitalEstimate: assessed.quoteFlowDigitalEstimate,
+      onlineChanges: onlineChangesBlocked
+        ? {
+            customerCanChangeOnline: false,
+            message:
+              recorded.onlineChangesBlockedMessage ||
+              "Published without online changes: this estimate's pricing cannot be reproduced for customer changes."
+          }
+        : { customerCanChangeOnline: true, message: null },
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -812,6 +849,11 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
         calc.totals?.customerDisplayTotal ?? approval.customerDisplayTotal ?? null,
       edgeLinearFeetTotal: assessed.customerPreview?.edgeLinearFeetTotal ?? null,
       reused: result?.reused === true,
+      customerCanChangeOnline: result?.envelope?.reason !== "pricing_rules_not_reproducible",
+      onlineChangesBlockedMessage:
+        result?.envelope?.reason === "pricing_rules_not_reproducible"
+          ? result.envelope.message || null
+          : null,
       staleReason: null,
       staleAt: null
     };
@@ -836,11 +878,14 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
       actorUserId
     });
 
+    const onlineChangesBlocked = result?.envelope?.reason === "pricing_rules_not_reproducible";
     return {
       ...presented,
       message:
         result?.staffNotice ||
+        (onlineChangesBlocked ? result.envelope.message : null) ||
         (result?.reused ? "Digital Estimate already published." : "Digital Estimate published."),
+      customerCanChangeOnline: !onlineChangesBlocked,
       reused: result?.reused === true,
       accessToken: result?.accessToken || null,
       customerUrl: presented.publication?.customerUrl || customerUrl,

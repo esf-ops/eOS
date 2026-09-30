@@ -59,9 +59,16 @@ assert.ok(configView.includes("/materials/elite100/") || api.includes("imageAsse
 assert.equal(configView.includes("Wholesale"), false);
 assert.equal(configView.includes("use tax"), false);
 assert.equal(configView.includes("Watt"), false);
-assert.equal(/\bAccept\b/.test(configView), false, "no Accept CTA");
+// Final acceptance lives in this view (studioAcceptPublishedEstimate.test.mjs); it must go through
+// Brain bound to the session this page exchanged, never decided client-side.
+assert.ok(configView.includes("submitFinalAcceptance({"), "acceptance is a server call");
+assert.ok(
+  /submitFinalAcceptance\(\{[\s\S]{0,200}expectedSessionId/.test(configView),
+  "acceptance carries the page's session id"
+);
 assert.equal(configView.includes("payment"), false);
-assert.equal(configView.includes("sold"), false);
+// The customer view may say the job is not sold yet; it must never mark or claim it sold.
+assert.equal(/mark(ed)?\s*(as\s*)?sold|markSold|job is now sold/i.test(configView), false);
 assert.ok(
   configView.includes("not final acceptance") || configView.includes("not an order or acceptance")
 );

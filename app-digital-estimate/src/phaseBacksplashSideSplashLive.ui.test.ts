@@ -47,7 +47,7 @@ function roomPricing(overrides: Partial<PublicRoomPricing["rooms"][number]> = {}
   const backsplash = view.lines.find((l) => l.label === "Backsplash");
   assert.ok(backsplash, "Backsplash row present");
   assert.equal(backsplash!.amount, 0, "authoritative zero is rendered, not dropped");
-  assert.equal(backsplash!.amountLabel, "$0");
+  assert.equal(backsplash!.amountLabel, "$0.00");
   console.log("ok: Updated renders authoritative Backsplash $0");
 }
 
@@ -91,7 +91,7 @@ function roomPricing(overrides: Partial<PublicRoomPricing["rooms"][number]> = {}
   });
   const row = view.lines.find((l) => /Side splash/.test(l.label));
   assert.ok(row, "changes row present");
-  assert.equal(row!.amountLabel, "+$85");
+  assert.equal(row!.amountLabel, "+$85.00");
   console.log("ok: Changes shows the side-splash delta");
 }
 

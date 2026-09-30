@@ -22,6 +22,7 @@ import {
 } from "../digitalEstimate/digitalEstimatePublicSerializer.mjs";
 import { buildPublicationFreezePayloads } from "../digitalEstimate/digitalEstimateSnapshot.mjs";
 import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
+import { withRealV4RateEvidence } from "./studioV4CalcTestEvidence.mjs";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORG2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -47,7 +48,7 @@ const ENV_ON = {
   NODE_ENV: "development"
 };
 
-function approvedEstimateRow(overrides = {}) {
+function approvedEstimateRowBase(overrides = {}) {
   const id = overrides.id || randomUUID();
   const fingerprint = overrides.fingerprint || "fp-approved-1";
   return {
@@ -112,6 +113,12 @@ function approvedEstimateRow(overrides = {}) {
     supersededAt: null,
     ...overrides
   };
+}
+
+const V4_RATE_EVIDENCE = (await withRealV4RateEvidence({}, approvedEstimateRowBase().scope)).elite100;
+function approvedEstimateRow(overrides = {}) {
+  const row = approvedEstimateRowBase(overrides);
+  return { ...row, calculationSnapshot: row.calculationSnapshot && { elite100: V4_RATE_EVIDENCE, ...row.calculationSnapshot } };
 }
 
 function harness() {
@@ -273,7 +280,7 @@ console.log("\nstudioEstimateDigitalEstimate.part2.test.mjs\n");
     accessExpiresAt: publishedOk.publication.accessExpiresAt
   });
   assertPublicDtoHasNoForbiddenContent(dto);
-  assert.equal(dto.estimate.totals.estimatedProjectTotal, 5123);
+  assert.equal(dto.estimate.totals.estimatedProjectTotal, 5123.45, "exact cents, no whole-dollar rounding");
   console.log("ok: 6 internal markup and internal-only fields never enter customer snapshot");
 
   const again = await svc.publish({

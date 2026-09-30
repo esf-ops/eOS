@@ -1,6 +1,29 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import type { QuoteFlowScopePiece, QuoteFlowScopeRoom } from "../lib/quoteFlowEstimatesApi";
 import { resolvePieceOpenEdgeLf, summarizeRoomsLocal } from "../lib/estimateGrouping.mjs";
+
+/** Suggested piece names; staff may still type any custom label. */
+export const STANDARD_PIECE_LABELS = ["Sink run", "Stove left", "Stove right", "Island", "Vanity"] as const;
+
+/** Suggested quoted vanity-top depth (overhang). Staff apply it per piece; never automatic. */
+export const VANITY_DEPTH_DEFAULT_IN = 22.5;
+
+const VANITY_ROOM_RE = /\b(bath(?:room)?|vanity|powder|lav(?:atory)?|half[\s-]?bath)\b/i;
+const NON_VANITY_PIECE_RE = /\b(kitchen|pantry|island|sink\s*run|stove|cooktop|desk|bar\s*top)\b/i;
+
+function isVanityLikePiece(room: QuoteFlowScopeRoom, piece: QuoteFlowScopePiece): boolean {
+  const name = String(piece.name || "");
+  if (/\bvanity\b/i.test(name)) return true;
+  if (NON_VANITY_PIECE_RE.test(name)) return false;
+  return VANITY_ROOM_RE.test(String(room.roomType || "")) || VANITY_ROOM_RE.test(String(room.name || ""));
+}
+
+/** Depth as first extracted (Takeoff/AI or first entry), preserved across staff edits. */
+function extractedDepthOf(piece: QuoteFlowScopePiece): number {
+  const kept = Number(piece.extractedDepthIn);
+  if (Number.isFinite(kept) && kept > 0) return kept;
+  return Number(piece.depthIn) || 0;
+}
 
 type Props = {
   rooms: QuoteFlowScopeRoom[];
@@ -171,6 +194,7 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
 export default function OfficialScopeEditor(props: Props) {
   const { rooms, onChange, disabled, heading, hint } = props;
   const localSummary = useMemo(() => summarizeRoomsLocal(rooms), [rooms]);
+  const [vanityDepthDraft, setVanityDepthDraft] = useState<number>(VANITY_DEPTH_DEFAULT_IN);
 
   function updateRoom(index: number, patch: Partial<QuoteFlowScopeRoom>) {
     const next = rooms.map((r, i) => (i === index ? { ...r, ...patch } : r));
@@ -222,6 +246,11 @@ export default function OfficialScopeEditor(props: Props) {
 
   return (
     <div className="qf-scope qf-scope--worksheet" data-testid="qf-official-scope-editor">
+      <datalist id="qf-scope-piece-labels" data-testid="qf-scope-piece-labels">
+        {STANDARD_PIECE_LABELS.map((label) => (
+          <option key={label} value={label} />
+        ))}
+      </datalist>
       <header className="qf-scope__intro" data-testid="qf-scope-intro">
         <div className="qf-scope__intro-copy">
           <h2>{heading || "Official scope"}</h2>
@@ -394,6 +423,8 @@ export default function OfficialScopeEditor(props: Props) {
                             <input
                               type="text"
                               aria-label="Piece name"
+                              list="qf-scope-piece-labels"
+                              data-testid="qf-scope-piece-name"
                               value={String(piece.name || "")}
                               disabled={disabled}
                               onChange={(e) =>
@@ -427,6 +458,7 @@ export default function OfficialScopeEditor(props: Props) {
                               onChange={(e) =>
                                 updatePiece(roomIndex, pieceIndex, {
                                   depthIn: Number(e.target.value) || 0,
+                                  extractedDepthIn: extractedDepthOf(piece) || undefined,
                                   depthStaffEdited: true,
                                   depthSource: "staff",
                                   normalizationNote: undefined,
@@ -516,6 +548,85 @@ export default function OfficialScopeEditor(props: Props) {
                             </button>
                           </td>
                         </tr>
+                        {isVanityLikePiece(room, piece) && Number(piece.depthIn) > 0 ? (() => {
+                          const extracted = extractedDepthOf(piece);
+                          const current = Number(piece.depthIn) || 0;
+                          const atDraft = Math.abs(current - vanityDepthDraft) < 0.01;
+                          const changed = Math.abs(current - extracted) >= 0.01;
+                          if (atDraft && !changed) return null;
+                          return (
+                            <tr
+                              key={`${piece.id || pieceIndex}-vanity-depth`}
+                              className="qf-scope__note-row"
+                              data-testid="qf-scope-vanity-depth"
+                            >
+                              <td colSpan={9}>
+                                <span className="qf-muted">
+                                  Extracted depth {extracted} in
+                                  {changed ? `; quoted at ${current} in.` : "."} Vanity tops are usually
+                                  quoted deeper than the cabinet for overhang.
+                                </span>{" "}
+                                {!atDraft ? (
+                                  <>
+                                    <label className="qf-scope__inline-field">
+                                      Default
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step={0.125}
+                                        aria-label="Vanity depth default (in)"
+                                        data-testid="qf-scope-vanity-depth-default"
+                                        value={vanityDepthDraft}
+                                        disabled={disabled}
+                                        onChange={(e) => setVanityDepthDraft(Number(e.target.value) || 0)}
+                                      />
+                                      in
+                                    </label>{" "}
+                                    <button
+                                      type="button"
+                                      className="qf-scope__link-btn"
+                                      data-testid="qf-scope-vanity-depth-apply"
+                                      disabled={disabled || !(vanityDepthDraft > 0)}
+                                      onClick={() =>
+                                        updatePiece(roomIndex, pieceIndex, {
+                                          depthIn: vanityDepthDraft,
+                                          extractedDepthIn: extracted,
+                                          depthStaffEdited: true,
+                                          depthSource: "staff_vanity_default",
+                                          normalizationNote: undefined,
+                                          normalizedBy: undefined
+                                        })
+                                      }
+                                    >
+                                      Use {vanityDepthDraft} in
+                                    </button>
+                                  </>
+                                ) : null}
+                                {changed ? (
+                                  <>
+                                    {" "}
+                                    <button
+                                      type="button"
+                                      className="qf-scope__link-btn"
+                                      data-testid="qf-scope-vanity-depth-revert"
+                                      disabled={disabled}
+                                      onClick={() =>
+                                        updatePiece(roomIndex, pieceIndex, {
+                                          depthIn: extracted,
+                                          extractedDepthIn: extracted,
+                                          depthStaffEdited: true,
+                                          depthSource: "staff"
+                                        })
+                                      }
+                                    >
+                                      Use extracted {extracted} in
+                                    </button>
+                                  </>
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })() : null}
                         {typeof piece.normalizationNote === "string" && piece.normalizationNote ? (
                           <tr
                             key={`${piece.id || pieceIndex}-vanity-note`}

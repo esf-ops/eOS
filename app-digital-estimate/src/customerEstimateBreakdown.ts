@@ -210,8 +210,9 @@ function formatMoney(n: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(Number(n)));
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.round(Number(n) * 100) / 100);
 }
 
 function moneyLabel(n: number | null | undefined): string {

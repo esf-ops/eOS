@@ -19,7 +19,8 @@ function money(v: unknown): string {
   if (v == null || v === "") return "—";
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n < 0 ? "-" : ""}$${abs}`;
 }
 
 function num(v: unknown): string {
@@ -380,7 +381,7 @@ export default function OfficialAcceptedReportPanel(props: Props) {
                 </div>
               </dl>
               <p className="qf-muted" data-testid="qf-accepted-no-qb">
-                No QuickBooks invoice has been created. Handoff is not active yet.
+                No QuickBooks invoice is created here. After Mark Sold, the Handoff tab tracks the sales order.
               </p>
             </div>
           ) : null}

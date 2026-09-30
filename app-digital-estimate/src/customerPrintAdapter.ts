@@ -59,13 +59,16 @@ function moneyLabel(n: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Math.round(Number(n)));
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.round(Number(n) * 100) / 100);
 }
 
 function roomSelections(room: LovableRoom): DigitalEstimatePrintSelection[] {
   const out: DigitalEstimatePrintSelection[] = [];
-  const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
+  const color =
+    room.colors.find((c) => c.id === room.selectedColorId) ||
+    (room.selectedColorId || !room.selectedColorName ? room.colors[0] : undefined);
   if (color?.name || room.selectedColorName) {
     out.push({
       label: "Material",

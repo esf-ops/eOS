@@ -24,6 +24,8 @@ import {
 import { attachDigitalEstimateRoutes } from "./digitalEstimateRoutes.js";
 import { resetDigitalEstimatePublicRateLimitsForTests } from "./digitalEstimateRateLimit.mjs";
 import { assertSyntheticPublicationPublicAccess } from "./syntheticPilotGuard.mjs";
+import { ESF_DIRECT_PRICE_PER_SQFT } from "../quotes/quoteCalculator.js";
+import { ELITE100_CUTOUT_RATES } from "../elite100EstimateStudio/elite100RoomPricingCalculator.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -61,6 +63,16 @@ function eliteHeader() {
       materialGroup: "Group B",
       materialProgramDefault: "elite_100",
       totals: { retail: 870, wholesale: 800, estimated_sqft: 10 },
+      pricingRuleEvidence: {
+        schema: 1,
+        pricingBasis: "direct",
+        materialRateTable: { ...ESF_DIRECT_PRICE_PER_SQFT },
+        materialUseTaxPercent: 2,
+        cutoutRates: { ...ELITE100_CUTOUT_RATES },
+        rooms: [{ roomKey: "kitchen", materialGroup: "Group B", ratePerSf: ESF_DIRECT_PRICE_PER_SQFT["Group B"], rateSource: "elite100_v4_fallback_table", materialUseTaxPercent: 2 }],
+        accountRules: { wattsTrusted: false, spahnTrusted: false, estimateWideAdjustmentPercent: 0 }
+      },
+      pricingBasis: "direct",
       internal_ui: {
         material_program_default: "elite_100",
         customer_display_total: 870,
@@ -92,6 +104,7 @@ async function seedPublishedWithEnvelope(env = ENV_LIVE) {
   const snap = deRepo._dump().snapshots[0];
   snap.pricing_evidence_json = {
     materialProgramDefault: "elite_100",
+    pricingPin: snap.pricing_evidence_json.pricingPin,
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
       internal_ui: {
@@ -448,8 +461,12 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
   assert.equal(badMaterial.status, 422);
   const badBody = await badMaterial.json();
   assert.ok(
-    badBody.code === "option_not_allowed" || badBody.code === "invalid_selection" || badBody.code === "unknown_option"
+    badBody.code === "option_not_allowed" ||
+      badBody.code === "invalid_selection" ||
+      badBody.code === "unknown_option" ||
+      badBody.code === "selection_unavailable"
   );
+  assert.equal(badBody.restoreSavedState, true);
   assert.equal(badBody.stage, "selection");
   assert.equal(badBody.diagnosticCode, "DE-OPTION-NOT-ALLOWED");
 

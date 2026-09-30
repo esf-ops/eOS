@@ -228,6 +228,83 @@ export type QuoteFlowPricingResult = {
   unresolvedItems?: Array<{ code?: string | null; message?: string }>;
 };
 
+/** Governed Vanity Program row; eligibility and price come from Brain only. */
+export type QuoteFlowVanityProgram = {
+  roomId: string | null;
+  roomName: string;
+  physicalFacts?: {
+    widthIn?: number | null;
+    depthIn?: number | null;
+    sinkOpenings?: number | null;
+    bowlLabel?: string | null;
+    backsplashLabel?: string | null;
+  };
+  eligible: boolean;
+  ineligibleReason?: string | null;
+  ineligibleDetail?: string | null;
+  programLabel?: string | null;
+  programPrice?: number | null;
+  applied: boolean;
+  includedScope?: string[];
+};
+
+/** Out-of-collection slab package (staff-only; costs never reach the customer). */
+export type QuoteFlowSlabPackageInput = {
+  id: string;
+  colorName: string;
+  supplier?: string;
+  thickness?: string;
+  label?: string;
+  slabLengthIn: number | null;
+  slabWidthIn: number | null;
+  costPerSlab: number | null;
+  wastePercent: number | null;
+  confirmedSlabQuantity: number | null;
+  quantityOverrideReason?: string;
+};
+
+export type QuoteFlowSlabPackage = QuoteFlowSlabPackageInput & {
+  calculated?: {
+    requiredSf: number;
+    requiredWithWasteSf: number;
+    slabAreaSf: number;
+    suggestedQuantity: number;
+    quantityPriced: number;
+    quantityConfirmed: boolean;
+    quantityOverridden: boolean;
+    total: number;
+    shared: boolean;
+    roomNames: string[];
+  } | null;
+  issues?: string[];
+};
+
+/** Staff sink decision per room (Brain validates product, kind and program rules). */
+export type QuoteFlowSinkSelectionInput = {
+  roomId: string;
+  mode: "catalog" | "customer_provided" | "program";
+  productId?: string | null;
+  sinkType?: string | null;
+};
+
+export type QuoteFlowSinkRoom = {
+  roomId: string;
+  roomName: string;
+  kitchenOpenings: number;
+  vanityOpenings: number;
+  vanityProgramApplied: boolean;
+  programSinkType: string | null;
+  decision: { mode: "catalog" | "customer_provided"; productId: string | null } | null;
+  decisionRequired: boolean;
+};
+
+export type QuoteFlowSinkCatalogItem = {
+  productId: string;
+  displayName: string;
+  sellPrice: number;
+  roomEligibility: string[];
+};
+
 export type QuoteFlowPricingPayload = {
   ok?: boolean;
   estimateId?: string;
@@ -248,13 +325,26 @@ export type QuoteFlowPricingPayload = {
       roomId?: string;
       roomName?: string;
       materialGroupOverride?: string | null;
+      slabPackageId?: string | null;
       colorNameOverride?: string | null;
+      colorTbd?: boolean;
       edgeProfileToken?: string | null;
       includeBacksplash?: boolean;
       backsplashSqft?: number;
       hasSinkCutout?: boolean;
       hasWaterfallGeometry?: boolean;
     }>;
+  };
+  vanityPrograms?: QuoteFlowVanityProgram[];
+  sinkSelections?: {
+    rooms: QuoteFlowSinkRoom[];
+    catalog: QuoteFlowSinkCatalogItem[];
+    programSinkTypes: Array<{ value: string; label: string }>;
+  };
+  slabPackages?: {
+    costMultiplier: number;
+    defaultWastePercent: number;
+    packages: QuoteFlowSlabPackage[];
   };
   lastCalculation?: QuoteFlowPricingResult | null;
   blockers?: string[];
@@ -273,6 +363,9 @@ export type QuoteFlowPricingDraftBody = {
   estimateWideAdjustment?: QuoteFlowEditablePricing["estimateWideAdjustment"];
   internalMarkupPercent?: number;
   customLineItems?: QuoteFlowCustomLineItem[];
+  vanityPrograms?: Array<{ roomId: string; apply: boolean }>;
+  sinkSelections?: QuoteFlowSinkSelectionInput[];
+  slabPackages?: QuoteFlowSlabPackageInput[];
 };
 
 export async function fetchQuoteFlowEstimatePricing(token: string, estimateId: string) {
@@ -333,6 +426,8 @@ export type QuoteFlowReviewSummary = {
   priceGroupLabel?: string | null;
   customerEstimateTotal?: number | null;
   customerFacingAdjustments?: number;
+  customLineAdjustments?: number;
+  estimateWideAdjustment?: { percentage: number; amount: number; reason: string | null; source: string | null } | null;
   customerFacingChargesTotal?: number;
   customerFacingCreditsTotal?: number;
   internalOnlyAdjustments?: number;
@@ -403,6 +498,7 @@ export type QuoteFlowDigitalEstimatePayload = {
   revision?: number | null;
   status?: string | null;
   publishStatus?: { key: string; label: string };
+  onlineChanges?: { customerCanChangeOnline: boolean; message: string | null };
   canPublish?: boolean;
   checklist?: QuoteFlowReviewChecklistItem[];
   blockers?: string[];
@@ -437,6 +533,15 @@ export type QuoteFlowDigitalEstimatePayload = {
     customerDisplayTotal?: number | null;
     lineItems?: Array<{ label?: string; amount?: number }>;
     roomCount?: number;
+    customerRooms?: Array<{
+      name?: string | null;
+      materialLabel?: string | null;
+      colorLabel?: string | null;
+      summaryLines?: unknown[];
+      countertopAmount?: number | null;
+      roomTotal?: number | null;
+      addOnLines?: Array<{ label: string; amount: number }>;
+    }>;
   } | null;
   publication?: {
     publicationId?: string | null;
@@ -727,4 +832,98 @@ export async function fetchQuoteFlowAcceptedReport(token: string, estimateId: st
     `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/accepted-report`,
     token
   ) as Promise<QuoteFlowAcceptedReportPayload>;
+}
+
+export type QuoteFlowCustomerJobCandidate = { listId: string | null; fullName: string | null };
+
+export type QuoteFlowSalesOrderBlocker = {
+  code: string;
+  message?: string;
+  candidates?: QuoteFlowCustomerJobCandidate[];
+};
+
+export type QuoteFlowSalesOrder = {
+  jobId?: string;
+  status: string;
+  statusLabel?: string;
+  synced?: boolean;
+  qbTxnId?: string | null;
+  qbRefNumber?: string | null;
+  attempts?: number;
+  nextAttemptAt?: string | null;
+  blockers?: QuoteFlowSalesOrderBlocker[];
+  customer?: { listId?: string | null; fullName?: string | null } | null;
+  companyIdentity?: string | null;
+  lastError?: { code?: string; message?: string; retryable?: boolean } | null;
+  totalCents?: number | null;
+  canRetry?: boolean;
+  /** Brain allows a typed customer:job only for the TEST company. */
+  typedCustomerJobAllowed?: boolean;
+};
+
+export type QuoteFlowSoldWorkspace = {
+  ok: boolean;
+  estimate?: {
+    id: string;
+    revision?: number;
+    customerName?: string | null;
+    customerDisplayTotal?: number | null;
+    lifecycleStatus?: string | null;
+  };
+  acceptance?: { acceptanceId?: string; acceptedAt?: string | null; customerDisplayTotal?: number | null } | null;
+  soldReview?: {
+    checklist: Record<string, boolean>;
+    checklistComplete: boolean;
+    notes?: string | null;
+  };
+  soldSnapshot?: { id: string; soldAt: string; customerDisplayTotal?: number | null } | null;
+  checklistLabels?: Record<string, string>;
+  openReviewRequestCount?: number;
+  canMarkSold?: boolean;
+  salesOrder?: QuoteFlowSalesOrder | null;
+  salesOrderError?: string | null;
+};
+
+const soldBase = (estimateId: string) =>
+  `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}`;
+
+export async function fetchQuoteFlowSoldWorkspace(token: string, estimateId: string) {
+  return apiGet(`${soldBase(estimateId)}/sold`, token) as Promise<QuoteFlowSoldWorkspace>;
+}
+
+export async function saveQuoteFlowSoldReview(
+  token: string,
+  estimateId: string,
+  checklist: Record<string, boolean>,
+  notes: string | null
+) {
+  return apiFetch(`${soldBase(estimateId)}/sold-review`, token, {
+    method: "PUT",
+    body: JSON.stringify({ checklist, notes })
+  }) as Promise<{ ok: boolean; soldReview: QuoteFlowSoldWorkspace["soldReview"] }>;
+}
+
+export async function markQuoteFlowEstimateSold(token: string, estimateId: string) {
+  return apiFetch(`${soldBase(estimateId)}/mark-sold`, token, {
+    method: "POST",
+    body: JSON.stringify({})
+  }) as Promise<{ ok: boolean; salesOrder?: QuoteFlowSalesOrder | null; salesOrderError?: string | null }>;
+}
+
+export async function retryQuoteFlowSalesOrder(token: string, estimateId: string) {
+  return apiFetch(`${soldBase(estimateId)}/sales-order/retry`, token, {
+    method: "POST",
+    body: JSON.stringify({})
+  }) as Promise<{ ok: boolean; salesOrder: QuoteFlowSalesOrder }>;
+}
+
+export async function selectQuoteFlowSalesOrderCustomerJob(
+  token: string,
+  estimateId: string,
+  selection: QuoteFlowCustomerJobCandidate
+) {
+  return apiFetch(`${soldBase(estimateId)}/sales-order/customer-job`, token, {
+    method: "PUT",
+    body: JSON.stringify(selection)
+  }) as Promise<{ ok: boolean; salesOrder: QuoteFlowSalesOrder }>;
 }

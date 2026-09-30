@@ -33,10 +33,11 @@ function errorMessage(e: unknown): string {
 
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
-  return `$${Number(n).toLocaleString(undefined, {
+  const abs = Math.abs(Number(n)).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  })}`;
+  });
+  return `${Number(n) < 0 ? "-" : ""}$${abs}`;
 }
 
 function severityClass(severity: string): string {
@@ -214,8 +215,23 @@ export default function OfficialReviewPanel(props: Props) {
             </div>
             <div>
               <dt>Customer-facing adjustments</dt>
-              <dd>{money(summary.customerFacingAdjustments)}</dd>
+              <dd data-testid="qf-review-customer-adjustments">{money(summary.customerFacingAdjustments)}</dd>
             </div>
+            {summary.estimateWideAdjustment ? (
+              <div>
+                <dt>Estimate-wide adjustment</dt>
+                <dd data-testid="qf-review-ewa">
+                  +{summary.estimateWideAdjustment.percentage}% · {money(summary.estimateWideAdjustment.amount)}
+                  {summary.estimateWideAdjustment.reason ? ` · ${summary.estimateWideAdjustment.reason}` : ""}
+                </dd>
+              </div>
+            ) : null}
+            {summary.estimateWideAdjustment && summary.customLineAdjustments ? (
+              <div>
+                <dt>Custom line adjustments</dt>
+                <dd>{money(summary.customLineAdjustments)}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Internal-only adjustments</dt>
               <dd>{money(summary.internalOnlyAdjustments)}</dd>

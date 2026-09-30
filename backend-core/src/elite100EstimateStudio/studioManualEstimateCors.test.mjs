@@ -96,6 +96,8 @@ function limitResult(data) {
   };
 }
 
+const NO_HEAD_ACCESS_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
 function mockSupabase({ organizationId = ORG } = {}) {
   const orgRow = {
     id: organizationId,
@@ -136,7 +138,8 @@ function mockSupabase({ organizationId = ORG } = {}) {
         return {
           select() {
             return {
-              eq() {
+              eq(_col, val) {
+                if (String(val) === NO_HEAD_ACCESS_USER_ID) return limitResult([]);
                 return limitResult([{ head_slug: "elite100_estimate_studio" }]);
               }
             };
@@ -215,7 +218,8 @@ console.log("\nstudioManualEstimateCors.test.mjs\n");
         req.user = {
           id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           email: "not-pilot@example.com",
-          role: "admin",
+          // Head access (not env pilot lists) is the gate; admins bypass it.
+          role: "estimator",
           isActive: true
         };
         return next();

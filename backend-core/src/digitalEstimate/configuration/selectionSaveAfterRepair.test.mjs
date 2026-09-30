@@ -22,6 +22,7 @@ import {
   STUDIO_ESTIMATE_STATUSES,
   emptyStudioEstimateScope
 } from "../../elite100EstimateStudio/studioEstimateTypes.mjs";
+import { withRealV4RateEvidence } from "../../elite100EstimateStudio/studioV4CalcTestEvidence.mjs";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ACTOR = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -42,7 +43,7 @@ const ENV_ON = {
   NODE_ENV: "development"
 };
 
-const fakeCalc = {
+const fakeCalcBase = {
   fingerprint: "v2-post-repair-save-fp",
   calculatedAt: "2026-08-03T18:00:00.000Z",
   pricingVersion: 4,
@@ -52,6 +53,7 @@ const fakeCalc = {
   unresolvedItems: [],
   fabrication: { customLineItems: [] }
 };
+const fakeCalc = await withRealV4RateEvidence(fakeCalcBase, approvedScope());
 
 function approvedScope() {
   return {

@@ -59,6 +59,8 @@ function publicError(res, e) {
     message = "This estimate link is no longer active. Please contact Elite.";
   } else if (code === "publication_superseded") {
     message = "A newer estimate is available. Please use the latest link.";
+  } else if (code === "session_mismatch") {
+    message = e.message;
   } else if (status === 409 || code === "row_version_conflict" || code === "stale_selection" || code === "stale_configuration") {
     message = "Please wait for your changes to finish saving.";
   } else if (code === "incomplete_configuration" || code === "note_too_long" || code === "stale_calculation") {

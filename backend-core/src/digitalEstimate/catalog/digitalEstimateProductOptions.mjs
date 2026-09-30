@@ -317,10 +317,12 @@ export function buildSinkOptionDefinitions(args) {
   const roomType = args.roomType || "kitchen";
   const groupId = args.groupId ?? null;
   const defaultMode = args.defaultMode || "none";
+  const defaultProductId =
+    defaultMode === "esf" ? String(args.defaultProductId || "").trim() || null : null;
   const out = [];
 
   const modes = [
-    { key: "none", label: "No sink" },
+    ...(args.includeNoSink === false ? [] : [{ key: "none", label: "No sink" }]),
     { key: "customer_provided", label: "Customer-provided sink" }
   ];
   for (const m of modes) {
@@ -353,7 +355,12 @@ export function buildSinkOptionDefinitions(args) {
       roomType,
       customerVisibleOnly: true
     }).filter((p) => p.active && !isNonSinkPlumbingRow(p));
+    if (defaultProductId && !products.some((p) => p.productId === defaultProductId)) {
+      const staffProduct = getProductById(defaultProductId);
+      if (staffProduct?.active) products.unshift(staffProduct);
+    }
     for (const product of products) {
+      const isStaffDefault = defaultProductId != null && product.productId === defaultProductId;
       // Seed family rows for Blanco (variants), not every color SKU.
       const safe = toCustomerSafeOptionFields(product);
       const copy = customerFacingProductCopy(product);
@@ -363,6 +370,8 @@ export function buildSinkOptionDefinitions(args) {
           optionKey: `sink:${roomKey}:esf:${product.productId}`,
           displayLabel: copy.displayName,
           description: copy.description || product.description || null,
+          includedInBaseline: isStaffDefault,
+          defaultQty: isStaffDefault ? 1 : 0,
           sellPrice: Number(product.sellPrice) || 0,
           customerPriceTreatment: "absolute",
           pricingMode: "per_each",
@@ -920,16 +929,32 @@ export function buildDefaultRoomProductOptions(args) {
       );
     }
 
-    if (choiceGroupEnabled(choiceGroups, "sink")) {
-      const hasSinkAddon = Number(addOns["qty-sink"] || addOns["qty-bar"] || 0) > 0;
-      const defaultMode =
-        hasSinkAddon && roomType !== "non_plumbing" ? "customer_provided" : "none";
+    // A Vanity Program room's sink is bundled into the program price; offering
+    // catalog sinks there would charge a second sink on top of the included one.
+    if (choiceGroupEnabled(choiceGroups, "sink") && room.sinkIncludedInVanityProgram !== true) {
+      const staff = room.staffSinkDecision && typeof room.staffSinkDecision === "object"
+        ? room.staffSinkDecision
+        : null;
+      let defaultMode;
+      if (staff?.mode === "catalog" && staff.productId) defaultMode = "esf";
+      else if (staff?.mode === "customer_provided") defaultMode = "customer_provided";
+      else {
+        const roomHasSink =
+          room.sinkOpeningCount != null
+            ? Number(room.sinkOpeningCount) > 0
+            : Number(addOns["qty-sink"] || addOns["qty-bar"] || 0) > 0;
+        defaultMode = roomHasSink && roomType !== "non_plumbing" ? "customer_provided" : "none";
+      }
       options.push(
         ...buildSinkOptionDefinitions({
           roomKey,
           roomType,
           groupId,
           defaultMode,
+          defaultProductId: defaultMode === "esf" ? staff.productId : null,
+          // A staff-decided sink is physical scope (it has a cutout); removing it
+          // is a scope change for Elite to review, not a customer toggle.
+          includeNoSink: !staff,
           includeEsfProducts: roomType !== "non_plumbing"
         })
       );

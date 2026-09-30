@@ -6,6 +6,7 @@ import {
   type FallbackReason,
 } from "./configurationBootstrap";
 import { ReadOnlyEstimateView } from "./ReadOnlyEstimateView";
+import { AcceptAsQuotedPanel } from "./AcceptAsQuotedPanel";
 import {
   EstimateRenderError,
   normalizePublicEstimate,
@@ -254,7 +255,7 @@ export function App() {
   if (mode === "configure" && configState) {
     return (
       <ConfigurationView
-        key={configState.session?.id || "configure"}
+        key={`${configState.estimate?.quoteNumber || "configure"}:${configState.estimate?.revisionNumber ?? ""}`}
         state={configState}
         onState={setConfigState}
         accessToken={accessToken}
@@ -327,6 +328,14 @@ export function App() {
             </p>
           ) : null}
           <ReadOnlyEstimateView estimate={estimate} />
+          {lifecycle === "blocked" && configState?.readMode === "baseline" && configState.session ? (
+            <AcceptAsQuotedPanel
+              publishedTotal={estimate.totals?.estimatedProjectTotal ?? null}
+              rowVersion={configState.session.rowVersion ?? null}
+              sessionId={configState.session.id ?? null}
+              accessToken={accessToken}
+            />
+          ) : null}
         </main>
       </div>
     );

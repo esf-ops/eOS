@@ -519,29 +519,48 @@ export function createSupabasePricingPolicyRepository({ db }) {
     err.code = "supabase_misconfigured";
     throw err;
   }
+  const repoFail = (code, message) => Object.assign(new Error(message), { code });
+  const inEffect = (row, at) =>
+    (!row.effective_from || Date.parse(row.effective_from) <= at) &&
+    (!row.effective_to || Date.parse(row.effective_to) >= at);
+
   return {
     mode: "supabase",
-    async getBaseRates(organizationId, scheduleCode) {
-      const { data: schedule, error: sErr } = await db
+    /**
+     * Rates from the org's single approved, active, in-effect policy version for this schedule.
+     * Returns {} when none is approved (caller uses built-in defaults). Rows that merely exist
+     * (draft, unapproved, out of effect) are never used. Throws on query failure or ambiguity.
+     */
+    async getBaseRates(organizationId, scheduleCode, { at = Date.now() } = {}) {
+      const { data: schedules, error: sErr } = await db
         .from("digital_estimate_material_schedules")
-        .select("id")
+        .select(
+          "id, effective_from, effective_to, policy:digital_estimate_pricing_policy_versions!inner(id, status, approved_at, effective_from, effective_to)"
+        )
         .eq("organization_id", organizationId)
         .eq("schedule_code", scheduleCode)
         .eq("is_active", true)
-        .limit(1);
+        .eq("policy.status", "active")
+        .not("policy.approved_at", "is", null);
       if (sErr) throw sErr;
-      const scheduleId = schedule?.[0]?.id;
-      if (!scheduleId) return {};
+      const eligible = (schedules || []).filter((s) => s.policy && inEffect(s, at) && inEffect(s.policy, at));
+      if (eligible.length === 0) return {};
+      if (eligible.length > 1) {
+        throw repoFail("ambiguous_rate_schedule", `More than one approved ${scheduleCode} rate schedule is in effect.`);
+      }
       const { data, error } = await db
         .from("digital_estimate_material_group_rates")
         .select("group_code, rate_per_sqft")
         .eq("organization_id", organizationId)
-        .eq("schedule_id", scheduleId)
+        .eq("schedule_id", eligible[0].id)
         .eq("is_active", true);
       if (error) throw error;
+      if (!data?.length) {
+        throw repoFail("empty_rate_schedule", `The approved ${scheduleCode} rate schedule has no active rates.`);
+      }
       /** @type {Record<string, number>} */
       const out = {};
-      for (const r of data || []) out[r.group_code] = Number(r.rate_per_sqft);
+      for (const r of data) out[r.group_code] = Number(r.rate_per_sqft);
       return out;
     }
   };

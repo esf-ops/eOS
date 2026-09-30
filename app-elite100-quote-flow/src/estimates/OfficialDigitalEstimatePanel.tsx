@@ -31,10 +31,11 @@ function errorMessage(e: unknown): string {
 
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
-  return `$${Number(n).toLocaleString(undefined, {
+  const abs = Math.abs(Number(n)).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  })}`;
+  });
+  return `${Number(n) < 0 ? "-" : ""}$${abs}`;
 }
 
 function severityClass(severity: string): string {
@@ -165,6 +166,12 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
         </div>
       ) : null}
 
+      {isPublished && payload?.onlineChanges?.customerCanChangeOnline === false ? (
+        <div className="qf-pricing__stale" data-testid="qf-de-online-changes-blocked" role="status">
+          {payload.onlineChanges.message}
+        </div>
+      ) : null}
+
       {payload?.reReviewRequired && payload.reReviewMessage ? (
         <div className="qf-pricing__stale" data-testid="qf-de-rereview" role="status">
           {payload.reReviewMessage}
@@ -272,6 +279,74 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
             </button>
           </div>
         </div>
+      ) : null}
+
+      {payload?.customerPreview ? (
+        <details
+          className="qf-de__preview"
+          data-testid="qf-de-customer-preview"
+          open={!isPublished || payload?.publishStatus?.key === "needs_republish"}
+        >
+          <summary>
+            <strong>Customer preview</strong> — what the customer will see after you publish
+          </summary>
+          <p className="qf-muted">
+            Built from the same customer-safe snapshot that publishing freezes. Nothing is sent or
+            published from this preview.
+          </p>
+          <p className="qf-de__preview-total" data-testid="qf-de-preview-total">
+            Estimated project total: <strong>{money(payload.customerPreview.customerDisplayTotal)}</strong>
+          </p>
+          {(payload.customerPreview.customerRooms || []).length > 0 ? (
+            <ul className="qf-de__preview-rooms" data-testid="qf-de-preview-rooms">
+              {(payload.customerPreview.customerRooms || []).map((room, i) => (
+                <li key={`${room.name || "room"}-${i}`} data-testid="qf-de-preview-room">
+                  <strong>{room.name || "Room"}</strong>
+                  {room.materialLabel || room.colorLabel ? (
+                    <span className="qf-muted">
+                      {" "}
+                      · {[room.materialLabel, room.colorLabel].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                  {room.roomTotal != null ? (
+                    <span data-testid="qf-de-preview-room-total"> — {money(room.roomTotal)}</span>
+                  ) : null}
+                  {room.countertopAmount != null || (room.addOnLines || []).length > 0 ? (
+                    <ul data-testid="qf-de-preview-room-lines">
+                      {room.countertopAmount != null ? <li>Countertops · {money(room.countertopAmount)}</li> : null}
+                      {(room.addOnLines || []).map((line, j) => (
+                        <li key={`${line.label}-${j}`}>
+                          {line.label} · {money(line.amount)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {room.summaryLines && room.summaryLines.length > 0 ? (
+                    <ul>
+                      {room.summaryLines.map((line, j) => (
+                        <li key={j}>{typeof line === "string" ? line : JSON.stringify(line)}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {(payload.customerPreview.lineItems || []).length > 0 ? (
+            <p className="qf-de__preview-lines-heading" data-testid="qf-de-preview-lines-heading">
+              <strong>Project items</strong> <span className="qf-muted">(not part of any room total)</span>
+            </p>
+          ) : null}
+          {(payload.customerPreview.lineItems || []).length > 0 ? (
+            <ul className="qf-de__preview-lines" data-testid="qf-de-preview-lines">
+              {(payload.customerPreview.lineItems || []).map((line, i) => (
+                <li key={`${line.label || "line"}-${i}`}>
+                  {line.label} · {money(line.amount)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </details>
       ) : null}
 
       <div className="qf-review__actions">

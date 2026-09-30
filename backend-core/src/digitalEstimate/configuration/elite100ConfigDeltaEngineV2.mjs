@@ -485,6 +485,7 @@ export function normalizeTrustedCalculationInput(raw) {
     customLines: Array.isArray(raw.customLines) ? raw.customLines : [],
     credits: Array.isArray(raw.credits) ? raw.credits : [],
     baseline: raw.baseline || null,
+    displayRounding: raw.displayRounding === "exact_cents" ? "exact_cents" : "ceil_to_10_dollars",
     selectionFingerprint: raw.selectionFingerprint || null,
     idempotencyKey: raw.idempotencyKey || null,
     pricingValidThrough: raw.pricingValidThrough || null,
@@ -678,7 +679,10 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     } else if (input.baseline.displayTotal != null) {
       baselineDisplayCents = dollarsToCents(Number(input.baseline.displayTotal));
     } else if (baselineExactCents != null) {
-      baselineDisplayCents = ceilCentsToTenDollars(baselineExactCents);
+      baselineDisplayCents =
+        input.displayRounding === "exact_cents"
+          ? baselineExactCents
+          : ceilCentsToTenDollars(baselineExactCents);
     }
   }
 
@@ -920,7 +924,9 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     baselineDisplayCents != null &&
     anchoredExactDeltaCents != null
       ? baselineDisplayCents + anchoredExactDeltaCents
-      : ceilCentsToTenDollars(configuredExactCents);
+      : input.displayRounding === "exact_cents"
+        ? configuredExactCents
+        : ceilCentsToTenDollars(configuredExactCents);
   if (anchoredExactDeltaCents < 0 && configuredDisplayCents > baselineDisplayCents) {
     throw fail(
       "display_delta_sign_reversal",
@@ -1063,7 +1069,7 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
       unit: "integer_cents",
       percentages: "basis_points",
       sfPrecision: "milli_sf_3dp",
-      displayRounding: "ceil_to_10_dollars"
+      displayRounding: useFrozenBaselineAnchor ? "anchored_to_publication" : input.displayRounding
     }
   };
 

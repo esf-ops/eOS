@@ -37,6 +37,15 @@ import {
   resolvePricedSelectionTotal
 } from "../digitalEstimate/configuration/baselineParityGuardrails.mjs";
 import { splitSelectionPayloadMeta } from "../digitalEstimate/configuration/customerConfigurationDraft.mjs";
+import {
+  checkConfigurationSessionBinding,
+  SESSION_MISMATCH_MESSAGE
+} from "../digitalEstimate/configuration/sessionBinding.mjs";
+import {
+  buildOriginalRoomPricingProjection,
+  toPublicRoomPricingDto
+} from "../digitalEstimate/configuration/customerRoomPricingProjection.mjs";
+import { validateFrozenQuoteForAcceptance } from "./frozenQuoteAcceptance.mjs";
 
 function unavailable(message = "Estimate unavailable", code = "not_found") {
   const e = new Error(message);
@@ -107,6 +116,25 @@ export function rejectFinalAcceptanceAuthority(body) {
       throw safeFail("forbidden_caller_authority", "Please refresh and try again", 400);
     }
   }
+}
+
+/**
+ * Customer-safe room breakdown, kept only when rooms + project items sum to the
+ * accepted total in cents.
+ * @param {any} roomPricing public room pricing DTO
+ * @param {number|null} acceptedTotal
+ */
+function reconciledRoomPricing(roomPricing, acceptedTotal) {
+  if (!roomPricing || typeof roomPricing !== "object" || acceptedTotal == null) return null;
+  if (roomPricing.reconciliationStatus === "failed") return null;
+  const rooms = Array.isArray(roomPricing.rooms) ? roomPricing.rooms : [];
+  const projectAddOns = Array.isArray(roomPricing.projectAddOns) ? roomPricing.projectAddOns : [];
+  const cents = (v) => Math.round((Number(v) || 0) * 100);
+  const sum =
+    rooms.reduce((s, r) => s + (Number(r?.roomTotalDetail?.amountCents) || cents(r?.roomTotal)), 0) +
+    projectAddOns.reduce((s, l) => s + cents(l?.amount), 0);
+  if (sum !== cents(acceptedTotal)) return null;
+  return structuredClone(roomPricing);
 }
 
 function finiteMoney(v) {
@@ -505,6 +533,18 @@ export function createStudioFinalAcceptanceService(deps) {
     }
   }
 
+  async function loadPublishedRoomPricing(organizationId, publicationId) {
+    if (typeof deRepository?.getSnapshotByPublicationId !== "function") return null;
+    try {
+      const snap = await deRepository.getSnapshotByPublicationId(organizationId, publicationId);
+      const customerSnapshot = snap?.customer_snapshot_json || snap?.customerSnapshot || null;
+      if (!customerSnapshot?.roomPricing) return null;
+      return toPublicRoomPricingDto(buildOriginalRoomPricingProjection(customerSnapshot));
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Core accept — used by public route and tests.
    * Idempotent on publication_id.
@@ -520,7 +560,9 @@ export function createStudioFinalAcceptanceService(deps) {
       customerCalc = null,
       selection = null,
       selectionPayload = null,
-      confirm = false
+      confirm = false,
+      asQuoted = false,
+      expectedAcceptMode = null
     } = ctx;
 
     if (!confirm) {
@@ -638,6 +680,18 @@ export function createStudioFinalAcceptanceService(deps) {
       isSelectionOnlyClassification(localClassification) ||
       selectionOnlyOpenReviews.length > 0;
 
+    // The customer confirmed a specific total; never record a different one.
+    if (
+      (expectedAcceptMode === "configured" && !wantsConfigured) ||
+      (expectedAcceptMode === "published" && wantsConfigured)
+    ) {
+      throw safeFail(
+        "configuration_changed",
+        "Your selections changed. Please review the current total and accept again.",
+        409
+      );
+    }
+
     const calc = estimate.calculationSnapshot || estimate.calculation || null;
     const scope = estimate.scope || {};
     const publishedTotal = publishedEstimateTotal(estimate, publication);
@@ -706,6 +760,7 @@ export function createStudioFinalAcceptanceService(deps) {
       assertAcceptableAsPublished({ configuration, customerCalc });
       customerDisplayTotal = publishedTotal;
       customerSafeSnapshot.acceptedAsPublished = true;
+      if (asQuoted) customerSafeSnapshot.acceptanceMode = "as_quoted";
       customerSafeSnapshot.acceptedAsConfigured = false;
       customerSafeSnapshot.acceptedPublicationId = publication.id;
       customerSafeSnapshot.acceptedSelectionId = selection?.id || null;
@@ -714,6 +769,15 @@ export function createStudioFinalAcceptanceService(deps) {
         customerDisplayTotal: publishedTotal
       };
     }
+
+    // Freeze the exact room breakdown the customer accepted (accounting source for
+    // the sales order). Null when it cannot be proven to reconcile to the total.
+    customerSafeSnapshot.acceptedRoomPricing = wantsConfigured
+      ? reconciledRoomPricing(customerCalc?.roomPricing, customerDisplayTotal)
+      : reconciledRoomPricing(
+          await loadPublishedRoomPricing(organizationId, publication.id),
+          customerDisplayTotal
+        );
 
     assertNoInternalEconomicsLeak(customerSafeSnapshot);
 
@@ -805,6 +869,26 @@ export function createStudioFinalAcceptanceService(deps) {
         throw safeFail("session_invalid", "Please refresh and try again", 401);
       }
 
+      const binding = checkConfigurationSessionBinding(session, body, { required: true });
+      if (binding) {
+        throw safeFail(binding, SESSION_MISMATCH_MESSAGE, 409);
+      }
+
+      // Bind acceptance to the configuration the customer is looking at; a save from
+      // another window between render and accept must not be accepted unseen.
+      const expectedRowVersion = body?.expectedRowVersion ?? body?.expected_row_version;
+      if (
+        expectedRowVersion != null &&
+        session.row_version != null &&
+        Number(session.row_version) !== Number(expectedRowVersion)
+      ) {
+        throw safeFail(
+          "configuration_changed",
+          "Your selections changed in another window. Please review the current total and accept again.",
+          409
+        );
+      }
+
       if (!deRepository?.getPublication) {
         throw unavailable();
       }
@@ -815,15 +899,20 @@ export function createStudioFinalAcceptanceService(deps) {
       );
       await assertPublicationAcceptable(session.organization_id, publication);
 
+      // No envelope on the publication and none on the session: online changes were never
+      // offered (view-only publish), so only the exact frozen quote can be accepted.
+      let asQuoted = false;
+      let activeEnvelope = null;
       if (configurationRepository?.getActiveEnvelope) {
-        const activeEnvelope = await configurationRepository.getActiveEnvelope(
+        activeEnvelope = await configurationRepository.getActiveEnvelope(
           session.organization_id,
           session.publication_id
         );
-        if (!activeEnvelope) {
+        if (!activeEnvelope && !session.envelope_id) {
+          asQuoted = true;
+        } else if (!activeEnvelope) {
           throw safeFail("session_invalid", "Please refresh and try again", 401);
-        }
-        if (!session.envelope_id || String(session.envelope_id) !== String(activeEnvelope.id)) {
+        } else if (!session.envelope_id || String(session.envelope_id) !== String(activeEnvelope.id)) {
           throw safeFail("stale_configuration", "Please refresh and try again", 409);
         }
       }
@@ -832,11 +921,24 @@ export function createStudioFinalAcceptanceService(deps) {
       let customerCalc = null;
       let selection = null;
       let selectionPayload = null;
-      if (configurationRepository?.getLatestSelectionForSession) {
+      if (!asQuoted && configurationRepository?.getLatestSelectionForSession) {
         selection = await configurationRepository.getLatestSelectionForSession(
           session.organization_id,
           session.id
         );
+        // A reopened link starts a new session that displays the latest priced draft
+        // for this publication + envelope; acceptance must price that same draft.
+        if (
+          !selection &&
+          activeEnvelope?.id &&
+          typeof configurationRepository.getLatestSelectionForPublicationEnvelope === "function"
+        ) {
+          selection = await configurationRepository.getLatestSelectionForPublicationEnvelope(
+            session.organization_id,
+            session.publication_id,
+            activeEnvelope.id
+          );
+        }
         if (selection) {
           selectionPayload =
             selection.selection_payload_json ||
@@ -856,6 +958,17 @@ export function createStudioFinalAcceptanceService(deps) {
               customerCalc = null;
             }
           }
+        }
+      }
+
+      if (session.row_version != null) {
+        const recheck = await resolveSession(rawSecret);
+        if (Number(recheck.session?.row_version) !== Number(session.row_version)) {
+          throw safeFail(
+            "configuration_changed",
+            "Your selections changed in another window. Please review the current total and accept again.",
+            409
+          );
         }
       }
 
@@ -886,6 +999,19 @@ export function createStudioFinalAcceptanceService(deps) {
         }
       }
 
+      if (asQuoted) {
+        const snap =
+          typeof deRepository.getSnapshotByPublicationId === "function"
+            ? await deRepository.getSnapshotByPublicationId(session.organization_id, publication.id)
+            : null;
+        const frozen = validateFrozenQuoteForAcceptance({ publication, snap, estimate });
+        if (!frozen.ok) {
+          throw safeFail("acceptance_blocked_frozen_quote_invalid", frozen.message, 409, {
+            reasons: frozen.reasons
+          });
+        }
+      }
+
       return acceptResolvedContext({
         organizationId: session.organization_id,
         publication,
@@ -896,7 +1022,9 @@ export function createStudioFinalAcceptanceService(deps) {
         customerCalc,
         selection,
         selectionPayload,
-        confirm
+        confirm,
+        asQuoted,
+        expectedAcceptMode: body?.expectedAcceptMode ?? null
       });
     },
 

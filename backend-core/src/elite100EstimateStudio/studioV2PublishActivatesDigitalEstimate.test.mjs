@@ -28,6 +28,7 @@ import { createStudioV2Service } from "./studioV2Service.mjs";
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import { STUDIO_V2_ERROR_CODES } from "./studioV2Errors.mjs";
 import { decideConfigurationView } from "../../../app-digital-estimate/src/configurationBootstrap.ts";
+import { withRealV4RateEvidence } from "./studioV4CalcTestEvidence.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "../../..");
@@ -51,7 +52,7 @@ const ENV_ON = {
   NODE_ENV: "development"
 };
 
-const fakeCalc = {
+const fakeCalcBase = {
   fingerprint: "v2-interactive-fp",
   calculatedAt: "2026-07-30T18:00:00.000Z",
   pricingVersion: 4,
@@ -84,6 +85,7 @@ const fakeCalc = {
     ]
   }
 };
+const fakeCalc = await withRealV4RateEvidence(fakeCalcBase, approvedScope());
 
 function approvedScope() {
   return {
@@ -115,7 +117,7 @@ function approvedScope() {
       }
     ],
     addOns: { "qty-sink": 1 },
-    customLineItems: fakeCalc.fabrication.customLineItems
+    customLineItems: fakeCalcBase.fabrication.customLineItems
   };
 }
 
@@ -558,6 +560,23 @@ console.log("\nstudioV2PublishActivatesDigitalEstimate.test.mjs\n");
   console.log(
     "ok: V2 publish ignores unapproved Takeoff; still requires approve/current calc; V1 gate intact"
   );
+}
+
+// Interactive intent: a deliberate pricing-rules block passes as view-only; any other
+// document-only result is still refused.
+{
+  const { assertStudioV2InteractivePublishResult } = await import("./studioV2Publish.mjs");
+  const interactive = { mode: "configure", customerChoiceGroups: ["material"], allowedOptionKeys: [] };
+  const blocked = assertStudioV2InteractivePublishResult(
+    { envelope: { configured: false, reason: "pricing_rules_not_reproducible", customerCanChangeOnline: false, message: "m" } },
+    interactive
+  );
+  assert.equal(blocked.configured, false);
+  assert.equal(blocked.customerCanChangeOnline, false);
+  assert.throws(() =>
+    assertStudioV2InteractivePublishResult({ envelope: { configured: false, reason: "DE-ENVELOPE-ACTIVATION-FAILED" } }, interactive)
+  );
+  console.log("ok: interactive guard accepts only the deliberate pricing-rules view-only result");
 }
 
 console.log("\nstudioV2PublishActivatesDigitalEstimate.test.mjs — passed\n");

@@ -41,6 +41,14 @@ const MESSAGES = {
  * @param {string} code
  * @param {string} [fallbackMessage]
  */
+/** Codes whose thrown message is authored validation copy, safe to show staff. */
+export const STAFF_VALIDATION_CODES = new Set([
+  "scope_invalid",
+  "pricing_invalid",
+  "review_not_ready",
+  "publish_not_ready"
+]);
+
 export function quoteFlowSafeError(code, fallbackMessage) {
   const c = String(code || "mailbox_unavailable");
   const normalized =
@@ -89,6 +97,9 @@ export function createQuoteFlowError(code, opts = {}) {
   err.code = safe.code;
   if (opts.diagnostic && typeof opts.diagnostic === "object") {
     err.diagnostic = opts.diagnostic;
+  }
+  if (STAFF_VALIDATION_CODES.has(safe.code) && typeof opts.message === "string" && opts.message.trim()) {
+    err.staffDetail = opts.message.trim().slice(0, 500);
   }
   return err;
 }

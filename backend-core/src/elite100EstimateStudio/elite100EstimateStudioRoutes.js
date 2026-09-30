@@ -80,6 +80,10 @@ import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepo
 import { createStudioSoldReviewService } from "./studioSoldReviewService.mjs";
 import { createStudioAllEstimatesService } from "./studioAllEstimatesService.mjs";
 import { canMarkStudioEstimateSold } from "./studioSoldReviewService.mjs";
+import {
+  createStudioSalesOrderService,
+  enqueueSalesOrderAfterMarkSold
+} from "./qbSalesOrder/studioSalesOrderRoutes.js";
 import { createStudioSimplifiedWorkflowService } from "./studioSimplifiedWorkflow.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
@@ -2280,6 +2284,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       lifecycleRepository,
       studioEstimateRepository: studioEstimateService.repository
     });
+  let salesOrderService = null;
   const allEstimatesService =
     deps.allEstimatesService ||
     createStudioAllEstimatesService({
@@ -2436,7 +2441,17 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         auditStudioEstimate("marked_sold", req, {
           estimateId: req.params.estimateId
         });
-        res.json(result);
+        salesOrderService ||=
+          deps.salesOrderService || createStudioSalesOrderService({ getSupabase, env });
+        const accounting = await enqueueSalesOrderAfterMarkSold({
+          salesOrderService,
+          estimateRepository: studioEstimateService.repository,
+          organizationId,
+          estimateId: req.params.estimateId,
+          soldSnapshotId: result.soldSnapshot.id,
+          actorUserId: req.user?.id || null
+        });
+        res.json({ ...result, ...accounting });
       } catch (e) {
         logStudio("mark sold failed", e, req);
         const { status, body } = lifecycleHttpError(e, "Unable to mark sold");

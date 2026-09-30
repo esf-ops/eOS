@@ -129,6 +129,7 @@ export type LovableRoom = {
   sideSplashPieces: SideSplashPieceSummary[];
   measurementStatus: string | null;
   baselineLabel: string | null;
+  customSlabPackage: boolean;
   selectedColorId: string | null;
   selectedOptionKey: string | null;
   selectedColorName: string | null;
@@ -677,12 +678,20 @@ export function mapEliteOsToLovableViewModel(
   const rooms: LovableRoom[] = (config.rooms || []).map((r) => {
     const colors = colorsForRoom(r.roomKey, options, config.materials);
     const mats = materialOptionsForRoom(options, r.roomKey);
+    // A published color outside the catalog has no baseline option. It stays the room's
+    // material until the customer picks one; the first catalog color must not stand in for it,
+    // because selectedOptionKey is also saved as the room's material.
+    const keepPublishedColor =
+      !roomHasMaterialSelection(r.roomKey) &&
+      Boolean(r.baselineColorLabel) &&
+      !mats.some((m) => m.includedInBaseline || m.defaultQty > 0) &&
+      !colors.some((c) => c.includedInBaseline);
     const selectedOpt =
       mats.find((m) => (effectiveQty[m.optionKey] ?? 0) > 0) ||
       (!roomHasMaterialSelection(r.roomKey)
         ? mats.find((m) => m.includedInBaseline || m.defaultQty > 0)
         : null) ||
-      mats[0] ||
+      (keepPublishedColor ? null : mats[0]) ||
       null;
     const selectedColor =
       colors.find((c) => c.optionKey === selectedOpt?.optionKey) ||
@@ -690,7 +699,7 @@ export function mapEliteOsToLovableViewModel(
       (!roomHasMaterialSelection(r.roomKey)
         ? colors.find((c) => c.includedInBaseline)
         : null) ||
-      colors[0] ||
+      (keepPublishedColor ? null : colors[0]) ||
       null;
     const calcRoom = calcRooms.find((cr) => String(cr.roomKey) === r.roomKey);
     const labelDraft = roomLabelDrafts?.[r.roomKey] ?? config.roomLabelDrafts?.[r.roomKey];
@@ -902,10 +911,14 @@ export function mapEliteOsToLovableViewModel(
       sideSplashPieces,
       measurementStatus: r.measurementStatus || "Measurements verified by estimator",
       baselineLabel: r.baselineColorLabel || r.baselineMaterialLabel || null,
+      customSlabPackage: r.customSlabPackage === true,
       selectedColorId: selectedColor?.id ?? null,
       selectedOptionKey: selectedColor?.optionKey ?? selectedOpt?.optionKey ?? null,
       selectedColorName:
         selectedColor?.name ||
+        // No material choices (e.g. custom slab package): the published color stands.
+        (colors.length === 0 && r.baselineColorLabel ? String(r.baselineColorLabel) : null) ||
+        (keepPublishedColor ? String(r.baselineColorLabel) : null) ||
         (calcRoom?.selectedMaterialLabel != null
           ? String(calcRoom.selectedMaterialLabel)
           : null),

@@ -953,6 +953,8 @@ html, body {
 }
 .plan-preview-frame--image { display: flex; align-items: center; justify-content: center; min-height: 200px; max-height: min(70vh, 720px); }
 .plan-preview-img { display: block; max-width: 100%; max-height: min(70vh, 720px); object-fit: contain; }
+.plan-preview-frame--zoomable { overflow: auto; justify-content: safe center; align-items: safe center; }
+.plan-preview-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .plan-preview-frame--pdf { display: flex; flex-direction: column; gap: 8px; }
 .plan-preview-object,
 .plan-preview-iframe {

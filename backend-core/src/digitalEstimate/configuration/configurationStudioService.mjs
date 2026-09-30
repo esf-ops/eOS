@@ -591,7 +591,7 @@ export function createConfigurationStudioService(deps) {
         body.optionQuantities && typeof body.optionQuantities === "object"
           ? body.optionQuantities
           : {};
-      const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
+      const catalog = new Map(ctx.optionCatalogInternal.map((o) => [o.optionKey, o]));
       const options = [];
       for (const [key, qtyRaw] of Object.entries(optionQuantities)) {
         const cat = catalog.get(key);
@@ -649,7 +649,7 @@ export function createConfigurationStudioService(deps) {
           bps: markupBps,
           ...(markupEvidence || {})
         },
-        materialTaxPolicy: { bps: 200 },
+        materialTaxPolicy: { bps: ctx.materialTaxPolicy.bps },
         options,
         baseline: {
           exactTotal: baselineExact,

@@ -227,6 +227,7 @@ export type ConfigProduct = {
   pricingTreatment?: string | null;
   visibleSellPrice?: number | null;
   visibleDelta?: number | null;
+  includedInBaseline?: boolean;
 };
 
 export type ProductDraft = {
@@ -353,6 +354,9 @@ export type CustomerConfigurationFoundation = {
 export type ConfigurationState = {
   lifecycle: string;
   message?: string | null;
+  /** "baseline" when only the published quote is available (no online changes). */
+  readMode?: "baseline" | null;
+  blockedReason?: string | null;
   estimate?: PublicEstimate | null;
   session?: { id: string; status: string; rowVersion: number; expiresAt?: string | null } | null;
   configuration?: {
@@ -382,6 +386,8 @@ export type ConfigurationState = {
       sourceDisplayName?: string;
       baselineMaterialLabel?: string;
       baselineColorLabel?: string | null;
+      /** Priced from a confirmed custom slab package; material changes go through Elite. */
+      customSlabPackage?: boolean;
       measurementsLocked?: boolean;
       measurementStatus?: string | null;
       countertopIncluded?: boolean;
@@ -820,6 +826,8 @@ export function classifyConfigurationMutationError(
 export async function saveConfigurationSelections(payload: {
   items: Array<{ optionKey: string; quantity: number }>;
   expectedRowVersion: number;
+  /** Session this page exchanged; Brain rejects if the shared cookie now points elsewhere. */
+  expectedSessionId?: string;
   idempotencyKey: string;
   customerInfoDraft?: {
     customerName?: string;
@@ -975,6 +983,7 @@ export type CustomerReviewRequest = {
 
 export async function submitReviewRequest(payload: {
   expectedRowVersion: number;
+  expectedSessionId?: string;
   expectedSelectionHash?: string;
   idempotencyKey: string;
   customerNote?: string;
@@ -1095,6 +1104,12 @@ export function acceptedDisplayTotal(
 export async function submitFinalAcceptance(payload: {
   confirm: true;
   confirmation?: "accept_final_estimate";
+  /** Session row version the customer is viewing; Brain rejects acceptance if it moved. */
+  expectedRowVersion?: number;
+  /** Required: the session this page exchanged, so acceptance cannot land on another open estimate. */
+  expectedSessionId: string;
+  /** Which total the customer confirmed; Brain rejects acceptance that would record the other. */
+  expectedAcceptMode?: "published" | "configured";
 }): Promise<{
   ok: boolean;
   reused?: boolean;
@@ -1175,14 +1190,15 @@ export async function submitFinalAcceptance(payload: {
   };
 }
 
-export async function fetchCurrentFinalAcceptance(): Promise<{
+export async function fetchCurrentFinalAcceptance(expectedSessionId?: string | null): Promise<{
   ok: boolean;
   acceptance: CustomerFinalAcceptance | null;
   configurationLocked?: boolean;
 }> {
   const base = apiBaseUrl();
+  const query = expectedSessionId ? `?expectedSessionId=${encodeURIComponent(expectedSessionId)}` : "";
   try {
-    const res = await fetch(`${base}/api/public-digital-estimate/v2/final-acceptance/current`, {
+    const res = await fetch(`${base}/api/public-digital-estimate/v2/final-acceptance/current${query}`, {
       method: "GET",
       credentials: "include",
       headers: { Accept: "application/json" },
@@ -1260,7 +1276,8 @@ export function formatCurrency(amount: number | null | undefined, currency = "US
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency || "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 

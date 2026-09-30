@@ -264,12 +264,18 @@ function islandEstimate() {
   const commercial = buildCommercialConfiguration(islandEstimate());
   assert.equal(commercial.vanityPrograms.length, 1);
   assert.equal(commercial.vanityPrograms[0].physicalFacts.sinkOpenings, 1);
-  assert.equal(commercial.vanityPrograms[0].selectedProgram, "37_S");
-  assert.equal(
-    commercial.vanityPrograms[0].selectedProgramLabel,
-    "37-inch Single-Bowl Vanity Program"
-  );
-  assert.equal(commercial.vanityPrograms[0].serverPrice, 1850);
+  // Governed projection: the server matches the program from Takeoff facts
+  // (room typed as a vanity) and estimators only elect it.
+  assert.equal(commercial.vanityPrograms[0].eligible, false, "untyped room is not a governed vanity");
+  const typed = islandEstimate();
+  const bath = typed.scope.rooms.find((r) => r.id === "bath");
+  bath.roomType = "vanity";
+  typed.scope.materialGroup = "Group Promo";
+  typed.scope.roomConfigurations = { bath: { vanityProgram: { applyProgram: true } } };
+  const governed = buildCommercialConfiguration(typed).vanityPrograms[0];
+  assert.equal(governed.programLabel, "37-inch Single-Bowl Vanity Program");
+  assert.equal(governed.eligible, true);
+  assert.equal(governed.applied, true);
   console.log("ok: Vanity Program estimator projection");
 }
 

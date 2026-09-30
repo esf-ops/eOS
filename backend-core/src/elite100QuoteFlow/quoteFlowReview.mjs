@@ -16,10 +16,20 @@ import {
   readQuoteFlowCustomLineItems,
   summarizeQuoteFlowCustomLineItems
 } from "./quoteFlowCustomLineItems.mjs";
-import { presentQuoteFlowPricingResult } from "./quoteFlowPricing.mjs";
+import {
+  presentQuoteFlowPricingResult,
+  stampOpenEdgeLfOntoScopeForPricing
+} from "./quoteFlowPricing.mjs";
+import { resolveQuoteFlowSinkRooms } from "./quoteFlowSinkSelection.mjs";
 import { buildStudioV2EditablePricing } from "../elite100EstimateStudio/studioV2Pricing.mjs";
 import { STUDIO_ESTIMATE_STATUSES } from "../elite100EstimateStudio/studioEstimateTypes.mjs";
 import { scopeFingerprint } from "../elite100EstimateStudio/studioEstimatePricing.mjs";
+import { resolveRoomMaterialGroup } from "../elite100EstimateStudio/studioMaterialInheritance.mjs";
+import { resolvePublishedRoomColorName } from "../elite100EstimateStudio/studioEstimatePublicationAdapter.mjs";
+import {
+  getElite100CustomerMaterial,
+  slugifyElite100ColorName
+} from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 
 export { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 
@@ -43,6 +53,46 @@ const NO_SIDE_EFFECTS = Object.freeze({
  */
 function checkItem(severity, id, label, detail = "") {
   return { id, label, severity, detail: detail || null, passed: severity === "passed" };
+}
+
+const GROUP_CODE_BY_LABEL = {
+  "Group Promo": "promo",
+  "Group A": "group_a",
+  "Group B": "group_b",
+  "Group C": "group_c",
+  "Group D": "group_d",
+  "Group E": "group_e",
+  "Group F": "group_f",
+  Remnant: "remnant"
+};
+const GROUP_LABEL_BY_CODE = Object.fromEntries(Object.entries(GROUP_CODE_BY_LABEL).map(([k, v]) => [v, k]));
+
+/**
+ * Rooms whose published color is an Elite 100 catalog color from a different price group
+ * than the room is priced at. The customer sees that color, so the price may be wrong.
+ * @param {object} scope
+ */
+export function findRoomColorGroupMismatches(scope) {
+  const projectColorName = scope?.colorTbd ? null : String(scope?.colorName || "").trim() || null;
+  const rooms = Array.isArray(scope?.rooms) ? scope.rooms.filter((r) => r && r.included !== false) : [];
+  const out = [];
+  for (const room of rooms) {
+    if (String(room.slabPackageId ?? "").trim()) continue;
+    const roomMaterial = resolveRoomMaterialGroup(scope, room);
+    const colorName = resolvePublishedRoomColorName({ projectColorName, room, roomMaterial, slabPackageLabel: null });
+    if (!colorName) continue;
+    const mat = getElite100CustomerMaterial(`e100-${slugifyElite100ColorName(colorName)}`);
+    const pricedCode = GROUP_CODE_BY_LABEL[roomMaterial.group];
+    if (!mat || !pricedCode || mat.pricingGroupCode === pricedCode) continue;
+    out.push({
+      roomId: room.id || null,
+      roomName: String(room.name || room.id || "Room"),
+      colorName,
+      colorGroupLabel: GROUP_LABEL_BY_CODE[mat.pricingGroupCode] || mat.pricingGroupCode,
+      pricedGroup: roomMaterial.group
+    });
+  }
+  return out;
 }
 
 /**
@@ -165,6 +215,42 @@ export function assessQuoteFlowReviewReadiness(row, opts = {}) {
     );
   }
 
+  // 5b. Custom slab packages confirmed (area-based suggestion is not a cutting layout)
+  const slabUnresolved = (Array.isArray(calc?.unresolvedItems) ? calc.unresolvedItems : []).filter(
+    (item) => String(item?.code || "").startsWith("slab_")
+  );
+  const hasSlabRooms = (Array.isArray(scope.rooms) ? scope.rooms : []).some((r) =>
+    String(r?.slabPackageId ?? "").trim()
+  );
+  if (slabUnresolved.length) {
+    checklist.push(
+      checkItem(
+        "blocker",
+        "slab_packages",
+        "Custom slab packages confirmed",
+        slabUnresolved.map((item) => item.message || item.code).join(" ")
+      )
+    );
+  } else if (hasSlabRooms && pricingResult.available === true) {
+    checklist.push(checkItem("passed", "slab_packages", "Custom slab packages confirmed"));
+  }
+
+  // 5c. Staff sink decision for every room the calculator charges a sink cutout
+  const sinkRooms = resolveQuoteFlowSinkRooms(stampOpenEdgeLfOntoScopeForPricing(scope));
+  const undecidedSinkRooms = sinkRooms.filter((r) => r.decisionRequired);
+  if (undecidedSinkRooms.length) {
+    checklist.push(
+      checkItem(
+        "blocker",
+        "sink_selections",
+        "Sinks selected",
+        `Select the sink for ${undecidedSinkRooms.map((r) => r.roomName).join(", ")} (catalog sink or customer-provided) on Pricing, then recalculate.`
+      )
+    );
+  } else if (sinkRooms.length) {
+    checklist.push(checkItem("passed", "sink_selections", "Sinks selected"));
+  }
+
   // 6. Customer total
   const customerTotal =
     pricingResult.customerDisplayTotal ?? pricingResult.estimatedTotal ?? null;
@@ -267,6 +353,20 @@ export function assessQuoteFlowReviewReadiness(row, opts = {}) {
     );
   }
 
+  const colorMismatches = findRoomColorGroupMismatches(scope);
+  if (colorMismatches.length) {
+    checklist.push(
+      checkItem(
+        "warning",
+        "color_price_group",
+        "Colors match their price groups",
+        colorMismatches
+          .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
+          .join("; ")
+      )
+    );
+  }
+
   const blockers = checklist.filter((c) => c.severity === "blocker");
   const warnings = checklist.filter((c) => c.severity === "warning");
   const canApprove = blockers.length === 0;
@@ -306,6 +406,9 @@ export function assessQuoteFlowReviewReadiness(row, opts = {}) {
   }
 
   const listItem = presentQuoteFlowEstimateListItem(row);
+  const ewa = calc?.totals?.estimateWideAdjustment;
+  const estimateWideAdjustmentAmount = Number.isFinite(Number(ewa?.exactAdjustment)) ? Number(ewa.exactAdjustment) : 0;
+  const customFacingNet = customSummary.customerFacingChargesTotal - customSummary.customerFacingCreditsTotal;
   const reviewSummary = {
     estimateName: resolveEstimateDisplayName(listItem) || listItem.estimateName || null,
     source: listItem.scopeSource || null,
@@ -318,7 +421,16 @@ export function assessQuoteFlowReviewReadiness(row, opts = {}) {
     priceGroup: editablePricing?.materialGroup || null,
     priceGroupLabel: editablePricing?.materialGroupLabel || null,
     customerEstimateTotal: customerTotal,
-    customerFacingAdjustments: customSummary.customerFacingChargesTotal - customSummary.customerFacingCreditsTotal,
+    customerFacingAdjustments: Math.round((customFacingNet + estimateWideAdjustmentAmount) * 100) / 100,
+    customLineAdjustments: customFacingNet,
+    estimateWideAdjustment: ewa
+      ? {
+          percentage: Number(ewa.percentage) || 0,
+          amount: estimateWideAdjustmentAmount,
+          reason: typeof ewa.reason === "string" ? ewa.reason : null,
+          source: typeof ewa.source === "string" ? ewa.source : null
+        }
+      : null,
     customerFacingChargesTotal: customSummary.customerFacingChargesTotal,
     customerFacingCreditsTotal: customSummary.customerFacingCreditsTotal,
     internalOnlyAdjustments: customSummary.internalOnlyChargesTotal - customSummary.internalOnlyCreditsTotal,

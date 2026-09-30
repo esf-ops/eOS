@@ -229,6 +229,15 @@ export function assertStudioV2InteractivePublishResult(result, configuration) {
           : true
     };
   }
+  // Deliberately view-only: the pinned pricing cannot be reproduced online.
+  if (envelope?.reason === "pricing_rules_not_reproducible" && envelope.customerCanChangeOnline === false) {
+    return {
+      configured: false,
+      reason: envelope.reason,
+      message: envelope.message || null,
+      customerCanChangeOnline: false
+    };
+  }
   const reason =
     str(envelope?.reason || envelope?.message || result?.code, 200) ||
     "configuration_envelope_missing";

@@ -22,6 +22,7 @@ import OfficialPricingPanel from "./OfficialPricingPanel";
 import OfficialReviewPanel from "./OfficialReviewPanel";
 import OfficialDigitalEstimatePanel from "./OfficialDigitalEstimatePanel";
 import OfficialActivityPanel from "./OfficialActivityPanel";
+import OfficialSoldAccountingPanel from "./OfficialSoldAccountingPanel";
 
 type Props = {
   authToken: string;
@@ -83,8 +84,8 @@ const SECTIONS: {
   {
     key: "handoff",
     label: "Handoff",
-    placeholder: "Sold job handoff will be added after the customer accepts the quote.",
-    active: false
+    placeholder: "",
+    active: true
   }
 ];
 
@@ -896,6 +897,17 @@ export default function EstimatesListPage(props: Props) {
                   data-testid="qf-estimates-section-activity"
                 >
                   <OfficialActivityPanel
+                    authToken={authToken}
+                    estimateId={selectedId}
+                    disabled={saving || detailLoading}
+                  />
+                </section>
+              ) : section === "handoff" && selectedId ? (
+                <section
+                  className="qf-estimates__section is-active"
+                  data-testid="qf-estimates-section-handoff"
+                >
+                  <OfficialSoldAccountingPanel
                     authToken={authToken}
                     estimateId={selectedId}
                     disabled={saving || detailLoading}

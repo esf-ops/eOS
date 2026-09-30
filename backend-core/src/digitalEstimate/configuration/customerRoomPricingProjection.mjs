@@ -221,6 +221,38 @@ function applySelectedLabel(room, category, opt) {
  *   same room stone categories under the same frozen policy version — never
  *   re-derived under current pricing.
  */
+/**
+ * A customer sink switch is priced as the difference from the staff-published sink,
+ * whose frozen price stays in the room as its own line. Fold the two into one line for
+ * the sink actually chosen so the accepted breakdown (and the sales order built from
+ * it) lists one sink at its full price. The room total is unchanged.
+ * @param {Array<{ category: string, label: string, amountCents: number }>} lines
+ */
+export function mergeReplacedPublishedSinkLines(lines) {
+  const out = [...(lines || [])];
+  for (const line of [...out]) {
+    if (line?.category !== "sink") continue;
+    const m = /\(replaces (.+)\)$/.exec(String(line.label || ""));
+    if (!m) continue;
+    const replaced = m[1].trim();
+    const idx = out.findIndex(
+      (l) => l !== line && l?.category === "custom" && String(l.label || "").trim() === `Sink — ${replaced}`
+    );
+    if (idx < 0) continue;
+    const frozen = out[idx];
+    out.splice(idx, 1);
+    const merged = out.indexOf(line);
+    out[merged] = {
+      ...line,
+      label: String(line.label)
+        .replace(/\s*\(replaces .+\)$/, "")
+        .replace(/^Sink — ESF Sink — /, "Sink — "),
+      amountCents: Math.trunc(Number(line.amountCents) || 0) + Math.trunc(Number(frozen.amountCents) || 0)
+    };
+  }
+  return out;
+}
+
 export function buildUpdatedRoomPricingProjection(args) {
   const internal = args?.internal;
   if (!internal || typeof internal !== "object") {
@@ -555,6 +587,9 @@ export function buildUpdatedRoomPricingProjection(args) {
       label: line.label,
       amountCents: line.amountCents
     });
+  }
+  for (const room of roomsByKey.values()) {
+    room.customerFacingLines = mergeReplacedPublishedSinkLines(room.customerFacingLines);
   }
 
   const rooms = order.map((key) => {
@@ -1024,6 +1059,7 @@ function toPublicRoom(room) {
     const amount = moneyPair(line.amountCents);
     return {
       category: CHANGES_CATEGORY_LABEL[line.category] || line.category || "Add-on",
+      categoryKey: line.category || null,
       label: customerSafeProjectionLabel(line.label),
       amount: amount.displayAmount,
       amountCents: amount.amountCents,
@@ -1077,6 +1113,7 @@ function toPublicRoom(room) {
 export function toPublicRoomPricingDto(projection) {
   const rooms = (projection?.rooms || []).map(toPublicRoom);
   const projectAddOns = (projection?.projectAddOns || []).map((l) => ({
+    categoryKey: l.category || null,
     label: customerSafeProjectionLabel(l.label, "Project item"),
     amount: l.amountCents != null ? centsToDollars(l.amountCents) : null
   }));

@@ -93,6 +93,7 @@ export function presentQuoteFlowAcceptance(acceptance) {
       : snap.acceptedAsPublished !== false,
     acceptedSelectionId: snap.acceptedSelectionId || null,
     selectionSource: acceptedAsConfigured ? "customer_configured" : "published",
+    acceptanceMode: snap.acceptanceMode === "as_quoted" ? "as_quoted" : null,
     customerName: str(snap.customerName),
     projectName: str(snap.projectName),
     materialGroup: str(snap.materialGroup)

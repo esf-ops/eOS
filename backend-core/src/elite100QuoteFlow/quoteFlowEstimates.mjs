@@ -316,7 +316,8 @@ export function createQuoteFlowEstimatesService(deps = {}) {
     const scopePatch = {
       rooms,
       quoteFlowScopeEdited: true,
-      quoteFlowManualEdits: true
+      quoteFlowManualEdits: true,
+      quoteFlowScopeEditedAt: new Date().toISOString()
     };
     let addOnsSyncedFromPieces = false;
     if (addOnsProvided) {

@@ -2142,6 +2142,24 @@ body {
   padding-left: 1.1rem;
 }
 
+.qf-de__preview {
+  border: 2px solid var(--eos-accent, #1a4d38);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  background: var(--eos-surface, #fff);
+}
+
+.qf-de__preview summary {
+  cursor: pointer;
+}
+
+.qf-de__preview-rooms,
+.qf-de__preview-lines {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .qf-activity__summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr));
@@ -2443,6 +2461,51 @@ body {
   background: #f8f9fc;
 }
 
+.qf-sold__checklist {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.qf-sold__status.is-synced {
+  color: #1f6b3a;
+  font-weight: 700;
+}
+
+.qf-sold__status.is-blocked,
+.qf-sold__status.is-needs_attention {
+  color: #9a3412;
+  font-weight: 700;
+}
+
+.qf-sold__blockers {
+  margin: 0.75rem 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.qf-sold__candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.qf-sold__typed-job {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.qf-sold__typed-job input {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
 @media print {
   .qf-review__actions,
   .qf-activity__timeline,
@@ -2701,6 +2764,18 @@ body {
 
 .qf-scope__link-btn:hover:not(:disabled) {
   color: var(--eos-ink);
+}
+
+.qf-scope__inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+}
+
+.qf-scope__inline-field input,
+.qf-scope__table .qf-scope__inline-field input[type="number"] {
+  width: 5.5em;
 }
 
 .qf-scope__link-btn:disabled {

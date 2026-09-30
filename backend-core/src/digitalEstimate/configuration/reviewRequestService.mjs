@@ -9,6 +9,7 @@ import {
 } from "./amendmentConfig.mjs";
 import { rejectClientAuthoritativeEconomics } from "./configurationTrustedContext.mjs";
 import { splitSelectionPayloadMeta } from "./customerConfigurationDraft.mjs";
+import { checkConfigurationSessionBinding, SESSION_MISMATCH_MESSAGE } from "./sessionBinding.mjs";
 import {
   classifyCustomerConfigurationForReview,
   classifyReviewRequestForEliteReview
@@ -210,6 +211,9 @@ export function createReviewRequestService(deps) {
       }
       if (!["active", "configuring", "saved"].includes(session.status)) {
         throw safeFail("session_invalid", "Please refresh and try again", 401);
+      }
+      if (checkConfigurationSessionBinding(session, body) === "session_mismatch") {
+        throw safeFail("session_mismatch", SESSION_MISMATCH_MESSAGE, 409);
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409);

@@ -946,13 +946,10 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
   const result = await calculateElite100Estimate({ scope, configuration });
   const exact = result.totals.exactTotal;
   assert.notEqual(exact % 10, 0, "test fixture must produce a non-multiple-of-10 exact total");
-  assert.equal(result.totals.displayTotal, Math.ceil(exact / 10) * 10);
-  assert.ok(result.totals.displayTotal >= exact);
-  assert.ok(result.totals.displayTotal - exact < 10);
-  // Room lines are never independently rounded to the nearest 10.
-  assert.equal(result.rooms[0].exactTotal, exact, "single-room estimate: room exact total must equal the unrounded estimate exact total");
-  assert.notEqual(result.rooms[0].exactTotal % 10 === 0 ? "rounded" : "exact", "rounded");
-  console.log(`ok: exact total (${exact}) preserved internally; display total (${result.totals.displayTotal}) rounds up once to the nearest $10; room totals are not independently rounded`);
+  assert.equal(result.totals.displayTotal, exact, "customer display total is the exact total in cents");
+  assert.equal(result.totals.displayRounding, "exact_cents");
+  assert.equal(result.rooms[0].exactTotal, exact, "single-room estimate: room exact total must equal the estimate exact total");
+  console.log(`ok: display total (${result.totals.displayTotal}) equals exact total in cents; no nearest-$10 rounding`);
 }
 
 // =========================================================================

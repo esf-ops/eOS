@@ -64,11 +64,7 @@
  */
 
 import { ceilBillableSquareFeet } from "../quotes/billableSquareFeet.mjs";
-import {
-  ESF_DIRECT_PRICE_PER_SQFT,
-  PROTOTYPE_TIER_PRICE_PER_SQFT,
-  roundPublicEstimateToNearestTen
-} from "../quotes/quoteCalculator.js";
+import { ESF_DIRECT_PRICE_PER_SQFT, PROTOTYPE_TIER_PRICE_PER_SQFT } from "../quotes/quoteCalculator.js";
 import {
   ALL_EDGE_PROFILES,
   edgeProfileDisplayLabel,
@@ -90,6 +86,14 @@ import {
 } from "./studioEstimateWideAdjustment.mjs";
 import { MATERIAL_GROUPS } from "./studioEstimateTypes.mjs";
 import {
+  priceSlabPackages,
+  SLAB_PACKAGE_COST_MULTIPLIER,
+  SLAB_PACKAGE_DEFAULT_WASTE_PERCENT,
+  SLAB_PACKAGE_MATERIAL_GROUP,
+  SLAB_PACKAGE_WASTE_METHOD,
+  toCustomerSafeSlabPackage
+} from "./elite100SlabPackagePricing.mjs";
+import {
   STUDIO_COMMERCIAL_ROLES,
   commercialRoleAffectsCustomerTotal,
   commercialRoleIsPublicNamed,
@@ -108,6 +112,9 @@ import {
 /** New calculator identity — distinct from quoteCalculator/studioEstimatePricing pricingVersion 1-3. */
 export const ELITE100_ROOM_PRICING_ENGINE = "elite100-room-pricing-v1";
 export const ELITE100_ROOM_PRICING_VERSION = 4;
+
+/** Stamped on every new calculation so frozen snapshots record which display rule produced them. */
+export const ELITE100_DISPLAY_ROUNDING = "exact_cents";
 
 /**
  * Direct/Retail $/SF book — identical to the existing ESF Direct authority
@@ -581,8 +588,14 @@ function calculateElite100Room(args) {
   const pieces = (Array.isArray(room?.pieces) ? room.pieces : []).filter((p) => p && p.included !== false);
   const counterPieces = pieces.filter((p) => !isBacksplashPiece(p));
 
-  const materialGroup = normalizeElite100MaterialGroup(roomConfig?.materialGroup);
-  if (!roomConfig?.materialGroup) {
+  // Custom slab package rooms: stone, fabrication and installation come from the
+  // package (priced once per package in calculateElite100Estimate); extras below
+  // keep their explicit charges.
+  const slabPackageId = String(roomConfig?.slabPackageId ?? "").trim() || null;
+  const materialGroup = slabPackageId
+    ? SLAB_PACKAGE_MATERIAL_GROUP
+    : normalizeElite100MaterialGroup(roomConfig?.materialGroup);
+  if (!slabPackageId && !roomConfig?.materialGroup) {
     warnings.push({
       code: "material_group_missing",
       message: `Room "${roomName}": no material/color selected — defaulted to ${materialGroup}.`
@@ -595,6 +608,7 @@ function calculateElite100Room(args) {
     env: pricingContext?.env,
     pricingContext
   });
+  const stoneRatePerSf = slabPackageId ? 0 : rateInfo.rate;
 
   // Geometry — always computed for audit, even when a Vanity Program bundle replaces the $ charge.
   let measuredCountertopSf = 0;
@@ -617,7 +631,7 @@ function calculateElite100Room(args) {
     (s, sink) => s + Math.max(0, Math.floor(Number(sink?.quantity ?? 1) || 0)),
     0
   );
-  if (isVanityRoomType && primaryPiece) {
+  if (isVanityRoomType && primaryPiece && !slabPackageId) {
     vanityProgram = evaluateElite100VanityProgram({
       piece: primaryPiece,
       sinkCount: vanitySinkCount,
@@ -629,7 +643,7 @@ function calculateElite100Room(args) {
   const bundled = Boolean(vanityProgram?.qualifies);
 
   // Countertop material.
-  const countertopMaterialSubtotal = bundled ? 0 : round2(billedCountertopSf * rateInfo.rate);
+  const countertopMaterialSubtotal = bundled ? 0 : round2(billedCountertopSf * stoneRatePerSf);
 
   // Backsplash (skipped when bundled — the program includes a standard backsplash).
   let backsplashSelected = false;
@@ -658,7 +672,7 @@ function calculateElite100Room(args) {
       }
       backsplashMeasuredSf = round2((Math.max(0, runLengthIn) * backsplashHeightIn) / 144);
       backsplashBilledSf = ceilBillableSquareFeet(backsplashMeasuredSf);
-      backsplashMaterialSubtotal = round2(backsplashBilledSf * rateInfo.rate);
+      backsplashMaterialSubtotal = round2(backsplashBilledSf * stoneRatePerSf);
     }
   } else if (roomConfig?.backsplash?.selected) {
     warnings.push({
@@ -684,7 +698,7 @@ function calculateElite100Room(args) {
     sideSplashBilledSf += billed;
     sideSplashDetails.push({ pieceId: piece.id ?? null, selection: sel, measuredSf: measured, billedSf: billed });
   }
-  const sideSplashMaterialSubtotal = round2(sideSplashBilledSf * rateInfo.rate);
+  const sideSplashMaterialSubtotal = round2(sideSplashBilledSf * stoneRatePerSf);
 
   // Waterfalls — always available regardless of bundling.
   const waterfallSelections = Array.isArray(roomConfig?.waterfalls) ? roomConfig.waterfalls : [];
@@ -717,7 +731,7 @@ function calculateElite100Room(args) {
     const legHeightIn = Math.max(0, Number(wf?.legHeightIn) || 0);
     const measuredSf = round2((width * legHeightIn) / 144);
     const billedSf = ceilBillableSquareFeet(measuredSf);
-    const materialAmount = round2(billedSf * rateInfo.rate);
+    const materialAmount = round2(billedSf * stoneRatePerSf);
     const taxAmount = round2(materialAmount * (ELITE100_MATERIAL_USE_TAX_PERCENT / 100));
     const laborAmount = ELITE100_WATERFALL_LABOR_PER_LEG;
     const polishAmount = wf?.backsidePolish === true ? ELITE100_BACKSIDE_POLISH : 0;
@@ -748,7 +762,7 @@ function calculateElite100Room(args) {
       legHeightIn,
       measuredSf,
       billedSf,
-      materialRatePerSf: rateInfo.rate,
+      materialRatePerSf: stoneRatePerSf,
       materialAmount,
       taxAmount,
       laborAmount,
@@ -928,8 +942,14 @@ function calculateElite100Room(args) {
     roomType,
     materialGroup,
     pricingBasis: rateInfo.basis,
-    materialRatePerSf: rateInfo.rate,
-    materialRateSource: rateInfo.rateSource,
+    materialRatePerSf: stoneRatePerSf,
+    materialRateSource: slabPackageId ? "slab_package" : rateInfo.rateSource,
+    slabPackageId,
+    // Physical stone area the package must cover (measured, not per-piece billed).
+    slabPackageRequiredSf: slabPackageId
+      ? round2(measuredCountertopSf + backsplashMeasuredSf + sideSplashMeasuredSf + waterfallMeasuredSf)
+      : 0,
+    slabPackage: null,
     wattsOverrideApplied: rateInfo.wattsOverrideApplied,
     measuredCountertopSf,
     billedCountertopSf,
@@ -1009,6 +1029,11 @@ function buildElite100PricingSnapshot(args) {
       materialUseTaxPercent: ELITE100_MATERIAL_USE_TAX_PERCENT
     },
     cutoutRates: ELITE100_CUTOUT_RATES,
+    slabPackageRules: {
+      costMultiplier: SLAB_PACKAGE_COST_MULTIPLIER,
+      defaultWastePercent: SLAB_PACKAGE_DEFAULT_WASTE_PERCENT,
+      wasteMethod: SLAB_PACKAGE_WASTE_METHOD
+    },
     vanityProgramTable: VANITY_PROGRAM_2026_BY_CODE,
     vanityProgramYear: VANITY_PROGRAM_YEAR,
     vanityProgramTierThresholdSqft: VANITY_TIER_THRESHOLD_SQFT,
@@ -1035,6 +1060,17 @@ function buildElite100PricingSnapshot(args) {
  */
 export function toCustomerSafeElite100RoomResult(room) {
   const lineItems = [];
+  if (room.slabPackage) {
+    lineItems.push({
+      label: `Installed Material Package — ${room.slabPackage.label}`,
+      amount: room.slabPackage.allocatedAmount,
+      ...(room.slabPackage.shared
+        ? {
+            note: `Shared package for ${room.slabPackage.roomNames.join(", ")}; package total $${room.slabPackage.packageTotal.toFixed(2)}.`
+          }
+        : {})
+    });
+  }
   if (room.countertopMaterialDisplayAmount > 0 || room.bundled) {
     lineItems.push({ label: "Countertop Material", amount: room.countertopMaterialDisplayAmount });
   }
@@ -1089,6 +1125,7 @@ export function toCustomerSafeElite100EstimateResult(estimate) {
     pricingVersion: estimate.pricingVersion,
     calculatedAt: estimate.calculatedAt,
     rooms: (estimate.rooms || []).map(toCustomerSafeElite100RoomResult),
+    slabPackages: (estimate.slabPackages || []).map(toCustomerSafeSlabPackage),
     estimateLineItems,
     total: estimate.totals?.displayTotal,
     exactTotal: estimate.totals?.exactTotal,
@@ -1138,6 +1175,35 @@ export async function calculateElite100Estimate(args = {}) {
     unresolved.push(...result.unresolved);
   }
 
+  const slabPricing = priceSlabPackages({
+    packages: scope.slabPackages,
+    roomAreas: roomResults
+      .filter((r) => r.slabPackageId)
+      .map((r) => ({
+        roomId: r.roomId,
+        roomName: r.roomName,
+        packageId: r.slabPackageId,
+        requiredSf: r.slabPackageRequiredSf
+      }))
+  });
+  for (const pkg of slabPricing.packages) {
+    for (const alloc of pkg.allocations) {
+      const room = roomResults.find((r) => r.roomId === alloc.roomId);
+      if (!room) continue;
+      room.slabPackage = {
+        packageId: pkg.packageId,
+        label: pkg.label,
+        shared: pkg.shared,
+        roomNames: pkg.roomNames,
+        packageTotal: pkg.total,
+        allocatedAmount: alloc.amount
+      };
+      room.exactTotal = round2(room.exactTotal + alloc.amount);
+    }
+  }
+  warnings.push(...slabPricing.warnings);
+  unresolved.push(...slabPricing.unresolved);
+
   const estimateCustomLines = customLines.filter((l) => l.roomId == null);
   const estimateCustomerFacing = estimateCustomLines.filter((l) => l.publicNamed);
   const estimateHidden = estimateCustomLines.filter((l) => l.foldedIntoCountertopMaterial);
@@ -1168,7 +1234,9 @@ export async function calculateElite100Estimate(args = {}) {
     : 0;
 
   const exactTotal = round2(preAccountTotal + accountAdjustment);
-  const displayTotal = roundPublicEstimateToNearestTen(exactTotal);
+  // Customer, acceptance and accounting totals share exact cents. Calculations saved
+  // before this rule keep their stored nearest-$10 displayTotal; nothing re-rounds them.
+  const displayTotal = exactTotal;
   const exactInternalTotal = round2(exactTotal + estimateInternalOnlyTotal + estimateAbsorbedTotal);
 
   const calculatedAt = (pricingContext.now instanceof Date ? pricingContext.now : new Date()).toISOString();
@@ -1180,6 +1248,7 @@ export async function calculateElite100Estimate(args = {}) {
     accountAdjustment,
     exactTotal,
     displayTotal,
+    displayRounding: ELITE100_DISPLAY_ROUNDING,
     exactInternalTotal,
     internalOnlyTotal: estimateInternalOnlyTotal,
     absorbedTotal: estimateAbsorbedTotal,
@@ -1219,6 +1288,8 @@ export async function calculateElite100Estimate(args = {}) {
     pricingBasis,
     qualifyingKitchenCounterSf,
     rooms: roomResults,
+    // Internal only (costs, multiplier, slab counts) — never serialize to customers.
+    slabPackages: slabPricing.packages,
     estimateCustomLines: {
       customerFacing: estimateCustomerFacing,
       hiddenCustomerCharge: estimateHidden,

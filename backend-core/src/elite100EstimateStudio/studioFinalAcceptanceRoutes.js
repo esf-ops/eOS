@@ -31,6 +31,10 @@ import {
 import { createStudioFinalAcceptanceService } from "./studioFinalAcceptanceService.mjs";
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepositoryFactory.mjs";
+import {
+  checkConfigurationSessionBinding,
+  SESSION_MISMATCH_MESSAGE
+} from "../digitalEstimate/configuration/sessionBinding.mjs";
 
 const jsonParser = express.json({ limit: "64kb" });
 const UNAVAILABLE = Object.freeze({ ok: false, error: "Estimate unavailable" });
@@ -65,6 +69,8 @@ function publicError(res, e) {
       "A newer estimate is available. Please use the latest estimate link from Elite.";
   } else if (code === "confirmation_required") {
     message = "Please confirm you are accepting this estimate.";
+  } else if (code === "session_mismatch" || code === "session_binding_missing") {
+    message = SESSION_MISMATCH_MESSAGE;
   } else if (
     code === "acceptance_blocked_selection_changes" ||
     code === "acceptance_blocked_scope_review" ||
@@ -234,6 +240,11 @@ export function attachStudioFinalAcceptanceRoutes(app, deps) {
       const session = await configurationRepository.getSessionBySecretHash(secretHash);
       if (!session) {
         return res.json({ ok: true, acceptance: null, code: "no_current_acceptance" });
+      }
+      const expectedSessionId =
+        typeof req.query?.expectedSessionId === "string" ? req.query.expectedSessionId : "";
+      if (checkConfigurationSessionBinding(session, { expectedSessionId }) === "session_mismatch") {
+        return res.json({ ok: true, acceptance: null, code: "session_mismatch" });
       }
       try {
         const acceptance = await service.getAcceptanceForPublication(

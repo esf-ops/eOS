@@ -13,6 +13,8 @@ import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import { attachDigitalEstimateReviewRequestRoutes } from "./reviewRequestRoutes.js";
 import { createInMemoryAmendmentRepository } from "./amendmentRepository.mjs";
 import express from "express";
+import { ESF_DIRECT_PRICE_PER_SQFT } from "../../quotes/quoteCalculator.js";
+import { ELITE100_CUTOUT_RATES } from "../../elite100EstimateStudio/elite100RoomPricingCalculator.mjs";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const QUOTE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -54,7 +56,19 @@ async function seed() {
       materialGroup: "Group Promo",
       materialProgramDefault: "elite_100",
       totals: { retail: 8361, wholesale: 8000, estimated_sqft: 68 },
+      pricingRuleEvidence: {
+        schema: 1,
+        pricingBasis: "direct",
+        materialRateTable: { ...ESF_DIRECT_PRICE_PER_SQFT },
+        materialUseTaxPercent: 2,
+        cutoutRates: { ...ELITE100_CUTOUT_RATES },
+        rooms: [
+          { roomKey: ROOM, materialGroup: "Group Promo", ratePerSf: ESF_DIRECT_PRICE_PER_SQFT["Group Promo"], rateSource: "elite100_v4_fallback_table", materialUseTaxPercent: 2 }
+        ],
+        accountRules: { wattsTrusted: false, spahnTrusted: false, estimateWideAdjustmentPercent: 0 }
+      },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 8361,
         estimate_rooms: [

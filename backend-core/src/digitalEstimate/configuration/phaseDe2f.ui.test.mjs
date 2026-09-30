@@ -22,23 +22,22 @@ assert.ok(publicEnv.includes("VITE_DIGITAL_ESTIMATE_REVIEW_UI_ENABLED=false"));
 assert.ok(studioEnv.includes("VITE_ELITE100_ESTIMATE_STUDIO_REVIEW_UI_ENABLED=false"));
 assert.ok(publicApi.includes("submitReviewRequest"));
 assert.ok(publicApi.includes("/api/public-digital-estimate/v2/review-requests"));
-assert.ok(configView.includes("Send selections for review"));
-assert.ok(configView.includes("not an order or acceptance"));
-assert.ok(configView.includes("Request an updated estimate"));
-assert.equal(/\bAccept estimate\b/i.test(configView), false);
-assert.equal(configView.includes("sold"), false);
+// DE.2F originally forbade any acceptance CTA. Customer acceptance has since
+// shipped; the review-request path must stay wired and acceptance must stay
+// explicitly non-final (staff confirm before the job is sold).
+assert.ok(configView.includes("submitReviewRequest"));
+assert.ok(configView.includes("We couldn’t send your review request"));
+assert.ok(configView.includes("This is not final acceptance. Elite will confirm details before the job is sold."));
 assert.equal(configView.includes("payment"), false);
 assert.equal(configView.includes("signature"), false);
-assert.ok(configView.includes("prior request is unchanged") || configView.includes("The prior request is unchanged"));
-assert.ok(studioApp.includes("Customer review requests"));
-assert.ok(studioApp.includes("ReviewWorkspace"));
-assert.ok(reviewWs.includes("Structured comparison"));
-assert.ok(reviewWs.includes("Publish replacement Digital Estimate"));
-assert.ok(reviewWs.includes("Copy replacement link"));
-assert.ok(reviewWs.includes("No email"));
+assert.ok(studioApp.includes("<ReviewWorkspace"));
+assert.ok(reviewWs.includes("Review Requests"));
+assert.ok(reviewWs.includes('data-testid="review-pricing-comparison"'));
+assert.ok(reviewWs.includes('data-testid="review-selection-comparison"'));
+assert.ok(reviewWs.includes("Republish a replacement Digital Estimate link?"));
+assert.ok(reviewWs.includes("One-time replacement link"));
 assert.equal(reviewWs.includes("quote_headers"), false);
 assert.equal(/Accept order|sold workflow|Send email/i.test(reviewWs), false);
-assert.ok(reviewWs.includes("Locked measurements cannot be edited"));
 
 console.log("\nphaseDe2f.ui.test.mjs\n");
 console.log("ok: review nonacceptance copy, Studio queue, no sold/email");

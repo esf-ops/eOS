@@ -609,4 +609,40 @@ function edgeChangeSelectionReview({ reviewRequested = true } = {}) {
   console.log("ok: route/source contracts; reuses Studio selection review; no sold/handoff");
 }
 
+{
+  const editedAt = "2026-09-30T15:00:00.000Z";
+  const acceptedAt = "2026-09-30T16:47:20.000Z";
+  const soldAt = "2026-09-30T16:47:51.000Z";
+  const base = scopedRow(EST_R2, 2);
+  const row = {
+    ...base,
+    updatedAt: soldAt,
+    scope: { ...base.scope, quoteFlowScopeEdited: true, quoteFlowScopeEditedAt: editedAt }
+  };
+  const activity = buildQuoteFlowActivityPayload(row, {
+    activePublication: { id: PUB_ID, customerUrl: "http://localhost:5190/e/token-3" },
+    acceptance: {
+      id: randomUUID(),
+      accepted_at: acceptedAt,
+      publication_id: PUB_ID,
+      estimate_revision: 2,
+      customer_display_total: 2619.75,
+      customer_safe_snapshot_json: { acceptanceMode: "as_quoted", totals: { customerDisplayTotal: 2619.75 } }
+    },
+    soldSnapshot: { id: randomUUID(), sold_at: soldAt, customer_display_total: 2619.75 },
+    organizationId: ORG
+  });
+  const edited = activity.timeline.find((e) => e.type === "scope_edited");
+  assert.equal(edited.at, editedAt, "scope edit keeps its own time, not the acceptance/sold row update");
+  const accepted = activity.timeline.find((e) => e.type === "customer_accepted");
+  assert.match(accepted.detail || accepted.description || "", /Accepted as quoted.*\$2,619\.75/);
+  const sold = activity.timeline.find((e) => e.type === "marked_sold");
+  assert.ok(sold, "marked sold appears in the timeline");
+  assert.equal(sold.at, soldAt);
+  const order = activity.timeline.map((e) => e.type);
+  assert.ok(order.indexOf("scope_edited") < order.indexOf("customer_accepted"));
+  assert.ok(order.indexOf("customer_accepted") < order.indexOf("marked_sold"));
+  console.log("ok: timeline — scope edit time, accepted-as-quoted total, marked sold");
+}
+
 console.log("\nquoteFlowActivity.test.mjs: ok\n");

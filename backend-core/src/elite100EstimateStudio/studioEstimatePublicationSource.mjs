@@ -103,13 +103,14 @@ export async function ensureStudioEstimatePublicationSource(input) {
   const baseNumber = studioEstimateQuoteNumber(estimate);
   // quote_number is globally unique — include revision so re-approvals of new estimate ids work.
   const quoteNumber = `${baseNumber}-R${revision}`;
-  const customerDisplayTotal = Math.round(
-    Number(
-      estimate.approval?.customerDisplayTotal ??
-        estimate.calculationSnapshot?.totals?.customerDisplayTotal ??
-        0
-    ) || 0
-  );
+  const customerDisplayTotal =
+    Math.round(
+      (Number(
+        estimate.approval?.customerDisplayTotal ??
+          estimate.calculationSnapshot?.totals?.customerDisplayTotal ??
+          0
+      ) || 0) * 100
+    ) / 100;
   const scope = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const nowIso = new Date().toISOString();
 

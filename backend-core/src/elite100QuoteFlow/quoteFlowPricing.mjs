@@ -35,6 +35,21 @@ import {
 import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 import { customerSafeCutoutLinesFromCharges } from "../elite100EstimateStudio/customerSafeCutoutPresentation.mjs";
 import { mergePricedCutoutsIntoFabricationAddOns } from "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs";
+import {
+  buildVanityProgramScopePatch,
+  resolveGovernedVanityPrograms
+} from "../elite100EstimateStudio/studioVanityProgramGovernance.mjs";
+import {
+  applyQuoteFlowSinkSelections,
+  listStaffSinkCatalog,
+  resolveQuoteFlowSinkRooms,
+  VANITY_PROGRAM_SINK_TYPES
+} from "./quoteFlowSinkSelection.mjs";
+import {
+  normalizeSlabPackage,
+  SLAB_PACKAGE_COST_MULTIPLIER,
+  SLAB_PACKAGE_DEFAULT_WASTE_PERCENT
+} from "../elite100EstimateStudio/elite100SlabPackagePricing.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -47,6 +62,125 @@ const NO_SIDE_EFFECTS = Object.freeze({
   refreshScopeFromTakeoff: false,
   estimateApproved: false
 });
+
+/**
+ * Estimator's add/remove Vanity Program decision per room, stored where Studio and the
+ * v4 adapter already read it (`scope.roomConfigurations[roomId].vanityProgram`).
+ * Eligibility is judged on the stamped scope because piece openings, not persisted
+ * `scope.addOns`, are the sink-count authority the calculator receives.
+ * @param {object} scope
+ * @param {unknown} raw
+ */
+export function applyQuoteFlowVanityProgramElections(scope, raw) {
+  const field = "pricing.vanityPrograms";
+  if (!Array.isArray(raw)) {
+    return { ok: false, issues: [{ field, message: "Vanity Program selections must be a list." }] };
+  }
+  const governed = new Map(
+    resolveGovernedVanityPrograms({ scope: stampOpenEdgeLfOntoScopeForPricing(scope) }).map(
+      (row) => [String(row.roomId || ""), row]
+    )
+  );
+  const roomConfigurations =
+    scope?.roomConfigurations && typeof scope.roomConfigurations === "object"
+      ? { ...scope.roomConfigurations }
+      : {};
+  for (const entry of raw) {
+    const roomId = String(entry?.roomId || "").trim();
+    const row = roomId ? governed.get(roomId) : null;
+    if (!row) {
+      return {
+        ok: false,
+        issues: [{ field, message: "The Vanity Program can only be set on a vanity room in Scope." }]
+      };
+    }
+    const apply = entry?.apply === true;
+    if (apply && !row.eligible) {
+      return {
+        ok: false,
+        issues: [{ field, message: row.ineligibleDetail || row.ineligibleReason }]
+      };
+    }
+    Object.assign(
+      roomConfigurations,
+      buildVanityProgramScopePatch({ roomId, apply, existing: roomConfigurations[roomId] })
+    );
+  }
+  return { ok: true, scope: { ...scope, roomConfigurations } };
+}
+
+const MAX_SLAB_PACKAGES = 20;
+
+/**
+ * Replace the estimate's custom slab packages (`scope.slabPackages`). Costs stay in
+ * scope (internal); the calculator projects only label + installed amounts to customers.
+ * @param {object} scope
+ * @param {unknown} raw
+ */
+export function applyQuoteFlowSlabPackages(scope, raw) {
+  const field = "pricing.slabPackages";
+  if (!Array.isArray(raw)) {
+    return { ok: false, issues: [{ field, message: "Custom slab packages must be a list." }] };
+  }
+  if (raw.length > MAX_SLAB_PACKAGES) {
+    return { ok: false, issues: [{ field, message: `At most ${MAX_SLAB_PACKAGES} custom slab packages.` }] };
+  }
+  const seen = new Set();
+  const packages = [];
+  for (const entry of raw) {
+    const pkg = normalizeSlabPackage(entry);
+    if (!pkg || !/^[A-Za-z0-9_-]{1,64}$/.test(pkg.id)) {
+      return { ok: false, issues: [{ field, message: "Each custom slab package needs a valid id." }] };
+    }
+    if (seen.has(pkg.id)) {
+      return { ok: false, issues: [{ field, message: `Duplicate custom slab package id "${pkg.id}".` }] };
+    }
+    seen.add(pkg.id);
+    for (const [key, label] of [
+      ["slabLengthIn", "slab length"],
+      ["slabWidthIn", "slab width"],
+      ["costPerSlab", "cost per slab"]
+    ]) {
+      const v = entry[key];
+      if (v != null && v !== "" && !(Number(v) >= 0)) {
+        return { ok: false, issues: [{ field, message: `"${pkg.label}": ${label} must be a positive number.` }] };
+      }
+    }
+    if (pkg.slabLengthIn > 240 || pkg.slabWidthIn > 120) {
+      return { ok: false, issues: [{ field, message: `"${pkg.label}": slab dimensions look wrong (inches).` }] };
+    }
+    if (pkg.confirmedSlabQuantity != null && pkg.confirmedSlabQuantity > 100) {
+      return { ok: false, issues: [{ field, message: `"${pkg.label}": slab quantity looks wrong.` }] };
+    }
+    packages.push(pkg);
+  }
+  return { ok: true, scope: { ...scope, slabPackages: packages } };
+}
+
+/**
+ * Every room slab election must reference a package on the estimate.
+ * @param {object} scope
+ */
+function validateRoomSlabElections(scope) {
+  const ids = new Set(
+    (Array.isArray(scope?.slabPackages) ? scope.slabPackages : []).map((p) => String(p?.id || ""))
+  );
+  for (const room of Array.isArray(scope?.rooms) ? scope.rooms : []) {
+    const id = String(room?.slabPackageId ?? "").trim();
+    if (id && !ids.has(id)) {
+      return {
+        ok: false,
+        issues: [
+          {
+            field: "pricing.roomSelections",
+            message: `Room "${room?.name || room?.id}": choose an existing custom slab package or Elite 100.`
+          }
+        ]
+      };
+    }
+  }
+  return { ok: true };
+}
 
 /**
  * Ensure openEdgeLf stamps finishedEdgeLf before calculator mapping.
@@ -350,6 +484,11 @@ export function createQuoteFlowPricingService(deps = {}) {
       else delete prior.tearout;
       nextScope.addOns = prior;
     }
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "slabPackages")) {
+      const slab = applyQuoteFlowSlabPackages(nextScope, pricingPayload.slabPackages);
+      if (!slab.ok) return { ok: false, issues: slab.issues };
+      nextScope = slab.scope;
+    }
     if (Array.isArray(pricingPayload.roomSelections)) {
       const byId = new Map(
         pricingPayload.roomSelections
@@ -367,11 +506,15 @@ export function createQuoteFlowPricingService(deps = {}) {
             const g = normalizeStudioV2MaterialGroup(patch.materialGroupOverride);
             next.materialGroupOverride = g || null;
           }
+          if (Object.prototype.hasOwnProperty.call(patch, "slabPackageId")) {
+            next.slabPackageId = String(patch.slabPackageId ?? "").trim() || null;
+          }
           if (Object.prototype.hasOwnProperty.call(patch, "colorNameOverride")) {
             next.colorNameOverride = String(patch.colorNameOverride || "").trim() || null;
           }
           if (Object.prototype.hasOwnProperty.call(patch, "colorTbd")) {
-            if (patch.colorTbd === true) {
+            next.colorTbd = patch.colorTbd === true;
+            if (next.colorTbd) {
               next.colorNameOverride = null;
             }
           }
@@ -392,6 +535,27 @@ export function createQuoteFlowPricingService(deps = {}) {
           return next;
         });
       }
+    }
+    const slabRefs = validateRoomSlabElections(nextScope);
+    if (!slabRefs.ok) return { ok: false, issues: slabRefs.issues };
+
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "vanityPrograms")) {
+      const vanity = applyQuoteFlowVanityProgramElections(nextScope, pricingPayload.vanityPrograms);
+      if (!vanity.ok) {
+        return { ok: false, issues: vanity.issues };
+      }
+      nextScope = vanity.scope;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "sinkSelections")) {
+      const sinks = applyQuoteFlowSinkSelections(
+        nextScope,
+        stampOpenEdgeLfOntoScopeForPricing(nextScope),
+        pricingPayload.sinkSelections,
+        { actorUserId }
+      );
+      if (!sinks.ok) return { ok: false, issues: sinks.issues };
+      nextScope = sinks.scope;
     }
 
     if (Object.prototype.hasOwnProperty.call(pricingPayload, "customLineItems")) {
@@ -444,7 +608,9 @@ export function createQuoteFlowPricingService(deps = {}) {
           roomId: String(room?.id || ""),
           roomName: String(room?.name || ""),
           materialGroupOverride: room?.materialGroupOverride || null,
+          slabPackageId: String(room?.slabPackageId ?? "").trim() || null,
           colorNameOverride: room?.colorNameOverride || null,
+          colorTbd: room?.colorTbd === true,
           edgeProfileToken: edgeTokens[0] || scope.edgeProfileToken || null,
           includeBacksplash: room?.includeBacksplash === true,
           backsplashSqft: Number(room?.backsplashSqft) || 0,
@@ -479,7 +645,59 @@ export function createQuoteFlowPricingService(deps = {}) {
         openEdgeLf: buildScopeSummary(row).openEdgeLf
       }),
       startingSelections,
+      vanityPrograms: resolveGovernedVanityPrograms({
+        scope: stampOpenEdgeLfOntoScopeForPricing(scope),
+        calculationSnapshot: row?.calculationSnapshot || null
+      }),
+      slabPackages: presentSlabPackagesDraft(scope, row?.calculationSnapshot || null),
+      sinkSelections: {
+        rooms: resolveQuoteFlowSinkRooms(stampOpenEdgeLfOntoScopeForPricing(scope)),
+        catalog: listStaffSinkCatalog(),
+        programSinkTypes: VANITY_PROGRAM_SINK_TYPES
+      },
       blockers: buildBlockers(row, editablePricing)
+    };
+  }
+
+  /** Internal (staff-only) slab package editor state: inputs + last calculated suggestion. */
+  function presentSlabPackagesDraft(scope, calc) {
+    const priced = new Map(
+      (Array.isArray(calc?.elite100?.slabPackages) ? calc.elite100.slabPackages : []).map((p) => [
+        String(p.packageId),
+        p
+      ])
+    );
+    const unresolved = Array.isArray(calc?.unresolvedItems) ? calc.unresolvedItems : [];
+    return {
+      costMultiplier: SLAB_PACKAGE_COST_MULTIPLIER,
+      defaultWastePercent: SLAB_PACKAGE_DEFAULT_WASTE_PERCENT,
+      packages: (Array.isArray(scope?.slabPackages) ? scope.slabPackages : [])
+        .map(normalizeSlabPackage)
+        .filter(Boolean)
+        .map((pkg) => {
+          const p = priced.get(pkg.id) || null;
+          return {
+            ...pkg,
+            calculated: p
+              ? {
+                  requiredSf: p.requiredSf,
+                  requiredWithWasteSf: p.requiredWithWasteSf,
+                  slabAreaSf: p.slabAreaSf,
+                  suggestedQuantity: p.suggestedQuantity,
+                  quantityPriced: p.quantityPriced,
+                  quantityConfirmed: p.quantityConfirmed,
+                  quantityOverridden: p.quantityOverridden,
+                  total: p.total,
+                  shared: p.shared,
+                  roomNames: p.roomNames,
+                  allocations: p.allocations
+                }
+              : null,
+            issues: unresolved
+              .filter((u) => String(u?.code || "").startsWith("slab_") && u.packageId === pkg.id)
+              .map((u) => u.message)
+          };
+        })
     };
   }
 
@@ -543,6 +761,9 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
       startingSelections: draft.startingSelections,
+      vanityPrograms: draft.vanityPrograms,
+      sinkSelections: draft.sinkSelections,
+      slabPackages: draft.slabPackages,
       lastCalculation,
       staleReason,
       pricingStale: Boolean(staleReason),
@@ -641,6 +862,9 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineSummary: draft.customLineSummary,
       edgeStatus: draft.edgeStatus,
       startingSelections: draft.startingSelections,
+      vanityPrograms: draft.vanityPrograms,
+      sinkSelections: draft.sinkSelections,
+      slabPackages: draft.slabPackages,
       lastCalculation: presentQuoteFlowPricingResult(updated),
       staleReason: String(updated.staleReason || "").trim() || null,
       pricingStale: true,
@@ -790,6 +1014,9 @@ export function createQuoteFlowPricingService(deps = {}) {
       customLineItems: draft.customLineItems,
       customLineSummary: draft.customLineSummary,
       edgeStatus: result.edgeStatus || draft.edgeStatus,
+      vanityPrograms: draft.vanityPrograms,
+      sinkSelections: draft.sinkSelections,
+      slabPackages: draft.slabPackages,
       lastCalculation: result,
       calculationNotes: notes,
       staleReason: null,

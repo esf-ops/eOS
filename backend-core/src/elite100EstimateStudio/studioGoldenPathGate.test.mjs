@@ -29,6 +29,7 @@ import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
 import { MANUAL_ESTIMATE_ORIGIN } from "./studioManualPhysicalScope.mjs";
 import { PROJECT_METADATA_SCOPE_KEYS } from "./studioProjectDetails.mjs";
 
+const FUTURE_VALID_THROUGH = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../../..");
 
@@ -149,7 +150,7 @@ function activePublicationFor(estimate, overrides = {}) {
     revisionNumber: estimate.revision,
     estimateId: estimate.id,
     publishedAt: "2026-07-24T14:00:00Z",
-    pricingValidThrough: "2026-08-22",
+    pricingValidThrough: FUTURE_VALID_THROUGH,
     customerUrl: "https://example.test/de/golden-stable",
     linkStatus: "active",
     ...overrides

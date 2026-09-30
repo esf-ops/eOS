@@ -129,9 +129,9 @@ assert.equal(
   changeGroups[0].lines[0].label,
   "4-inch backsplash → No backsplash",
 );
-assert.equal(changeGroups[0].lines[0].amountLabel, "−$650");
+assert.equal(changeGroups[0].lines[0].amountLabel, "−$650.00");
 assert.equal(changeGroups[0].lines.at(-1)?.label, "Kitchen total change");
-assert.equal(changes.totalLabel, "−$650");
+assert.equal(changes.totalLabel, "−$650.00");
 console.log("ok: Changes uses room hierarchy with sign-preserving customer-facing delta");
 
 // Public rendering data contains no raw ids / implementation keys / geometry.

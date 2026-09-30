@@ -4,13 +4,20 @@
  */
 
 import {
-  FIXTURE_ELITE100_DIRECT_RATES_PER_SQFT,
-  FIXTURE_ELITE100_WHOLESALE_RATES_PER_SQFT,
+  PIN_RULE_SPAHN_TRUSTED_ACCOUNT,
+  builtinRateSetPin,
+  normalizePinnedPricingBasis,
+  resolvePublicationPricingPin
+} from "./publicationPricingPin.mjs";
+import {
   FIXTURE_GLOBAL_MATERIAL_USE_TAX,
   GROUP_CODE_DISPLAY_NAMES,
   buildFixtureMaterialGroupRates
 } from "./approvedPricingFixtures.mjs";
-import { CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaConstants.mjs";
+import {
+  CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID,
+  SPAHN_AND_ROSE_ADJUSTMENT_BPS
+} from "./elite100ConfigDeltaConstants.mjs";
 import { sha256CanonicalJson } from "../digitalEstimateToken.mjs";
 import {
   billableBacksplashFromRoom,
@@ -138,6 +145,7 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
         baselineMaterialGroup: groupCode,
         baselineMaterialLabel: GROUP_CODE_DISPLAY_NAMES[groupCode] || String(groupRaw || ""),
         colorLabel: r.colorName || r.color_name || r.colorLabel || null,
+        customSlabPackage: r.customSlabPackage === true,
         measurementsLocked: true,
         pieces: Array.isArray(r.pieces)
           ? r.pieces.map((p, idx) => {
@@ -326,6 +334,26 @@ export function serverApprovedOptionCatalog() {
 }
 
 /**
+ * Price the catalog from a publication's pin. An active option the pin has no price for is
+ * unavailable on that publication rather than priced from today's catalog.
+ */
+function pinOptionCatalog(catalog, pinnedOptionPrices) {
+  return catalog.map((o) => {
+    if (o.availabilityState !== "active") return { ...o };
+    if (Object.prototype.hasOwnProperty.call(pinnedOptionPrices, o.optionKey)) {
+      return { ...o, sellPrice: Number(pinnedOptionPrices[o.optionKey]) };
+    }
+    return {
+      ...o,
+      sellPrice: null,
+      availabilityState: "unavailable",
+      customerPriceTreatment: "unavailable",
+      unresolvedReason: "Not priced in this publication's pinned pricing"
+    };
+  });
+}
+
+/**
  * @param {{
  *   organizationId: string,
  *   publicationId: string,
@@ -363,13 +391,22 @@ export async function buildTrustedConfigurationContext(args) {
       : {};
   const iu =
     calcCopy.internal_ui && typeof calcCopy.internal_ui === "object" ? calcCopy.internal_ui : {};
-  // Prefer explicit caller override, then frozen Studio publication basis.
-  const frozenBasis = String(
-    pricingBasisArg || iu.pricing_basis || calcCopy.pricingBasis || "direct"
-  ).toLowerCase();
-  const pricingBasis = frozenBasis === "wholesale" ? "wholesale" : "direct";
-
   const { rooms, blockers } = extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot);
+
+  // Rates, tax and option prices come only from the publication's own pin — never from the
+  // org's current schedule. A staff caller may choose the schedule explicitly; a customer
+  // path never can, so an unrecorded basis blocks customer repricing instead of guessing.
+  const pinResolution = resolvePublicationPricingPin(pricingEvidence);
+  const staffBasis = normalizePinnedPricingBasis(pricingBasisArg);
+  let pin = pinResolution.ok ? pinResolution.pin : null;
+  if (!pinResolution.ok) {
+    if (pinResolution.code === "pricing_basis_unestablished" && staffBasis) {
+      pin = pinResolution.pin || builtinRateSetPin(staffBasis);
+    } else {
+      blockers.push({ code: pinResolution.code, message: pinResolution.reason });
+    }
+  }
+  const pricingBasis = staffBasis || pin?.pricingBasis || "direct";
 
   let partnerAccountId = null;
   if (typeof deRepository.getQuoteHeader === "function" && pub.source_quote_id) {
@@ -383,7 +420,33 @@ export async function buildTrustedConfigurationContext(args) {
   let estimateAdjustments = [];
   let accountMappingNotice = null;
 
-  if (pricingPolicyRepository && typeof pricingPolicyRepository._dump === "function") {
+  // A pinned publication already carries the account rules its calculation used; current
+  // account overrides/adjustments must not reprice it.
+  if (pin && pinResolution.ok && pinResolution.kind === "legacy_builtin" && partnerAccountId) {
+    blockers.push({
+      code: "pricing_rules_not_reproducible",
+      message: "Published before pricing pins for a trusted account; the account pricing it used was not recorded."
+    });
+  }
+  if (pin && partnerAccountId && (pin.rules || []).includes(PIN_RULE_SPAHN_TRUSTED_ACCOUNT)) {
+    const pinnedGroupId = `pin:${pin.rateSetId}:spahn`;
+    accountMemberships = [
+      { id: `${pinnedGroupId}:member`, organizationId, accountGroupId: pinnedGroupId, partnerAccountId, isActive: true }
+    ];
+    estimateAdjustments = [
+      {
+        id: pinnedGroupId,
+        organizationId,
+        accountGroupId: pinnedGroupId,
+        accountGroupCode: "spahn_and_rose",
+        adjustmentCode: "spahn_and_rose_entire_estimate_pct",
+        bps: SPAHN_AND_ROSE_ADJUSTMENT_BPS,
+        rate: SPAHN_AND_ROSE_ADJUSTMENT_BPS / 10000,
+        isActive: true
+      }
+    ];
+  }
+  if (!pin && pricingPolicyRepository && typeof pricingPolicyRepository._dump === "function") {
     const dump = pricingPolicyRepository._dump();
     accountMemberships = (dump.memberships || [])
       .filter((m) => m.organization_id === organizationId)
@@ -440,16 +503,12 @@ export async function buildTrustedConfigurationContext(args) {
       "No trusted account pricing mapping (partner_account_id). Watt's / Spahn & Rose rules will not apply.";
   }
 
-  const frozenBaseRates = {
-    direct: { ...FIXTURE_ELITE100_DIRECT_RATES_PER_SQFT },
-    wholesale: { ...FIXTURE_ELITE100_WHOLESALE_RATES_PER_SQFT }
-  };
-  if (pricingPolicyRepository?.getBaseRates) {
-    const d = pricingPolicyRepository.getBaseRates(organizationId, "direct");
-    const w = pricingPolicyRepository.getBaseRates(organizationId, "wholesale");
-    if (d && Object.keys(d).length) Object.assign(frozenBaseRates.direct, d);
-    if (w && Object.keys(w).length) Object.assign(frozenBaseRates.wholesale, w);
-  }
+  // With no usable pin the context is blocked; these rates are never used to price then.
+  const frozenBaseRates = pin
+    ? { direct: { ...pin.rates.direct }, wholesale: { ...pin.rates.wholesale } }
+    : { direct: {}, wholesale: {} };
+  const materialUseTaxBps = pin ? pin.materialUseTaxBps : FIXTURE_GLOBAL_MATERIAL_USE_TAX.rate * 10000;
+  const pinnedOptionPrices = pin?.optionPrices || {};
 
   const allowedMaterialGroups = buildFixtureMaterialGroupRates("direct").map((g) => ({
     groupCode: g.groupCode,
@@ -459,8 +518,9 @@ export async function buildTrustedConfigurationContext(args) {
   const pricingPolicyFingerprint = sha256CanonicalJson({
     engine: CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID,
     rates: frozenBaseRates,
-    tax: FIXTURE_GLOBAL_MATERIAL_USE_TAX.rate
+    tax: materialUseTaxBps / 10000
   });
+  const optionCatalogInternal = pinOptionCatalog(serverApprovedOptionCatalog(), pinnedOptionPrices);
   const catalogFingerprint = sha256CanonicalJson({
     options: serverApprovedOptionCatalog().map((o) => o.optionKey)
   });
@@ -568,8 +628,18 @@ export async function buildTrustedConfigurationContext(args) {
     estimateAdjustments,
     pricingBasis,
     frozenBaseRates,
+    rateSource: pinResolution.ok ? pinResolution.kind : staffBasis && pin ? "staff_selected_basis" : null,
+    pricingPin: pin
+      ? {
+          rateSetId: pin.rateSetId,
+          rateSetKey: pin.rateSetKey,
+          source: pin.source,
+          policyVersionId: pin.policyVersionId,
+          pricingBasis: pin.pricingBasis
+        }
+      : null,
     allowedMaterialGroups,
-    optionCatalog: serverApprovedOptionCatalog().map((o) => ({
+    optionCatalog: optionCatalogInternal.map((o) => ({
       optionKey: o.optionKey,
       groupKey: o.groupKey,
       displayLabel: o.displayLabel,
@@ -581,10 +651,10 @@ export async function buildTrustedConfigurationContext(args) {
       unresolvedReason: o.unresolvedReason || null
       // sellPrice intentionally omitted from customer-safe context; staff preview resolves server-side
     })),
-    optionCatalogInternal: serverApprovedOptionCatalog(),
+    optionCatalogInternal,
     materialTaxPolicy: {
-      bps: 200,
-      rate: 0.02,
+      bps: materialUseTaxBps,
+      rate: materialUseTaxBps / 10000,
       taxableBasis: "material_sell_amount",
       customerPresentation: "bundled_not_separate_line"
     },

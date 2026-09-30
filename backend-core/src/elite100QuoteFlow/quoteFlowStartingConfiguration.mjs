@@ -192,13 +192,34 @@ export function applyStartingConfigurationToScope(scope, startingConfiguration, 
   };
   const quote = cfg.quote && typeof cfg.quote === "object" ? cfg.quote : {};
 
-  for (const row of Array.isArray(cfg.rooms) ? cfg.rooms : []) {
-    const idx = rooms.findIndex((r) => String(r.id) === String(row.roomId));
-    if (idx < 0) continue;
+  const cfgRows = Array.isArray(cfg.rooms) ? cfg.rooms.filter((row) => row && typeof row === "object") : [];
+  const idsClaimedById = new Set(
+    cfgRows
+      .map((row) => String(row.roomId ?? ""))
+      .filter((id) => id && rooms.some((r) => String(r.id) === id))
+  );
+  const normName = (v) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  const unmatchedRoomIds = [];
+  for (const row of cfgRows) {
+    let idx = rooms.findIndex((r) => String(r.id) === String(row.roomId));
+    if (idx < 0 && normName(row.roomName)) {
+      // Room ids can change when the takeoff is re-extracted; fall back to an
+      // unambiguous name match so estimator colors are not silently dropped.
+      const byName = rooms
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => normName(r.name) === normName(row.roomName) && !idsClaimedById.has(String(r.id)));
+      if (byName.length === 1) idx = byName[0].i;
+    }
+    if (idx < 0) {
+      unmatchedRoomIds.push(String(row.roomId ?? ""));
+      continue;
+    }
+    const rowColor = String(row.colorName ?? "").trim();
     rooms[idx] = {
       ...rooms[idx],
       ...(row.materialGroup ? { materialGroupOverride: row.materialGroup } : {}),
-      ...(row.colorName ? { colorNameOverride: row.colorName } : {}),
+      ...(rowColor ? { colorNameOverride: rowColor, colorTbd: false } : {}),
+      ...(!rowColor && row.colorTbd === true ? { colorNameOverride: null, colorTbd: true } : {}),
       ...(row.includeBacksplash != null ? { includeBacksplash: row.includeBacksplash } : {}),
       ...(row.backsplashHeightIn != null ? { backsplashHeightIn: row.backsplashHeightIn } : {}),
       ...(row.backsplashHeightMode ? { backsplashHeightMode: row.backsplashHeightMode } : {})
@@ -234,7 +255,16 @@ export function applyStartingConfigurationToScope(scope, startingConfiguration, 
 
   const warnings = [
     ...(Array.isArray(base.customerRequestedWarnings) ? base.customerRequestedWarnings : []),
-    ...(Array.isArray(cfg.warnings) ? cfg.warnings : [])
+    ...(Array.isArray(cfg.warnings) ? cfg.warnings : []),
+    ...(unmatchedRoomIds.length
+      ? [
+          {
+            code: "starting_configuration_room_unmatched",
+            message: `Starting configuration for ${unmatchedRoomIds.length} room(s) did not match a takeoff room; re-check room material and color in pricing.`,
+            roomIds: unmatchedRoomIds
+          }
+        ]
+      : [])
   ];
 
   return {

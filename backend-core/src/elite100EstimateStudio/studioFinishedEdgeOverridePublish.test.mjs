@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const FUTURE_VALID_THROUGH = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
 import {
   flattenPieces,
   patchRunFinishedEdge
@@ -202,7 +204,7 @@ function approvedEstimate(scope, calc) {
     takeoffReviewStatus: "approved",
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
     configuration: {
-      pricingValidThrough: "2026-08-15",
+      pricingValidThrough: FUTURE_VALID_THROUGH,
       allowedOptionKeys: [],
       customerChoiceGroups: []
     }
@@ -218,7 +220,7 @@ function approvedEstimate(scope, calc) {
   const dto = buildStudioPublicationReadinessDto({
     estimate,
     readiness,
-    configuration: { pricingValidThrough: "2026-08-15" },
+    configuration: { pricingValidThrough: FUTURE_VALID_THROUGH },
     publishedConfiguration: { envelopeFingerprint: readiness.details.envelopeFingerprint },
     activePublication: null
   });
@@ -253,7 +255,7 @@ function approvedEstimate(scope, calc) {
     repositoryMode: "injected",
     takeoffReviewStatus: "approved",
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
-    configuration: { pricingValidThrough: "2026-08-15", allowedOptionKeys: [] }
+    configuration: { pricingValidThrough: FUTURE_VALID_THROUGH, allowedOptionKeys: [] }
   });
   assert.equal(
     zeroReadiness.blockers.some((b) => b.code === "finished_edge_geometry_required"),
@@ -396,7 +398,7 @@ function approvedEstimate(scope, calc) {
     repositoryMode: "injected",
     takeoffReviewStatus: "approved",
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
-    configuration: { pricingValidThrough: "2026-08-15", allowedOptionKeys: [] }
+    configuration: { pricingValidThrough: FUTURE_VALID_THROUGH, allowedOptionKeys: [] }
   });
   assert.equal(
     legacyReady.blockers.some((b) => b.code === "finished_edge_geometry_required"),

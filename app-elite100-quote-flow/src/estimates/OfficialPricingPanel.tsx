@@ -2,7 +2,7 @@
  * Estimates modal — Pricing tab (internal only).
  * Uses Quote Flow pricing API + official scope summary. No approval, DE publish, or sold.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import {
   calculateQuoteFlowEstimatePricing,
@@ -14,8 +14,16 @@ import {
   type QuoteFlowEdgeStatus,
   type QuoteFlowPricingPayload,
   type QuoteFlowPricingResult,
-  type QuoteFlowScopeSummary
+  type QuoteFlowScopeSummary,
+  type QuoteFlowSlabPackage,
+  type QuoteFlowSlabPackageInput,
+  type QuoteFlowSinkCatalogItem,
+  type QuoteFlowSinkRoom,
+  type QuoteFlowSinkSelectionInput,
+  type QuoteFlowVanityProgram
 } from "../lib/quoteFlowEstimatesApi";
+import CustomSlabPackagesSection from "./CustomSlabPackagesSection";
+import { SinkSelectionsSection } from "./SinkSelectionsSection";
 
 const BASIS_OPTIONS = [
   { value: "wholesale", label: "Wholesale" },
@@ -59,6 +67,8 @@ type StartingRoomSelection = {
   roomId: string;
   roomName: string;
   materialGroupOverride: string;
+  /** Custom slab package id; empty = Elite 100 collection pricing. */
+  slabPackageId: string;
   colorNameOverride: string;
   colorTbd: boolean;
   edgeProfileToken: string;
@@ -125,10 +135,11 @@ function emptyPricing(): QuoteFlowEditablePricing {
 
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
-  return `$${Number(n).toLocaleString(undefined, {
+  const abs = Math.abs(Number(n)).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  })}`;
+  });
+  return `${Number(n) < 0 ? "-" : ""}$${abs}`;
 }
 
 function newLineId(): string {
@@ -202,10 +213,16 @@ function summarizeLocal(lines: QuoteFlowCustomLineItem[]): QuoteFlowCustomLineSu
 function pricingFingerprint(
   p: QuoteFlowEditablePricing,
   lines: QuoteFlowCustomLineItem[],
-  selections: StartingSelectionsState
+  selections: StartingSelectionsState,
+  vanityElections: Record<string, boolean> = {},
+  slabPackages: QuoteFlowSlabPackageInput[] = [],
+  sinkEdits: Record<string, QuoteFlowSinkSelectionInput> = {}
 ): string {
   try {
     return JSON.stringify({
+      vanityElections,
+      slabPackages,
+      sinkEdits,
       pricingBasis: p.pricingBasis,
       materialGroup: p.materialGroup,
       estimateWideAdjustment: p.estimateWideAdjustment,
@@ -218,6 +235,7 @@ function pricingFingerprint(
         rooms: selections.rooms.map((r) => ({
           roomId: r.roomId,
           materialGroupOverride: r.materialGroupOverride,
+          slabPackageId: r.slabPackageId,
           colorNameOverride: r.colorNameOverride,
           colorTbd: r.colorTbd,
           edgeProfileToken: r.edgeProfileToken,
@@ -415,8 +433,32 @@ export default function OfficialPricingPanel(props: Props) {
   const [edgeStatus, setEdgeStatus] = useState<QuoteFlowEdgeStatus | null>(null);
   const [serverSummary, setServerSummary] = useState<QuoteFlowCustomLineSummary | null>(null);
   const [selections, setSelections] = useState<StartingSelectionsState>(emptyStartingSelections());
+  const [vanityPrograms, setVanityPrograms] = useState<QuoteFlowVanityProgram[]>([]);
+  /** Unsaved add/remove decisions by room; only changed rooms are sent to Brain. */
+  const [vanityElections, setVanityElections] = useState<Record<string, boolean>>({});
+  const [slabPackages, setSlabPackages] = useState<QuoteFlowSlabPackageInput[]>([]);
+  const [sinkRooms, setSinkRooms] = useState<QuoteFlowSinkRoom[]>([]);
+  const [sinkCatalog, setSinkCatalog] = useState<QuoteFlowSinkCatalogItem[]>([]);
+  const [programSinkTypes, setProgramSinkTypes] = useState<Array<{ value: string; label: string }>>([]);
+  /** Unsaved sink decisions by room; only changed rooms are sent to Brain. */
+  const [sinkEdits, setSinkEdits] = useState<Record<string, QuoteFlowSinkSelectionInput>>({});
+  const [orphanedPackageRooms, setOrphanedPackageRooms] = useState<string[]>([]);
+  const [slabCalculated, setSlabCalculated] = useState<Record<string, QuoteFlowSlabPackage | undefined>>({});
+  const [slabRules, setSlabRules] = useState<{ costMultiplier: number | null; defaultWastePercent: number }>({
+    costMultiplier: null,
+    defaultWastePercent: 20
+  });
 
-  const dirty = pricingFingerprint(pricing, customLines, selections) !== savedFp;
+  const dirty =
+    pricingFingerprint(pricing, customLines, selections, vanityElections, slabPackages, sinkEdits) !== savedFp;
+  const slabRoomNames = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const r of selections.rooms) {
+      if (!r.slabPackageId) continue;
+      (out[r.slabPackageId] ||= []).push(r.roomName || r.roomId);
+    }
+    return out;
+  }, [selections.rooms]);
   const localSummary = useMemo(() => summarizeLocal(customLines), [customLines]);
 
   function applyPayload(payload: QuoteFlowPricingPayload) {
@@ -426,7 +468,8 @@ export default function OfficialPricingPanel(props: Props) {
     };
     const lines = Array.isArray(payload.customLineItems) ? payload.customLineItems : [];
     const ss = payload.startingSelections || {};
-    const nextSelections: StartingSelectionsState = {
+    const knownPackageIds = new Set((payload.slabPackages?.packages || []).map((p) => String(p.id || "")));
+    const savedSelections: StartingSelectionsState = {
       colorName: String(ss.colorName || ""),
       colorTbd: ss.colorTbd === true,
       edgeProfileToken: String(ss.edgeProfileToken || ""),
@@ -437,8 +480,9 @@ export default function OfficialPricingPanel(props: Props) {
             roomId: String(r.roomId || ""),
             roomName: String(r.roomName || r.roomId || "Room"),
             materialGroupOverride: String(r.materialGroupOverride || ""),
+            slabPackageId: String(r.slabPackageId || ""),
             colorNameOverride: String(r.colorNameOverride || ""),
-            colorTbd: !r.colorNameOverride && Boolean(r.materialGroupOverride),
+            colorTbd: r.colorTbd === true || (!r.colorNameOverride && Boolean(r.materialGroupOverride)),
             edgeProfileToken: String(r.edgeProfileToken || ""),
             includeBacksplash: r.includeBacksplash === true,
             backsplashSqft: Number(r.backsplashSqft) || 0,
@@ -447,10 +491,51 @@ export default function OfficialPricingPanel(props: Props) {
           }))
         : []
     };
+    // A room pointing at a package that no longer exists falls back to Elite 100; staff must save to persist it.
+    const orphanedRooms = savedSelections.rooms.filter(
+      (r) => r.slabPackageId && !knownPackageIds.has(r.slabPackageId)
+    );
+    const nextSelections: StartingSelectionsState = orphanedRooms.length
+      ? {
+          ...savedSelections,
+          rooms: savedSelections.rooms.map((r) =>
+            r.slabPackageId && !knownPackageIds.has(r.slabPackageId) ? { ...r, slabPackageId: "" } : r
+          )
+        }
+      : savedSelections;
+    setOrphanedPackageRooms(orphanedRooms.map((r) => r.roomName || r.roomId));
     setPricing(next);
     setCustomLines(lines);
     setSelections(nextSelections);
-    setSavedFp(pricingFingerprint(next, lines, nextSelections));
+    setVanityPrograms(Array.isArray(payload.vanityPrograms) ? payload.vanityPrograms : []);
+    setVanityElections({});
+    setSinkRooms(Array.isArray(payload.sinkSelections?.rooms) ? payload.sinkSelections.rooms : []);
+    setSinkCatalog(Array.isArray(payload.sinkSelections?.catalog) ? payload.sinkSelections.catalog : []);
+    setProgramSinkTypes(
+      Array.isArray(payload.sinkSelections?.programSinkTypes) ? payload.sinkSelections.programSinkTypes : []
+    );
+    setSinkEdits({});
+    const slabServer = payload.slabPackages?.packages || [];
+    const nextSlabs: QuoteFlowSlabPackageInput[] = slabServer.map((p) => ({
+      id: p.id,
+      colorName: p.colorName || "",
+      supplier: p.supplier || "",
+      thickness: p.thickness || "",
+      label: p.label,
+      slabLengthIn: p.slabLengthIn || null,
+      slabWidthIn: p.slabWidthIn || null,
+      costPerSlab: p.costPerSlab || null,
+      wastePercent: p.wastePercent ?? null,
+      confirmedSlabQuantity: p.confirmedSlabQuantity ?? null,
+      quantityOverrideReason: p.quantityOverrideReason || ""
+    }));
+    setSlabPackages(nextSlabs);
+    setSlabCalculated(Object.fromEntries(slabServer.map((p) => [p.id, p])));
+    setSlabRules({
+      costMultiplier: payload.slabPackages?.costMultiplier ?? null,
+      defaultWastePercent: payload.slabPackages?.defaultWastePercent ?? 20
+    });
+    setSavedFp(pricingFingerprint(next, lines, savedSelections, {}, nextSlabs));
     setScopeSummary(payload.scopeSummary || null);
     setLastCalculation(payload.lastCalculation || null);
     setBlockers(Array.isArray(payload.blockers) ? payload.blockers : []);
@@ -462,6 +547,10 @@ export default function OfficialPricingPanel(props: Props) {
     setServerSummary(payload.customLineSummary || payload.lastCalculation?.customLineItems?.summary || null);
   }
 
+  // A session token refresh must not reload the draft and discard unsaved edits.
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -469,7 +558,7 @@ export default function OfficialPricingPanel(props: Props) {
       setError(null);
       setNotice(null);
       try {
-        const res = await fetchQuoteFlowEstimatePricing(authToken, estimateId);
+        const res = await fetchQuoteFlowEstimatePricing(authTokenRef.current, estimateId);
         if (cancelled) return;
         applyPayload(res);
       } catch (e) {
@@ -482,7 +571,7 @@ export default function OfficialPricingPanel(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [authToken, estimateId]);
+  }, [estimateId]);
 
   const summaryCards = useMemo(() => {
     const s = scopeSummary;
@@ -525,6 +614,7 @@ export default function OfficialPricingPanel(props: Props) {
       roomSelections: selections.rooms.map((r) => ({
         roomId: r.roomId,
         materialGroupOverride: r.materialGroupOverride || null,
+        slabPackageId: r.slabPackageId || null,
         colorNameOverride: r.colorTbd ? "" : r.colorNameOverride,
         colorTbd: r.colorTbd,
         edgeProfileToken: r.edgeProfileToken || null,
@@ -534,8 +624,30 @@ export default function OfficialPricingPanel(props: Props) {
         ...l,
         amount: lineAmount(l),
         sortOrder: l.sortOrder ?? i
-      }))
+      })),
+      slabPackages,
+      ...(Object.keys(vanityElections).length
+        ? {
+            vanityPrograms: Object.entries(vanityElections).map(([roomId, apply]) => ({
+              roomId,
+              apply
+            }))
+          }
+        : {}),
+      ...(Object.keys(sinkEdits).length ? { sinkSelections: Object.values(sinkEdits) } : {})
     };
+  }
+
+  function setVanityElection(v: QuoteFlowVanityProgram, apply: boolean) {
+    const roomId = String(v.roomId || "");
+    if (!roomId) return;
+    setVanityElections((prev) => {
+      const next = { ...prev };
+      if (apply === v.applied) delete next[roomId];
+      else next[roomId] = apply;
+      return next;
+    });
+    setNotice(null);
   }
 
   async function saveDraft() {
@@ -755,10 +867,12 @@ export default function OfficialPricingPanel(props: Props) {
           {ewa?.active ? (
             <>
               <label className="qf-pricing__field">
-                Percentage
+                Increase by (%)
                 <input
                   type="number"
                   step="0.1"
+                  min={0}
+                  max={100}
                   value={ewa?.percentage ?? 0}
                   disabled={busy || ewa?.editable === false}
                   data-testid="qf-pricing-ewa-pct"
@@ -767,7 +881,7 @@ export default function OfficialPricingPanel(props: Props) {
                       ...pricing,
                       estimateWideAdjustment: {
                         ...(ewa || {}),
-                        percentage: Number(e.target.value) || 0,
+                        percentage: Math.max(0, Number(e.target.value) || 0),
                         active: true,
                         source: "manual"
                       }
@@ -795,6 +909,10 @@ export default function OfficialPricingPanel(props: Props) {
                   }
                 />
               </label>
+              <p className="qf-muted" data-testid="qf-pricing-ewa-hint">
+                Adds this percentage to the estimate total. Discounts are not supported here. Customers can
+                accept an adjusted quote as is; any change goes back to staff for a revised quote.
+              </p>
             </>
           ) : null}
         </div>
@@ -877,12 +995,43 @@ export default function OfficialPricingPanel(props: Props) {
             Include tear-out
           </label>
         </div>
+        {orphanedPackageRooms.length > 0 ? (
+          <p className="qf-muted" role="status" data-testid="qf-pricing-orphaned-package">
+            {orphanedPackageRooms.join(", ")} referenced a custom slab package that no longer exists; switched to Elite
+            100 collection. Save the pricing draft to keep this.
+          </p>
+        ) : null}
         {selections.rooms.length > 0 ? (
           <ul className="qf-pricing__room-selections" data-testid="qf-pricing-room-selections">
             {selections.rooms.map((room) => (
               <li key={room.roomId} data-testid="qf-pricing-room-selection-row">
                 <h4>{room.roomName || room.roomId}</h4>
                 <div className="qf-pricing__controls">
+                  <label className="qf-pricing__field">
+                    Material
+                    <select
+                      value={room.slabPackageId}
+                      disabled={busy}
+                      data-testid="qf-pricing-room-material-source"
+                      onChange={(e) => {
+                        setSelections({
+                          ...selections,
+                          rooms: selections.rooms.map((r) =>
+                            r.roomId === room.roomId ? { ...r, slabPackageId: e.target.value } : r
+                          )
+                        });
+                        setNotice(null);
+                      }}
+                    >
+                      <option value="">Elite 100 collection</option>
+                      {slabPackages.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          Custom slab — {p.colorName || "unnamed"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {room.slabPackageId ? null : (
                   <label className="qf-pricing__field">
                     Material group override
                     <select
@@ -909,6 +1058,8 @@ export default function OfficialPricingPanel(props: Props) {
                       ))}
                     </select>
                   </label>
+                  )}
+                  {room.slabPackageId ? null : (
                   <label className="qf-pricing__field">
                     Color override
                     <input
@@ -929,6 +1080,7 @@ export default function OfficialPricingPanel(props: Props) {
                       }}
                     />
                   </label>
+                  )}
                   <label className="qf-pricing__field">
                     Room edge profile
                     <select
@@ -980,8 +1132,7 @@ export default function OfficialPricingPanel(props: Props) {
                   </label>
                   {room.hasSinkCutout ? (
                     <p className="qf-muted" data-testid="qf-pricing-room-sink-hint">
-                      Sink cutout present on Scope — assign a supplied sink product via custom
-                      lines or add-ons when needed (cutout ≠ supplied sink).
+                      Sink cutout present on Scope — choose the sink under Sinks below.
                     </p>
                   ) : null}
                   {room.hasWaterfallGeometry ? (
@@ -998,6 +1149,110 @@ export default function OfficialPricingPanel(props: Props) {
           <p className="qf-muted">No rooms on official scope yet.</p>
         )}
       </div>
+
+      <CustomSlabPackagesSection
+        packages={slabPackages}
+        calculated={slabCalculated}
+        costMultiplier={slabRules.costMultiplier}
+        defaultWastePercent={slabRules.defaultWastePercent}
+        roomNamesByPackage={slabRoomNames}
+        busy={busy}
+        onChange={(next) => {
+          setSlabPackages(next);
+          setNotice(null);
+        }}
+      />
+
+      <SinkSelectionsSection
+        rooms={sinkRooms}
+        catalog={sinkCatalog}
+        programSinkTypes={programSinkTypes}
+        edits={sinkEdits}
+        busy={busy}
+        onChange={(roomId, next) => {
+          setSinkEdits((prev) => ({ ...prev, [roomId]: next }));
+          setNotice(null);
+        }}
+      />
+
+      {vanityPrograms.length > 0 ? (
+        <div className="qf-pricing__controls" data-testid="qf-pricing-vanity-programs">
+          <h3>Bathroom Vanity Program</h3>
+          <p className="qf-muted">
+            Eligibility and program price come from Scope and the pricing calculator. Save draft or
+            Calculate to apply a change.
+          </p>
+          <ul className="qf-pricing__room-selections">
+            {vanityPrograms.map((v, idx) => {
+              const roomId = String(v.roomId || "");
+              const pending = Object.prototype.hasOwnProperty.call(vanityElections, roomId);
+              const applied = pending ? vanityElections[roomId] : v.applied;
+              const facts = v.physicalFacts || {};
+              return (
+                <li
+                  key={roomId || idx}
+                  data-testid="qf-pricing-vanity-card"
+                  data-applied={applied ? "1" : "0"}
+                >
+                  <h4>{v.roomName}</h4>
+                  <p className="qf-muted" data-testid="qf-pricing-vanity-facts">
+                    {facts.widthIn ? `${facts.widthIn}"` : "—"} ×{" "}
+                    {facts.depthIn ? `${facts.depthIn}"` : "—"}
+                    {facts.bowlLabel ? ` · ${facts.bowlLabel}` : ""}
+                    {facts.backsplashLabel ? ` · ${facts.backsplashLabel}` : ""}
+                  </p>
+                  {v.eligible ? (
+                    <>
+                      <p data-testid="qf-pricing-vanity-label">
+                        {applied ? "Vanity Program added" : "Eligible program"}: {v.programLabel}
+                      </p>
+                      <p data-testid="qf-pricing-vanity-price">
+                        Program price:{" "}
+                        {pending || v.programPrice == null
+                          ? "Calculate to update"
+                          : money(v.programPrice)}
+                      </p>
+                      {applied && Array.isArray(v.includedScope) && v.includedScope.length ? (
+                        <ul data-testid="qf-pricing-vanity-included">
+                          {v.includedScope.map((s) => (
+                            <li key={s}>{s}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="qf-muted" data-testid="qf-pricing-vanity-not-eligible">
+                      {v.ineligibleReason}
+                      {v.ineligibleDetail ? ` ${v.ineligibleDetail}` : ""}
+                    </p>
+                  )}
+                  {applied ? (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      disabled={busy}
+                      data-testid="qf-pricing-vanity-remove"
+                      onClick={() => setVanityElection(v, false)}
+                    >
+                      Remove Vanity Program
+                    </button>
+                  ) : v.eligible ? (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      disabled={busy}
+                      data-testid="qf-pricing-vanity-apply"
+                      onClick={() => setVanityElection(v, true)}
+                    >
+                      Add Vanity Program
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="qf-pricing__custom-lines" data-testid="qf-pricing-custom-lines">
         <h3>Custom line items</h3>

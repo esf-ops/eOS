@@ -359,6 +359,27 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
       });
     },
 
+    async listActivePublicationsWithoutPricingPin(organizationId, opts = {}) {
+      const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+      const rows = [];
+      for (const p of publications.values()) {
+        if (p.organization_id !== organizationId || p.status !== "active") continue;
+        const s = [...snapshots.values()].find(
+          (x) => x.organization_id === organizationId && x.publication_id === p.id
+        );
+        if (s?.pricing_evidence_json?.pricingPin) continue;
+        rows.push({
+          publication: structuredClone(p),
+          customerSnapshot: structuredClone(s?.customer_snapshot_json || null),
+          pricingEvidence: structuredClone(s?.pricing_evidence_json || null),
+          envelopes: null,
+          acceptanceCount: null
+        });
+      }
+      rows.sort((a, b) => String(b.publication.published_at || "").localeCompare(String(a.publication.published_at || "")));
+      return rows.slice(0, limit);
+    },
+
     /**
      * Aggregate view events for many publications in one pass.
      * @param {string} organizationId
@@ -1030,6 +1051,77 @@ export function createSupabaseDigitalEstimateRepository(deps) {
           link_status: p.status === "active" ? "active" : p.status
         };
       });
+    },
+
+    /**
+     * Active publications whose frozen evidence has no pricing pin (published before pins),
+     * with the evidence staff need to review them. Bounded; the pin filter runs in SQL.
+     */
+    async listActivePublicationsWithoutPricingPin(organizationId, opts = {}) {
+      const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+      const { data: pubs, error } = await db
+        .from("quote_publications")
+        .select(
+          "id, organization_id, source_quote_id, quote_family_root_id, quote_number, revision_number, revision_label, status, published_at, pricing_valid_through"
+        )
+        .eq("organization_id", organizationId)
+        .eq("status", "active")
+        .order("published_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      const ids = (pubs || []).map((p) => p.id);
+      if (!ids.length) return [];
+      const { data: snaps, error: snapErr } = await db
+        .from("quote_publication_snapshots")
+        .select("publication_id, customer_snapshot_json, pricing_evidence_json")
+        .eq("organization_id", organizationId)
+        .in("publication_id", ids)
+        .is("pricing_evidence_json->pricingPin", null);
+      if (snapErr) throw snapErr;
+      const unpinned = new Map((snaps || []).map((s) => [String(s.publication_id), s]));
+      const unpinnedIds = [...unpinned.keys()];
+      if (!unpinnedIds.length) return [];
+
+      const { data: envs, error: envErr } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .select("publication_id, status, pricing_policy_fingerprint, pricing_policy_version_id")
+        .eq("organization_id", organizationId)
+        .in("publication_id", unpinnedIds);
+      if (envErr) throw envErr;
+      const envByPub = new Map();
+      for (const e of envs || []) {
+        const k = String(e.publication_id);
+        if (!envByPub.has(k)) envByPub.set(k, []);
+        envByPub.get(k).push({
+          status: e.status,
+          pricingPolicyFingerprint: e.pricing_policy_fingerprint || null,
+          pricingPolicyVersionId: e.pricing_policy_version_id || null
+        });
+      }
+      const { data: accs, error: accErr } = await db
+        .from("studio_estimate_acceptances")
+        .select("publication_id")
+        .eq("organization_id", organizationId)
+        .in("publication_id", unpinnedIds);
+      if (accErr) throw accErr;
+      const accCount = new Map();
+      for (const a of accs || []) {
+        const k = String(a.publication_id);
+        accCount.set(k, (accCount.get(k) || 0) + 1);
+      }
+
+      return (pubs || [])
+        .filter((p) => unpinned.has(String(p.id)))
+        .map((p) => {
+          const s = unpinned.get(String(p.id));
+          return {
+            publication: p,
+            customerSnapshot: s.customer_snapshot_json || null,
+            pricingEvidence: s.pricing_evidence_json || null,
+            envelopes: envByPub.get(String(p.id)) || [],
+            acceptanceCount: accCount.get(String(p.id)) || 0
+          };
+        });
     },
 
     async aggregatePortfolioEvents(organizationId, publicationIds) {

@@ -36,7 +36,7 @@ function str(v) {
 }
 
 function roundMoney(n) {
-  return Math.round(Number(n));
+  return Math.round(Number(n) * 100) / 100;
 }
 
 function addDaysDateOnly(days, now = new Date()) {
@@ -322,6 +322,77 @@ function freezePiecesForPublication(pieces) {
 }
 
 /**
+ * Calculator-priced stone cents per room (material, tax, slab package, edge/program
+ * labor — everything except add-ons and commercial lines that the room pricing
+ * snapshot attaches by name). Used as allocation weights so a room's frozen share
+ * follows its priced amount rather than square footage.
+ * @param {object|undefined} calcRoom
+ */
+function calculatorStoneWeights(calcRoom) {
+  if (!calcRoom || !Number.isFinite(Number(calcRoom.exactTotal))) return {};
+  const cents = (v) => Math.round((Number(v) || 0) * 100);
+  const stoneCents = Math.max(
+    0,
+    cents(calcRoom.exactTotal) -
+      cents(calcRoom.cutoutsTotal) -
+      cents(calcRoom.sinkProductsTotal) -
+      cents(calcRoom.productsTotal) -
+      cents(calcRoom.customerFacingLinesTotal) -
+      cents(calcRoom.hiddenCustomerChargeTotal)
+  );
+  const taxFactor = 1 + (Number(calcRoom.materialUseTaxPercent) || 0) / 100;
+  const backsplashCents = Math.min(
+    stoneCents,
+    Math.round(cents(calcRoom.backsplashMaterialSubtotal) * taxFactor)
+  );
+  return {
+    pricedStoneCents: stoneCents,
+    pricedBacksplashCents: backsplashCents,
+    pricedCountertopCents: stoneCents - backsplashCents
+  };
+}
+
+/**
+ * Customer-facing color for one room. A custom slab package names the room's
+ * material; a room-level color (or room-level TBD) beats the project color; a
+ * room moved to a different material group never inherits the project color,
+ * because that color belongs to the project group.
+ */
+export function resolvePublishedRoomColorName({ projectColorName, room, roomMaterial, slabPackageLabel }) {
+  const slabLabel = str(slabPackageLabel);
+  if (slabLabel) return slabLabel;
+  if (room?.colorTbd === true) return null;
+  const roomColor = str(room?.colorNameOverride);
+  if (roomColor) return roomColor;
+  if (roomMaterial?.source === "room_override" && roomMaterial.group !== roomMaterial.estimateDefault) {
+    return null;
+  }
+  return projectColorName || null;
+}
+
+/**
+ * Which catalog color the customer page treats as a room's included material.
+ *
+ * - Published color in the catalog and in the room's priced group → that color.
+ * - Published color outside the catalog, or in another price group → none: the published
+ *   color stands, and marking a catalog color as included would reprice the room on save.
+ * - No published color (TBD) → `fallbackMaterialId` (the price group's default).
+ *
+ * @param {{ colorName: string|null, roomGroupCode: string|null, findMaterial: (id: string) => any, slugify: (s: string) => string, fallbackMaterialId?: string|null }} args
+ * @returns {{ materialId: string|null, reason: "published_color"|"color_not_in_catalog"|"color_group_mismatch"|"no_published_color" }}
+ */
+export function resolveRoomBaselineMaterialId({ colorName, roomGroupCode, findMaterial, slugify, fallbackMaterialId = null }) {
+  const name = str(colorName);
+  if (!name) return { materialId: fallbackMaterialId || null, reason: "no_published_color" };
+  const mat = findMaterial(`e100-${slugify(name)}`);
+  if (!mat) return { materialId: null, reason: "color_not_in_catalog" };
+  if (roomGroupCode && mat.pricingGroupCode !== roomGroupCode) {
+    return { materialId: null, reason: "color_group_mismatch" };
+  }
+  return { materialId: mat.materialId, reason: "published_color" };
+}
+
+/**
  * Build estimate_rooms for eligibility + configuration evidence (locked SF).
  * @param {object} estimate
  */
@@ -332,6 +403,10 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
   const edgeScope = resolveScopeEdgeLinearFeet(scope);
   const included = rooms.filter((r) => r && r.included !== false);
   const legacyFallback = assessLegacyProjectEdgeFallback(scope);
+  const calc = estimate?.calculationSnapshot || estimate?.calculation || null;
+  const calcRoomsById = new Map(
+    (Array.isArray(calc?.elite100?.rooms) ? calc.elite100.rooms : []).map((cr) => [String(cr.roomId), cr])
+  );
   // Room-scoped edge LF (FEATURE_DECISIONS §165 / §173): each room freezes its own
   // confirmed/approved open-edge quantity. Never assign project finalLf to
   // the first countertop room. Never divide project LF across rooms.
@@ -417,11 +492,91 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
           : roomEdge.missingReason || "missing_room_edge_lf",
         edgeScopeSource: edgeScope.source || null,
         materialGroup,
-        colorName,
+        materialLabel: calcRoomsById.get(str(r.id))?.slabPackage?.label || materialGroup,
+        colorName: resolvePublishedRoomColorName({
+          projectColorName: colorName,
+          room: r,
+          roomMaterial: roomMat,
+          slabPackageLabel: calcRoomsById.get(str(r.id))?.slabPackage?.label
+        }),
+        ...(calcRoomsById.get(str(r.id))?.slabPackage ? { customSlabPackage: true } : {}),
+        ...calculatorStoneWeights(calcRoomsById.get(str(r.id))),
         pieces,
         notes: str(r.notes) || ""
       };
     });
+}
+
+/**
+ * Per-room sink lines exactly as the calculator priced them: the chosen catalog
+ * sink (product price), each room's own sink cutout charge, an explicit $0
+ * customer-provided sink, or a $0 Vanity Program inclusion. Null for legacy
+ * calculations without room pricing (the snapshot then keeps the add-on map path).
+ * @param {object|null|undefined} calc
+ */
+export function buildStudioSinkLinesForPublication(calc) {
+  const rooms = Array.isArray(calc?.elite100?.rooms) ? calc.elite100.rooms : null;
+  if (!rooms) return null;
+  const lines = [];
+  for (const room of rooms) {
+    const roomId = str(room?.roomId);
+    if (!roomId) continue;
+    const roomName = str(room?.roomName) || null;
+    const base = { roomId, roomName, unit: "ea" };
+    if (room?.vanityProgram?.qualifies === true) {
+      lines.push({
+        ...base,
+        lineKey: `fab-sink-program-${roomId}`,
+        label: "Sink and sink cutout (included in Vanity Program)",
+        category: "sink",
+        amountCents: 0,
+        quantity: 1
+      });
+      continue;
+    }
+    const c = room?.cutouts && typeof room.cutouts === "object" ? room.cutouts : {};
+    for (const [qtyKey, chargeKey, label] of [
+      ["kitchenSinkQty", "kitchenSinkCharge", "Kitchen sink cutout"],
+      ["vanitySinkQty", "vanitySinkCharge", "Vanity/bar sink cutout"]
+    ]) {
+      const qty = Math.max(0, Math.floor(Number(c[qtyKey]) || 0));
+      if (qty <= 0) continue;
+      lines.push({
+        ...base,
+        lineKey: `fab-sink-cutout-${chargeKey}-${roomId}`,
+        label,
+        category: "sink_cutout",
+        amountCents: Math.round((Number(c[chargeKey]) || 0) * 100),
+        quantity: qty
+      });
+    }
+    for (const [i, sink] of (Array.isArray(room?.sinks) ? room.sinks : []).entries()) {
+      const qty = Math.max(0, Math.floor(Number(sink?.quantity) || 0));
+      if (qty <= 0) continue;
+      const product = sink?.product;
+      if (product && !product.reviewRequired && Number(product.lineTotal) >= 0) {
+        lines.push({
+          ...base,
+          lineKey: `fab-sink-product-${roomId}-${i + 1}`,
+          label: `Sink — ${str(product.name) || "ESF sink"}`,
+          category: "sink",
+          amountCents: Math.round(Number(product.lineTotal) * 100),
+          quantity: qty,
+          productId: str(product.productId) || null
+        });
+      } else if (sink?.customerSupplied) {
+        lines.push({
+          ...base,
+          lineKey: `fab-sink-customer-${roomId}-${i + 1}`,
+          label: "Customer-provided sink",
+          category: "sink",
+          amountCents: 0,
+          quantity: qty
+        });
+      }
+    }
+  }
+  return lines;
 }
 
 /**
@@ -495,9 +650,9 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
   const customerFacingRows = publicLines.map((l, i) => ({
     key: `custom-line-${l.lineKey || i + 1}`,
     label: l.roomName ? `${l.roomName} — ${l.name}` : l.name,
-    displayAmount: Math.round(Number(l.lineTotal) || 0)
+    displayAmount: roundMoney(Number(l.lineTotal) || 0)
   }));
-  const finalRounded = Math.round(Number(customerDisplayTotal) || 0);
+  const finalRounded = roundMoney(Number(customerDisplayTotal) || 0);
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const summaryRows = [
     ...customerFacingRows,
@@ -528,12 +683,59 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
       if (r.backsplashSqft > 0) lines.push(`Backsplash ${Math.round(r.backsplashSqft)} sf`);
       return {
         name: r.name,
-        materialLabel: r.materialGroup,
+        materialLabel: r.materialLabel || r.materialGroup,
         colorLabel: r.colorName,
         summaryLines: lines
       };
     }),
     summaryRows
+  };
+}
+
+/**
+ * Rates and rules the calculator actually used, for the publication pricing pin
+ * (publicationPricingPin.mjs). Internal pricing evidence only: $/SF and rule flags,
+ * never slab costs, multipliers, markup or wholesale totals. Null when the
+ * calculation carries no room-pricing evidence (the pin then blocks repricing).
+ * @param {object|null|undefined} calc
+ * @param {object} estimate
+ */
+export function buildStudioPricingRuleEvidence(calc, estimate) {
+  const e100 = calc?.elite100 && typeof calc.elite100 === "object" ? calc.elite100 : null;
+  const snap = e100?.snapshot && typeof e100.snapshot === "object" ? e100.snapshot : null;
+  if (!e100 || !snap || !Array.isArray(e100.rooms)) return null;
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const adj = calc?.totals?.estimateWideAdjustment || e100?.totals?.estimateWideAdjustment || null;
+  const account = calc?.account || e100?.account || {};
+  return {
+    schema: 1,
+    pricingEngine: str(calc?.pricingEngine || snap.pricingEngine) || null,
+    pricingVersion: calc?.pricingVersion ?? snap.pricingVersion ?? null,
+    pricingBasis: str(snap.priceBookBasis || calc?.pricingBasis || scope.pricingBasis) || null,
+    materialRateTable: snap.materialRateTable ? { ...snap.materialRateTable } : null,
+    materialUseTaxPercent: Number.isFinite(Number(snap.materialUseTaxPercent))
+      ? Number(snap.materialUseTaxPercent)
+      : null,
+    cutoutRates: snap.cutoutRates ? { ...snap.cutoutRates } : null,
+    rooms: e100.rooms.map((r) => ({
+      roomKey: str(r.roomId) || null,
+      materialGroup: str(r.materialGroup) || null,
+      ratePerSf: Number.isFinite(Number(r.materialRatePerSf)) ? Number(r.materialRatePerSf) : null,
+      rateSource: str(r.materialRateSource) || null,
+      slabPackage: Boolean(r.slabPackageId),
+      wattsOverrideApplied: r.wattsOverrideApplied === true,
+      materialUseTaxPercent: Number.isFinite(Number(r.materialUseTaxPercent))
+        ? Number(r.materialUseTaxPercent)
+        : null,
+      vanityProgram: Boolean(r.bundled)
+    })),
+    accountRules: {
+      wattsTrusted: account.wattsTrusted === true || snap.accountRuleResult?.wattsTrusted === true,
+      spahnTrusted: account.spahnTrusted === true,
+      estimateWideAdjustmentPercent: adj ? Number(adj.percentage) || 0 : 0,
+      estimateWideAdjustmentSource: adj ? str(adj.source) || null : null,
+      accountAdjustmentAmount: Number(calc?.totals?.accountAdjustment ?? account.accountAdjustment) || 0
+    }
   };
 }
 
@@ -611,7 +813,9 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       approvedCalculationFingerprint:
         estimate.approval?.calculationFingerprint || calc?.fingerprint || null
     },
-    // Intentionally omit: internalMarkup, account overlays, rate tables, wholesale totals.
+    // Intentionally omit: internalMarkup, slab costs, wholesale totals. The rates actually
+    // used are kept only for the pricing pin; customer snapshots never read this object.
+    pricingRuleEvidence: buildStudioPricingRuleEvidence(calc, estimate),
     totals: {
       customerDisplayTotal
     },
@@ -627,6 +831,7 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       // authority for published Digital Estimate option labels + save amounts.
       edge_option_effects: edgeOptionEffects,
       fabrication_add_ons: fabricationAddOns,
+      fabrication_sink_lines: buildStudioSinkLinesForPublication(calc),
       custom_line_items: buildStudioCustomLineItemsForPublication(estimate).filter(
         (l) => l.customerFacing || l.absorbIntoStone
       ),

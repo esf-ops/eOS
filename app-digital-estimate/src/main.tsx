@@ -7,11 +7,18 @@ import "./styles.css";
 import "@quote-lib/customerEstimate/customerEstimateDocument.css";
 import "@quote-lib/customerEstimate/customerEstimateDocumentPrint.css";
 import "./digitalEstimatePrint.css";
+import { loopbackAlignedUrl } from "./loopbackHostAlignment";
+import { apiBaseUrl } from "./publicConfigApi";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <EstimateErrorBoundary>
-      <App />
-    </EstimateErrorBoundary>
-  </StrictMode>,
-);
+const aligned = loopbackAlignedUrl(window.location.href, apiBaseUrl());
+if (aligned) {
+  window.location.replace(aligned);
+} else {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <EstimateErrorBoundary>
+        <App />
+      </EstimateErrorBoundary>
+    </StrictMode>,
+  );
+}

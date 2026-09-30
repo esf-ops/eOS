@@ -384,7 +384,7 @@ async function buildMinimalActiveEnvelope(repo, organizationId = ORG) {
   );
   await assert.rejects(
     () => repo.saveSelection(ORG, session.id, { selections: { unknown: 1 } }),
-    (e) => e.code === "unknown_option"
+    (e) => e.code === "invalid_selection" && e.statusCode === 422 && e.restoreSavedState === true
   );
   const s1 = await repo.saveSelection(
     ORG,

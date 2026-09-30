@@ -42,7 +42,8 @@ function money(v: unknown): string {
   if (v == null || v === "") return "—";
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n < 0 ? "-" : ""}$${abs}`;
 }
 
 function deltaMoney(v: unknown): string {
@@ -187,7 +188,7 @@ export default function OfficialActivityPanel(props: Props) {
           publish.
         </p>
         <p className="qf-muted" data-testid="qf-activity-no-handoff">
-          Sold job handoff is not active yet.
+          Mark Sold and the QuickBooks sales order are on the Handoff tab.
         </p>
       </header>
 

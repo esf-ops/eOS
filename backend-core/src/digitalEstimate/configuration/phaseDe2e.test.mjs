@@ -75,6 +75,7 @@ function eliteHeader() {
       materialProgramDefault: "elite_100",
       totals: { retail: 870, wholesale: 800, estimated_sqft: 10 },
       internal_ui: {
+        pricing_basis: "direct",
         material_program_default: "elite_100",
         customer_display_total: 870,
         customer_estimate_customer_facing_notes: "Thank you.",
@@ -111,6 +112,7 @@ async function seedPublishedWithEnvelope() {
     calculationSnapshotCopy: {
       materialProgramDefault: "elite_100",
       internal_ui: {
+        pricing_basis: "direct",
         estimate_rooms: [
           { id: "kitchen", name: "Kitchen", countertopSqft: 10, materialGroup: "group_b" }
         ]

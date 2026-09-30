@@ -28,7 +28,6 @@ import {
 import { calculateStudioEstimate } from "./studioEstimatePricing.mjs";
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import { normalizeManualRooms, MANUAL_ESTIMATE_ORIGIN } from "./studioManualPhysicalScope.mjs";
-import { roundPublicEstimateToNearestTen } from "../quotes/quoteCalculator.js";
 import { ELITE100_CUTOUT_RATES } from "./elite100RoomPricingCalculator.mjs";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -550,14 +549,6 @@ function noTakeoffService(overrides = {}) {
     ]
   };
   const visibleCalc = await calculateStudioEstimateV4({ scope: visibleLineScope, env: {} });
-  // customerDisplayTotal is the exact total rounded UP to the nearest $10 for
-  // customer presentation (published, tested behavior of the v1 calculator —
-  // see elite100RoomPricingCalculator.test.mjs's "display total rounds up
-  // once to the nearest $10"), so a $65 line does not necessarily move the
-  // *rounded* display total by exactly $65. Assert the exact economics (what
-  // the customer is actually charged before presentation rounding) increase
-  // by the line's full amount, then independently confirm the display total
-  // is the real rounding of that new exact total.
   assert.equal(
     round2(visibleCalc.totals.exactInternalTotal - baselineCalc.totals.exactInternalTotal),
     65,
@@ -565,8 +556,8 @@ function noTakeoffService(overrides = {}) {
   );
   assert.equal(
     visibleCalc.totals.customerDisplayTotal,
-    roundPublicEstimateToNearestTen(visibleCalc.totals.exactTotal),
-    "customer display total is the real nearest-$10 rounding of the new exact total"
+    visibleCalc.totals.exactTotal,
+    "customer display total is the exact total in cents"
   );
   const visibleItem = visibleCalc.fabrication.customLineItems.find((l) => l.id === "cust-visible-1");
   assert.ok(visibleItem, "custom line appears in fabrication.customLineItems");

@@ -217,9 +217,12 @@ export function buildCustomerSafePriceGroups(estimate) {
     );
   }
 
-  // Remaining fabrication (edges, sinks, products, etc.) after typed cutouts.
+  const sinkProducts = round2(Number(review.sinkProductsTotal) || 0);
+  push("sinks", "Sinks", sinkProducts);
+
+  // Remaining fabrication (edges, products, etc.) after typed cutouts and sinks.
   const cutoutSum = round2(cutoutLines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
-  const fabRemainder = round2((Number(review.fabricationTotal) || 0) - cutoutSum);
+  const fabRemainder = round2((Number(review.fabricationTotal) || 0) - cutoutSum - sinkProducts);
   if (fabRemainder > 0) {
     push("fabrication", "Edges & fabrication", fabRemainder);
   } else if (!cutoutLines.length) {
