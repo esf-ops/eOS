@@ -469,6 +469,7 @@ console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + 
   assert.match(pricingPanel, /disabled=\{busy \|\| Boolean\(roomColorGroup\)\}/);
   assert.match(pricingPanel, /data-testid="qf-pricing-color-group-conflict"/);
   assert.match(pricingPanel, /disabled=\{busy \|\| \(!dirty && !colorConflicts\.length\)\}/, "a conflict alone keeps Save enabled");
+  assert.match(pricingPanel, /data-testid="qf-pricing-unsaved-changes"/, "unsaved edits flag the last calculation");
   assert.match(pricingPanel, /data-testid="qf-pricing-room-group-exception-reason"/);
   // Exception controls render only for estimators Brain says may apply them.
   assert.match(pricingPanel, /\{canApplyException \? \(/);

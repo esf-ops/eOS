@@ -853,6 +853,11 @@ export default function OfficialPricingPanel(props: Props) {
           {staleReason}
         </div>
       ) : null}
+      {dirty && lastCalculation?.available && !pricingStale && !scopeChangedSinceCalculation ? (
+        <div className="qf-pricing__stale" data-testid="qf-pricing-unsaved-changes" role="status">
+          Unsaved changes — the latest calculation reflects the last saved pricing. Save or Calculate to update it.
+        </div>
+      ) : null}
 
       {localBlockers.length > 0 ? (
         <ul className="qf-pricing__blockers" data-testid="qf-pricing-blockers">
