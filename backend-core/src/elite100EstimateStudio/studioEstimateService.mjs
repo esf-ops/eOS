@@ -1883,6 +1883,20 @@ export function createStudioEstimateService(deps = {}) {
       const statusBefore = row.status;
 
       try {
+        // Also refuses re-approval (and so publish) of an estimate approved before this rule.
+        const colorConflicts = assessRoomColorPriceGroups(row.scope).filter((r) => r.status === "conflict");
+        if (colorConflicts.length) {
+          const err = new Error(
+            `${colorConflicts
+              .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
+              .join("; ")}. Apply the color's price group and recalculate, or record a documented price-group exception.`
+          );
+          err.statusCode = 422;
+          err.code = "color_price_group_conflict";
+          err.details = colorConflicts;
+          throw err;
+        }
+
         // Idempotent: already approved for same calculation fingerprint.
         if (
           row.status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
@@ -1929,19 +1943,6 @@ export function createStudioEstimateService(deps = {}) {
           err.statusCode = 422;
           err.code = "unresolved_items";
           err.details = unresolved;
-          throw err;
-        }
-
-        const colorConflicts = assessRoomColorPriceGroups(row.scope).filter((r) => r.status === "conflict");
-        if (colorConflicts.length) {
-          const err = new Error(
-            `${colorConflicts
-              .map((m) => `${m.roomName}: ${m.colorName} is ${m.colorGroupLabel} but priced as ${m.pricedGroup}`)
-              .join("; ")}. Apply the color's price group and recalculate, or record a documented price-group exception.`
-          );
-          err.statusCode = 422;
-          err.code = "color_price_group_conflict";
-          err.details = colorConflicts;
           throw err;
         }
 

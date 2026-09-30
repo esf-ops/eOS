@@ -246,6 +246,12 @@ export function assessQuoteFlowDigitalEstimateReadiness(row, opts = {}) {
     );
   }
 
+  // Approvals recorded before the color → price group rule still cannot publish a conflict.
+  const colorConflict = (review.blockers || []).find((b) => b.id === "color_price_group");
+  if (colorConflict) {
+    checklist.push(checkItem("blocker", "color_price_group", colorConflict.label, colorConflict.detail));
+  }
+
   if (review.reviewStatusKey === "approved") {
     checklist.push(
       checkItem(

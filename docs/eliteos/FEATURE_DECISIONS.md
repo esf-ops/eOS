@@ -5192,3 +5192,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Pricing Admin owning per-account group rules; a role model for "authorized estimator" beyond admin plus allowlist. |
 
 ---
+
+### 391. Pre-rule approvals cannot publish a color / price-group conflict
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-30 |
+| **Decision** | Follow-up to #390. An estimate approved before #390 keeps its approval record, and nothing is changed or repriced. It cannot be published while an Elite 100 color conflicts with its priced group without a documented exception. Quote Flow's Digital Estimate readiness adds the Review `color_price_group` blocker. Studio approve checks conflicts before its "already approved" early return, so Studio publish (which re-runs approve) also refuses. |
+| **Why** | Publish checked only that an approval existed. The production SMOKE TEST draft (approved before #390 at Promo for a Group C color) showed that path. |
+| **Verification** | `quoteFlowColorPriceGroup.test.mjs` covers a pre-rule approved conflict (publish `canPublish: false`). The Quote Flow Digital Estimate, public acceptance, Studio service, golden path, V2 publish and publish-fix suites pass. The #390 regression baseline was re-run on `e6d44516` without `timeout`, which macOS lacks. 11 of the 12 failures fail identically there, and `studioIdentityOptionalPublish` passes but hangs on an open handle there too. |
+| **Impacted files/docs** | `elite100QuoteFlow/quoteFlowDigitalEstimate.mjs`, `elite100EstimateStudio/studioEstimateService.mjs`, `quoteFlowColorPriceGroup.test.mjs`. |
+
+---

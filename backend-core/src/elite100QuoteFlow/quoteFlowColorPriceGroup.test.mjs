@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
 import { assessQuoteFlowReviewReadiness } from "./quoteFlowReview.mjs";
+import { assessQuoteFlowDigitalEstimateReadiness } from "./quoteFlowDigitalEstimate.mjs";
 import { calculateStudioEstimateV4 } from "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs";
 import {
   applyElite100ColorPriceGroups,
@@ -211,7 +212,17 @@ const roomPatch = (p) => ({ pricing: { roomSelections: [{ roomId: "kitchen", ...
   const v2 = assessStudioV2ApprovalReadiness({ ...row, status: "priced", staleReason: null });
   assert.equal(v2.allowed, false);
   assert.ok(v2.blockers.some((b) => b.code === "color_price_group_conflict"));
-  console.log("ok: existing conflicting drafts are not regrouped on calculate; Quote Flow and Studio approval block");
+
+  // Approved before the rule: the approval is left alone, but it cannot be published.
+  const preRuleApproved = {
+    ...row,
+    status: "approved",
+    approval: { approvedAt: "2026-09-30T16:55:51Z", calculationFingerprint: row.calculationSnapshot.fingerprint }
+  };
+  const publish = assessQuoteFlowDigitalEstimateReadiness(preRuleApproved, { env: {} });
+  assert.ok(publish.blockers.some((b) => b.id === "color_price_group"));
+  assert.equal(publish.canPublish, false);
+  console.log("ok: existing conflicting drafts are not regrouped on calculate; approval and publish block");
 }
 
 // Documented exception: authorized only, reason required, audited, cleared when the color changes.
