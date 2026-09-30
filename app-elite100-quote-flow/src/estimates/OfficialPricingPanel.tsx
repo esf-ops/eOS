@@ -1456,7 +1456,7 @@ export default function OfficialPricingPanel(props: Props) {
           type="button"
           className="qf-btn-secondary"
           data-testid="qf-pricing-save-draft"
-          disabled={busy || !dirty}
+          disabled={busy || (!dirty && !colorConflicts.length)}
           onClick={() => void saveDraft()}
         >
           {saving ? "Saving…" : "Save pricing draft"}
