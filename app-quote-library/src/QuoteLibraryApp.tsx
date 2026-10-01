@@ -268,6 +268,7 @@ export default function QuoteLibraryApp() {
   const [revisions, setRevisions] = useState<Record<string, unknown>[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [showAllRevisions, setShowAllRevisions] = useState(false);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
 
   // Debounce the raw search input → committed search (avoids a fetch on every keystroke).
   useEffect(() => {
@@ -340,6 +341,19 @@ export default function QuoteLibraryApp() {
     if (showAllRevisions) n += 1;
     return n;
   }, [searchInput, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
+
+  const advancedFilterCount = useMemo(() => {
+    let n = 0;
+    if (accountQ.trim()) n += 1;
+    if (branch.trim()) n += 1;
+    if (salesRep.trim()) n += 1;
+    if (createdFrom) n += 1;
+    if (createdTo) n += 1;
+    if (handoffStatus) n += 1;
+    if (showArchived) n += 1;
+    if (showAllRevisions) n += 1;
+    return n;
+  }, [accountQ, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
 
   const listContextKey = useMemo(
     () =>
@@ -1093,10 +1107,6 @@ export default function QuoteLibraryApp() {
                 />
               </label>
               <label>
-                Account
-                <input value={accountQ} onChange={(e) => setAccountQ(e.target.value)} placeholder="Account / name" />
-              </label>
-              <label>
                 Status
                 <select value={status} onChange={(e) => setStatus(e.target.value)}>
                   {STATUS_FILTER_VALUES.map((s) => (
@@ -1118,38 +1128,6 @@ export default function QuoteLibraryApp() {
                 </select>
               </label>
               <label>
-                Branch
-                <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" />
-              </label>
-              <label>
-                Sales rep
-                <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} placeholder="Rep" />
-              </label>
-              <label>
-                Created from
-                <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
-              </label>
-              <label>
-                Created to
-                <input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
-              </label>
-              <label>
-                Handoff
-                <select value={handoffStatus} onChange={(e) => setHandoffStatus(e.target.value)}>
-                  <option value="">Any</option>
-                  <option value="none">Not started</option>
-                  <option value="in_progress">In progress</option>
-                </select>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
-                <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-                Show archived
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }} title="Include older revisions in the list (default shows latest revision only)">
-                <input type="checkbox" checked={showAllRevisions} onChange={(e) => setShowAllRevisions(e.target.checked)} />
-                Include older revisions
-              </label>
-              <label>
                 Sort by
                 <select value={sort} onChange={(e) => setSort(e.target.value)}>
                   <option value="updated_at">Updated</option>
@@ -1169,6 +1147,46 @@ export default function QuoteLibraryApp() {
                 </select>
               </label>
             </div>
+            {moreFiltersOpen ? (
+              <div className="filter-grid filter-grid-more" id="ql-more-filters">
+                <label>
+                  Account
+                  <input value={accountQ} onChange={(e) => setAccountQ(e.target.value)} placeholder="Account / name" />
+                </label>
+                <label>
+                  Branch
+                  <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" />
+                </label>
+                <label>
+                  Sales rep
+                  <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} placeholder="Rep" />
+                </label>
+                <label>
+                  Created from
+                  <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
+                </label>
+                <label>
+                  Created to
+                  <input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
+                </label>
+                <label>
+                  Handoff
+                  <select value={handoffStatus} onChange={(e) => setHandoffStatus(e.target.value)}>
+                    <option value="">Any</option>
+                    <option value="none">Not started</option>
+                    <option value="in_progress">In progress</option>
+                  </select>
+                </label>
+                <label className="filter-check">
+                  <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                  Show archived
+                </label>
+                <label className="filter-check" title="Include older revisions in the list (default shows latest revision only)">
+                  <input type="checkbox" checked={showAllRevisions} onChange={(e) => setShowAllRevisions(e.target.checked)} />
+                  Include older revisions
+                </label>
+              </div>
+            ) : null}
             <div className="filter-toolbar">
               <button
                 type="button"
@@ -1187,6 +1205,18 @@ export default function QuoteLibraryApp() {
               </button>
               <button type="button" className="btn ghost" disabled={activeFilterCount === 0} onClick={clearFilters}>
                 Clear filters
+              </button>
+              <button
+                type="button"
+                className="btn ghost filter-more-toggle"
+                aria-expanded={moreFiltersOpen}
+                aria-controls="ql-more-filters"
+                onClick={() => setMoreFiltersOpen((v) => !v)}
+              >
+                {moreFiltersOpen ? "Fewer filters" : "More filters"}
+                {!moreFiltersOpen && advancedFilterCount ? (
+                  <span className="filter-count-badge">{advancedFilterCount} active</span>
+                ) : null}
               </button>
             </div>
           </section>
@@ -1214,6 +1244,7 @@ export default function QuoteLibraryApp() {
                         className="btn secondary btn-xs"
                         onClick={() => {
                           setAccountQ(str(g.account_key));
+                          setMoreFiltersOpen(true);
                           setTab("all");
                         }}
                       >
@@ -1341,19 +1372,15 @@ export default function QuoteLibraryApp() {
                           />
                         </th>
                         <th className="col-num">Quote #</th>
-                        <th>Account</th>
-                        <th className="hide-sm">Project / Job</th>
-                        <th className="hide-sm">Location</th>
-                        <th>Source</th>
+                        <th className="col-account">Account / project</th>
                         <th>Status</th>
-                        <th className="hide-md">Sales rep</th>
-                        <th className="hide-md">Branch</th>
-                        <th className="hide-md">Entered by</th>
+                        <th className="hide-sm">Rep / branch</th>
                         <th className="col-total">Total</th>
-                        <th className="hide-sm">Sq ft</th>
-                        <th>Updated</th>
-                        <th className="hide-md">Handoff</th>
-                        <th className="col-actions">Actions</th>
+                        <th className="col-date">Updated</th>
+                        <th className="hide-md col-handoff">Handoff</th>
+                        <th className="col-actions">
+                          <span className="sr-only">Actions</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1378,9 +1405,14 @@ export default function QuoteLibraryApp() {
                             <td className="col-num">
                               <span className="quote-num">{str(r.quote_number_revision_summary || r.quote_number)}</span>
                             </td>
-                            <td className="account-cell">
+                            <td className="account-cell col-account">
                               <div className="primary">{ac.primary}</div>
                               {ac.subline ? <div className="sub">Customer: {ac.subline}</div> : null}
+                              {ac.projectCell || loc(r) !== "—" ? (
+                                <div className="sub">
+                                  {[ac.projectCell, loc(r) !== "—" ? loc(r) : ""].filter(Boolean).join(" · ")}
+                                </div>
+                              ) : null}
                               <div className="account-link-meta">
                                 {ac.accountLinked ? (
                                   <span className="pill pill-account-linked">Account linked</span>
@@ -1389,23 +1421,25 @@ export default function QuoteLibraryApp() {
                                 )}
                               </div>
                             </td>
-                            <td className="hide-sm">{ac.projectCell || "—"}</td>
-                            <td className="hide-sm muted">{loc(r)}</td>
                             <td>
-                              <span className="pill pill-source">{labelQuoteSource(r.quote_source)}</span>
+                              <div className="cell-stack">
+                                <span className={statusPillClass(r.quote_status)}>{labelQuoteStatus(r.quote_status)}</span>
+                                <span className="pill pill-source">{labelQuoteSource(r.quote_source)}</span>
+                              </div>
                             </td>
-                            <td>
-                              <span className={statusPillClass(r.quote_status)}>{labelQuoteStatus(r.quote_status)}</span>
+                            <td className="hide-sm">
+                              <div>{str(r.sales_rep) || "—"}</div>
+                              {str(r.branch) ? <div className="sub">{str(r.branch)}</div> : null}
+                              {str(r.prepared_by) ? (
+                                <div className="sub">Entered by {formatPersonDisplayName(r.prepared_by)}</div>
+                              ) : null}
                             </td>
-                            <td className="hide-md">{str(r.sales_rep) || "—"}</td>
-                            <td className="hide-md">{str(r.branch) || "—"}</td>
-                            <td className="hide-md">{formatPersonDisplayName(r.prepared_by)}</td>
-                            <td className="col-total">{formatMoneyWhole(pickDisplayTotal(r as Record<string, unknown>))}</td>
-                            <td className="hide-sm">{formatSqft(r.estimated_sqft)}</td>
-                            <td>{formatShortDate(r.updated_at)}</td>
-                            <td className="hide-md muted" style={{ maxWidth: 140 }}>
-                              {handoffLabel}
+                            <td className="col-total">
+                              <div>{formatMoneyWhole(pickDisplayTotal(r as Record<string, unknown>))}</div>
+                              <div className="sub">{formatSqft(r.estimated_sqft)}</div>
                             </td>
+                            <td className="col-date">{formatShortDate(r.updated_at)}</td>
+                            <td className="hide-md muted col-handoff">{handoffLabel}</td>
                             <td className="col-actions">
                               <button
                                 type="button"

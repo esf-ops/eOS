@@ -134,14 +134,14 @@ body {
 .main {
   flex: 1;
   width: 100%;
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: 28px 24px 48px;
+  padding: 22px 24px 40px;
 }
 
 .page {
   /* Compatibility: any old `.page` wrappers behave like .main inside .shell. */
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 28px 22px 56px;
 }
@@ -149,12 +149,12 @@ body {
 .ql-hero {
   position: relative;
   overflow: hidden;
-  padding: 36px 36px 30px;
+  padding: 22px 28px 20px;
   border-radius: var(--r-xl);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.82) 100%);
   border: 1px solid var(--eos-line);
   box-shadow: var(--sh-2);
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .ql-hero-grid {
@@ -185,7 +185,7 @@ body {
 }
 
 .hero-eyebrow {
-  margin: 0 0 14px;
+  margin: 0 0 8px;
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.16em;
@@ -203,8 +203,8 @@ body {
 }
 
 .hero-sub {
-  margin: 10px 0 0;
-  font-size: 1rem;
+  margin: 6px 0 0;
+  font-size: 0.94rem;
   line-height: 1.55;
   color: var(--eos-ink-mid);
   max-width: 56ch;
@@ -815,6 +815,33 @@ input[type="checkbox"] {
   }
 }
 
+.filter-grid-more {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--eos-line-strong);
+}
+
+.filter-grid .filter-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  min-height: 42px;
+}
+
+.filter-more-toggle {
+  margin-left: auto;
+}
+
+.filter-count-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--eos-accent-soft);
+  color: var(--eos-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 /* ----- Metrics grid ----------------------------------------------------- */
 
 .metrics-section {
@@ -831,9 +858,9 @@ input[type="checkbox"] {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  gap: 12px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 .metric {
@@ -841,7 +868,7 @@ input[type="checkbox"] {
   background: var(--eos-surface);
   border: 1px solid var(--eos-line);
   border-radius: var(--r-md);
-  padding: 14px 16px 14px 18px;
+  padding: 10px 12px 10px 15px;
   box-shadow: var(--sh-card);
   overflow: hidden;
   transition: box-shadow var(--eos-dur-2) var(--eos-ease);
@@ -863,7 +890,7 @@ input[type="checkbox"] {
 }
 
 .metric .val {
-  font-size: 1.32rem;
+  font-size: 1.12rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--eos-ink);
@@ -876,9 +903,9 @@ input[type="checkbox"] {
   font-weight: 600;
   color: var(--eos-ink-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-top: 6px;
-  line-height: 1.35;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+  line-height: 1.3;
 }
 
 .metric-zero .val {
@@ -908,8 +935,12 @@ input[type="checkbox"] {
 
 /* ----- Table ------------------------------------------------------------ */
 
+/* Bounded scroll box: the header row and any horizontal scrollbar stay on screen
+   instead of sitting below the last of 50+ rows. */
 .table-wrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: max(420px, calc(100vh - 150px));
+  overscroll-behavior-x: contain;
   margin: 0 -4px;
   border-radius: var(--r-md);
   border: 1px solid var(--eos-line);
@@ -918,14 +949,18 @@ input[type="checkbox"] {
 
 .ql-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.84rem;
-  min-width: 920px;
+  min-width: 760px;
 }
 
 .ql-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   text-align: left;
-  padding: 12px 14px;
+  padding: 11px 12px;
   border-bottom: 1px solid var(--eos-line);
   background: #f7f9fc;
   font-weight: 700;
@@ -938,10 +973,40 @@ input[type="checkbox"] {
 
 .ql-table td {
   text-align: left;
-  padding: 12px 14px;
+  padding: 11px 12px;
   border-bottom: 1px solid #f1f3f8;
   vertical-align: top;
   color: var(--eos-ink-soft);
+}
+
+.ql-table td .sub {
+  font-size: 0.74rem;
+  color: var(--eos-ink-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.ql-table .col-account {
+  min-width: 220px;
+}
+
+.ql-table .col-date {
+  white-space: nowrap;
+}
+
+.ql-table .col-handoff {
+  max-width: 160px;
+}
+
+.ql-table .col-total .sub {
+  font-weight: 500;
+}
+
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
 }
 
 .ql-table tbody tr {
@@ -2257,7 +2322,7 @@ input[type="checkbox"] {
     display: none !important;
   }
   .ql-table {
-    min-width: 640px;
+    min-width: 560px;
   }
   .topbar {
     padding: 12px 16px;
@@ -2369,6 +2434,44 @@ input[type="checkbox"] {
 @supports (scrollbar-gutter: stable) {
   .ql-modal-body {
     scrollbar-gutter: stable;
+  }
+}
+
+/* Single column by default; the second column's first block keeps its divider. */
+.ql-modal-col + .ql-modal-col > .drawer-block:first-of-type,
+.ql-modal-columns + .drawer-block {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--eos-line);
+}
+
+@media (min-width: 1100px) {
+  .ql-modal {
+    max-width: min(1240px, calc(100vw - 48px));
+  }
+
+  .ql-modal-columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0;
+    align-items: start;
+  }
+
+  .ql-modal-col {
+    min-width: 0;
+    padding-right: 32px;
+  }
+
+  .ql-modal-col + .ql-modal-col {
+    padding-right: 0;
+    padding-left: 32px;
+    border-left: 1px solid var(--eos-line);
+  }
+
+  .ql-modal-col + .ql-modal-col > .drawer-block:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
   }
 }
 
@@ -2570,6 +2673,10 @@ body:has(.ql-modal-wrap) {
   }
   body {
     background: #fff;
+  }
+  .table-wrap {
+    max-height: none;
+    overflow: visible;
   }
   .card,
   .ql-hero,

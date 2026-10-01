@@ -102,7 +102,7 @@ body {
 .main {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: clamp(18px, 2.2vw, 32px) clamp(16px, 2.4vw, 28px) 56px;
   min-width: 0;

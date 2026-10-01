@@ -41,7 +41,7 @@ a {
 }
 
 .shell {
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 1.5rem clamp(1rem, 3vw, 2rem) 3rem;
 }

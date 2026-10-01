@@ -115,7 +115,7 @@ body {
 }
 
 .page {
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 16px 16px 48px;
 }
@@ -7151,9 +7151,8 @@ body {
 
 .ie-shell-body {
   width: 100%;
-  /* Bumped from 1360px so the center estimator column gets more horizontal
-     real estate on 1440 / 1600+ viewports without overflowing 1280 / 1024. */
-  max-width: 1480px;
+  /* Platform content width for protected internal heads (eliteos-ui-direction.md §5). */
+  max-width: 1600px;
   margin: 0 auto;
   padding:
     clamp(18px, 2vw, 26px)
@@ -7335,7 +7334,7 @@ body {
 
 .ie-sticky-actions-inner {
   width: 100%;
-  max-width: 1360px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 0 clamp(16px, 2.4vw, 28px);
   display: flex;

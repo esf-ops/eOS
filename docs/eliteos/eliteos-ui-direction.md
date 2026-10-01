@@ -169,7 +169,13 @@ content. Other heads can apply the same wash via the shared body background.
 
 ## 5. Layout & spacing
 
-- **Page width:** `max-width: 1180px` content column, centered.
+- **Page width:** protected internal heads use a `max-width: 1600px` content
+  column, centered (sticky action bars and topbar inner rails match it).
+  Data-dense views (tables, queues) must fit their primary columns inside that
+  width without horizontal scroll at ≥1280px viewports; consolidate related
+  fields into stacked cells instead of adding columns. Public / customer-facing
+  heads (`app-quote`, `app-digital-estimate`, kiosk) may keep narrower reading
+  widths intentionally.
 - **Page padding:** `32px 28px` on desktop, `20px 16px` on mobile.
 - **Section gaps:** `36px` between major sections.
 - **Card grid:** `repeat(auto-fill, minmax(286px, 1fr))` for live tools,

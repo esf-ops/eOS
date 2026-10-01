@@ -38,7 +38,7 @@ body {
 .main {
   flex: 1;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 24px 24px calc(48px + env(safe-area-inset-bottom, 0px));
 }

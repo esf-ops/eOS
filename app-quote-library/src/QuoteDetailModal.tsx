@@ -375,6 +375,8 @@ export function QuoteDetailModal({
               </div>
             ) : null}
 
+            <div className="ql-modal-columns">
+            <div className="ql-modal-col">
             {/* Overview */}
             <section
               className="drawer-block"
@@ -814,7 +816,9 @@ export function QuoteDetailModal({
                 )}
               </section>
             ) : null}
+            </div>
 
+            <div className="ql-modal-col">
             {/* Handoff documents */}
             <section className="drawer-block">
               <h3>Handoff documents</h3>
@@ -1093,6 +1097,8 @@ export function QuoteDetailModal({
                   })}
               </ul>
             </section>
+            </div>
+            </div>
 
             {/* Admin / debug */}
             <section className="drawer-block debug-accordion">

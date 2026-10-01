@@ -82,7 +82,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .main {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 1560px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 0 clamp(20px, 3.5vw, 52px) 80px;
   min-width: 0;

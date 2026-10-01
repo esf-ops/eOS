@@ -130,7 +130,7 @@ body {
   padding: 10px clamp(16px, 2.4vw, 28px) 0;
   margin: 0 auto;
   width: 100%;
-  max-width: 1480px;
+  max-width: 1600px;
   background: transparent;
 }
 
@@ -142,7 +142,7 @@ body {
   margin: clamp(10px, 1.2vw, 16px) auto 0;
   padding: 0 clamp(16px, 2.4vw, 28px);
   width: 100%;
-  max-width: 1480px;
+  max-width: 1600px;
 }
 
 .sa-strip-row {
@@ -207,7 +207,7 @@ body {
   border: 1px solid var(--eos-line);
   box-shadow: var(--eos-shadow);
   width: calc(100% - clamp(28px, 4.8vw, 56px));
-  max-width: 1480px;
+  max-width: 1600px;
 }
 
 .hero-aurora {
@@ -428,7 +428,7 @@ body {
 .main {
   flex: 1 1 auto;
   width: 100%;
-  max-width: 1480px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 0;
   min-width: 0;
