@@ -48,6 +48,7 @@ import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js
 import { openEstimateForIntakeCase } from "./takeoff/intakeOpenEstimateService.mjs";
 import { createStudioEstimateService } from "./elite100EstimateStudio/studioEstimateService.mjs";
 import { EOS_CORS_ALLOWED_HEADERS, EOS_CORS_METHODS } from "./http/eosCorsPolicy.mjs";
+import { withSupabaseCallTiming } from "./lib/requestStageTimer.mjs";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -85,7 +86,10 @@ function supabaseServerClient() {
   if (!_supabaseServerClientInstance) {
     const url = requiredEnv("SUPABASE_URL");
     const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-    _supabaseServerClientInstance = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    _supabaseServerClientInstance = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: withSupabaseCallTiming() }
+    });
   }
   return _supabaseServerClientInstance;
 }
@@ -550,7 +554,9 @@ app.use(
     credentials: true,
     // Shared list — includes Idempotency-Key for Studio manual estimate create (and any other idempotent POSTs).
     allowedHeaders: [...EOS_CORS_ALLOWED_HEADERS],
-    methods: [...EOS_CORS_METHODS]
+    methods: [...EOS_CORS_METHODS],
+    // Without this browsers re-preflight every ~5s per URL; each preflight is a full round trip to Brain.
+    maxAge: 600
   })
 );
 

@@ -3,6 +3,8 @@
  * Defaults to Elite Stone Fabrication until tenant routing is fully enforced.
  */
 
+import { authLoadedProfileFor } from "../auth/authMiddleware.js";
+
 export const DEFAULT_ORGANIZATION_KEY = "elite_stone_fabrication";
 
 /** @type {Map<string, boolean>} */
@@ -126,6 +128,20 @@ export async function resolveOrganizationContext({ req, supabase, mode = "authen
     };
   }
 
+  const loaded = mode !== "public" && req?.user?.id ? authLoadedProfileFor(req) : null;
+  /** Settles (never rejects) so it can run alongside the default-org lookup. */
+  const loadedOrgRow = loaded?.organizationId
+    ? supabase
+        .from("organizations")
+        .select("id,organization_key,display_name")
+        .eq("id", loaded.organizationId)
+        .limit(1)
+        .then(
+          (r) => r,
+          (error) => ({ data: null, error })
+        )
+    : null;
+
   const defaultOrg = await getDefaultOrganization(supabase);
   if (!defaultOrg) {
     warnings.push("organizations_table_missing_or_unseeded");
@@ -151,18 +167,21 @@ export async function resolveOrganizationContext({ req, supabase, mode = "authen
   const user = req?.user;
   if (user?.id) {
     try {
-      const { data: prof, error: pe } = await supabase
-        .from("user_profiles")
-        .select("organization_id")
-        .eq("id", user.id)
-        .limit(1);
-      if (!pe && prof?.[0]?.organization_id) {
-        const oid = prof[0].organization_id;
-        const { data: orgRow, error: oe } = await supabase
-          .from("organizations")
-          .select("id,organization_key,display_name")
-          .eq("id", oid)
+      let oid = null;
+      if (loaded) {
+        oid = loaded.organizationId;
+      } else {
+        const { data: prof, error: pe } = await supabase
+          .from("user_profiles")
+          .select("organization_id")
+          .eq("id", user.id)
           .limit(1);
+        if (!pe) oid = prof?.[0]?.organization_id || null;
+      }
+      if (oid) {
+        const { data: orgRow, error: oe } = loadedOrgRow
+          ? await loadedOrgRow
+          : await supabase.from("organizations").select("id,organization_key,display_name").eq("id", oid).limit(1);
         if (!oe && orgRow?.[0]) {
           return {
             organizationId: orgRow[0].id,

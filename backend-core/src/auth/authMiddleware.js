@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import { APPLICATION_ROLES } from "./eosGovernanceConstants.js";
+import { withSupabaseCallTiming } from "../lib/requestStageTimer.mjs";
 
 export const ALLOWED_ROLES = APPLICATION_ROLES;
 
@@ -15,7 +16,10 @@ function supabaseAdminClient() {
   if (!_authAdminClientInstance) {
     const url = requiredEnv("SUPABASE_URL");
     const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-    _authAdminClientInstance = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    _authAdminClientInstance = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: withSupabaseCallTiming() }
+    });
   }
   return _authAdminClientInstance;
 }
@@ -142,6 +146,21 @@ async function loadOrBootstrapProfile(supabase, authUser) {
   return await loadUserProfileOrNull(supabase, authUser.id);
 }
 
+/** Profile facts read from user_profiles by requireAuth/optionalAuth, keyed by the request they were read for. */
+const authLoadedProfiles = new WeakMap();
+
+/**
+ * user_kind / organization_id that this module's auth middleware loaded from user_profiles for
+ * this exact request, or null when the request was authenticated some other way (callers must then query).
+ * @param {import("express").Request} req
+ * @returns {{ userId: string, userKind: string, organizationId: string | null } | null}
+ */
+export function authLoadedProfileFor(req) {
+  const loaded = req ? authLoadedProfiles.get(req) : null;
+  if (!loaded || String(req.user?.id || "") !== loaded.userId) return null;
+  return loaded;
+}
+
 function attachUser(req, authUser, profile) {
   const fullName = profile?.full_name || "";
   const organizationId = profile?.organization_id != null ? String(profile.organization_id).trim() : "";
@@ -159,6 +178,13 @@ function attachUser(req, authUser, profile) {
     // Display-only fields — do not use for access checks
     job_title: profile?.job_title ?? null
   };
+  if (profile) {
+    authLoadedProfiles.set(req, {
+      userId: String(authUser.id),
+      userKind: String(profile.user_kind ?? ""),
+      organizationId: profile.organization_id != null ? String(profile.organization_id) : null
+    });
+  }
 }
 
 export function requireAuth() {

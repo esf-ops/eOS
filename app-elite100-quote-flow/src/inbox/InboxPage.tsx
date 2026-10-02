@@ -40,6 +40,10 @@ type Props = {
   onOpenEstimates?: (estimateId?: string | null) => void;
   /** Open a specific Inbox request after navigating from Estimate Queue. */
   initialMessageKey?: string | null;
+  /** Increments on every cross-tab "open request" so repeat requests for the same key still open it. */
+  openRequestSeq?: number;
+  /** False while the Inbox tab is hidden (page stays mounted); background polling pauses. */
+  isActive?: boolean;
   /** @deprecated use onOpenQueue */
   onOpenQueuePlaceholder?: () => void;
 };
@@ -509,7 +513,9 @@ function FailureCard({
 }
 
 export default function InboxPage(props: Props) {
-  const { authToken, onOpenEstimates, initialMessageKey = null } = props;
+  const { authToken, onOpenEstimates, initialMessageKey = null, openRequestSeq = 0, isActive = true } = props;
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
   const onOpenQueue = props.onOpenQueue || props.onOpenQueuePlaceholder;
   const [items, setItems] = useState<QuoteFlowInboxItem[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -632,7 +638,7 @@ export default function InboxPage(props: Props) {
     if (mode !== "poll") setError(null);
 
     try {
-      const res = await fetchQuoteFlowInbox(authToken, { limit: 50, state: "all" });
+      const res = await fetchQuoteFlowInbox(authTokenRef.current, { limit: 50, state: "all" });
       const rows = (Array.isArray(res.items) ? res.items : []).map(
         (row) => normalizeInboxItemLabels(row) as QuoteFlowInboxItem
       );
@@ -652,10 +658,19 @@ export default function InboxPage(props: Props) {
     }
   }
 
+  // Load once per mount; a session token refresh must not reload the list.
   useEffect(() => {
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken]);
+  }, []);
+
+  // Returning to a hidden Inbox catches up once; applyListRows soft-merges and keeps the open request.
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) void loadList("poll");
+    wasActiveRef.current = isActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   // Deep-link / cross-tab: open a request when navigating from Estimate Queue.
   useEffect(() => {
@@ -664,7 +679,7 @@ export default function InboxPage(props: Props) {
     if (selectedKey === key) return;
     void openRow(key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialMessageKey, items.length]);
+  }, [initialMessageKey, openRequestSeq, items.length]);
 
   // Background poll while active takeoffs exist (or tracked batch still in flight).
   useEffect(() => {
@@ -677,13 +692,15 @@ export default function InboxPage(props: Props) {
         row?.isActiveTakeoff === true
       );
     });
+    if (!isActive) return;
     if (grouped.active.length === 0 && !trackedActive) return;
     const id = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void loadList("poll");
     }, 12000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grouped.active.length, trackedBatchKeys.join("|"), authToken]);
+  }, [grouped.active.length, trackedBatchKeys.join("|"), isActive]);
 
   function rememberSelection(messageKey: string, attachmentKey: string | null) {
     if (!messageKey || !attachmentKey) return;

@@ -2,7 +2,7 @@
  * Estimates modal — Review tab (internal approval gate only).
  * No Digital Estimate publish, acceptance, or sold.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import {
   approveQuoteFlowEstimateReview,
@@ -67,6 +67,9 @@ export default function OfficialReviewPanel(props: Props) {
     }
   }
 
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
+
   useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -74,7 +77,7 @@ export default function OfficialReviewPanel(props: Props) {
       setError(null);
       setNotice(null);
       try {
-        const res = await fetchQuoteFlowEstimateReview(authToken, estimateId);
+        const res = await fetchQuoteFlowEstimateReview(authTokenRef.current, estimateId);
         if (!cancelled) setPayload(res);
       } catch (e) {
         if (!cancelled) setError(errorMessage(e));
@@ -86,7 +89,7 @@ export default function OfficialReviewPanel(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [authToken, estimateId]);
+  }, [estimateId]);
 
   async function approve() {
     setBusy(true);

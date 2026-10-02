@@ -3,7 +3,7 @@
  * Mark Sold, retry and customer:job selection are enforced by Brain (privileged role,
  * checklist, org scope); this panel only reflects what the server allows.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import {
   fetchQuoteFlowSoldWorkspace,
@@ -206,9 +206,13 @@ export default function OfficialSoldAccountingPanel(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
+  // A session token refresh must not reload the workspace and reset the unsaved checklist.
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
+
   const load = useCallback(async () => {
     try {
-      const res = await fetchQuoteFlowSoldWorkspace(authToken, estimateId);
+      const res = await fetchQuoteFlowSoldWorkspace(authTokenRef.current, estimateId);
       setWorkspace(res);
       setChecklist(res.soldReview?.checklist || {});
       setError(null);
@@ -217,7 +221,7 @@ export default function OfficialSoldAccountingPanel(props: Props) {
     } finally {
       setLoading(false);
     }
-  }, [authToken, estimateId]);
+  }, [estimateId]);
 
   useEffect(() => {
     setLoading(true);

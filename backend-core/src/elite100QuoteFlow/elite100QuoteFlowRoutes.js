@@ -32,7 +32,8 @@ import { createQuoteFlowAcceptedReportService } from "./quoteFlowAcceptedReport.
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   attachRequestTimingHeader,
-  createRequestStageTimer
+  createRequestStageTimer,
+  requestTimingMiddleware
 } from "../lib/requestStageTimer.mjs";
 import { createStudioSecurePlanViewerService } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
 import { normalizeStartTakeoffAttachmentKeys } from "./quoteFlowTakeoffPacket.mjs";
@@ -117,6 +118,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   if (!isElite100QuoteFlowEnabled(env)) {
     return { mounted: false, reason: "flag_off" };
   }
+
+  app.use("/api/elite100-quote-flow", requestTimingMiddleware());
 
   const rejectPartnerOnlyUser = async (req, res, next) => {
     try {

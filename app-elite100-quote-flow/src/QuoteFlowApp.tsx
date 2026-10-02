@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import { apiGet, ApiError } from "./lib/api";
@@ -36,6 +36,14 @@ function parseNavFromSearch(): MainNav {
   return "inbox";
 }
 
+function TabPanel({ active, testId, children }: { active: boolean; testId: string; children: React.ReactNode }) {
+  return (
+    <div data-testid={testId} hidden={!active} style={active ? { display: "contents" } : undefined}>
+      {children}
+    </div>
+  );
+}
+
 export default function QuoteFlowApp() {
   const supabase = useMemo(() => getSupabase(), []);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
@@ -48,7 +56,11 @@ export default function QuoteFlowApp() {
   const [mainNav, setMainNav] = useState<MainNav>(() => parseNavFromSearch());
   const [shellStatus, setShellStatus] = useState<string | null>(null);
   const [openEstimateId, setOpenEstimateId] = useState<string | null>(null);
+  const [openEstimateSeq, setOpenEstimateSeq] = useState(0);
   const [openInboxMessageKey, setOpenInboxMessageKey] = useState<string | null>(null);
+  const [openInboxSeq, setOpenInboxSeq] = useState(0);
+  /** Pages stay mounted after first visit so switching tabs never discards in-progress work. */
+  const [visitedNav, setVisitedNav] = useState<ReadonlySet<MainNav>>(() => new Set([mainNav]));
 
   useEffect(() => {
     if (!supabase) {
@@ -83,15 +95,21 @@ export default function QuoteFlowApp() {
     };
   }, [supabase]);
 
+  const sessionTokenRef = useRef(sessionToken);
+  sessionTokenRef.current = sessionToken;
+  const hasSession = Boolean(sessionToken);
+
+  // Once per sign-in; a token refresh is not a reconnect.
   useEffect(() => {
-    if (!sessionToken) {
+    const token = sessionTokenRef.current;
+    if (!token) {
       setShellStatus(null);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const body = (await apiGet("/api/elite100-quote-flow/health", sessionToken)) as {
+        const body = (await apiGet("/api/elite100-quote-flow/health", token)) as {
           ok?: boolean;
           shell?: string;
         };
@@ -122,10 +140,11 @@ export default function QuoteFlowApp() {
     return () => {
       cancelled = true;
     };
-  }, [sessionToken]);
+  }, [hasSession]);
 
   function setNav(next: MainNav) {
     setMainNav(next);
+    setVisitedNav((prev) => (prev.has(next) ? prev : new Set([...prev, next])));
     try {
       const url = new URL(window.location.href);
       url.searchParams.set("tab", next);
@@ -268,32 +287,49 @@ export default function QuoteFlowApp() {
         ) : null}
 
         <main className="qf-main">
-          {mainNav === "inbox" ? (
-            <InboxPage
-              authToken={sessionToken}
-              initialMessageKey={openInboxMessageKey}
-              onOpenQueue={() => setNav("queue")}
-              onOpenEstimates={(estimateId) => {
-                setOpenEstimateId(estimateId || null);
-                setNav("estimates");
-              }}
-            />
+          {visitedNav.has("inbox") ? (
+            <TabPanel active={mainNav === "inbox"} testId="qf-tab-inbox">
+              <InboxPage
+                authToken={sessionToken}
+                isActive={mainNav === "inbox"}
+                initialMessageKey={openInboxMessageKey}
+                openRequestSeq={openInboxSeq}
+                onOpenQueue={() => setNav("queue")}
+                onOpenEstimates={(estimateId) => {
+                  setOpenEstimateId(estimateId || null);
+                  setOpenEstimateSeq((n) => n + 1);
+                  setNav("estimates");
+                }}
+              />
+            </TabPanel>
           ) : null}
-          {mainNav === "queue" ? (
-            <EstimateQueuePage
-              authToken={sessionToken}
-              onOpenEstimates={(estimateId) => {
-                setOpenEstimateId(estimateId || null);
-                setNav("estimates");
-              }}
-              onOpenInbox={(messageKey) => {
-                setOpenInboxMessageKey(messageKey || null);
-                setNav("inbox");
-              }}
-            />
+          {visitedNav.has("queue") ? (
+            <TabPanel active={mainNav === "queue"} testId="qf-tab-queue">
+              <EstimateQueuePage
+                authToken={sessionToken}
+                isActive={mainNav === "queue"}
+                onOpenEstimates={(estimateId) => {
+                  setOpenEstimateId(estimateId || null);
+                  setOpenEstimateSeq((n) => n + 1);
+                  setNav("estimates");
+                }}
+                onOpenInbox={(messageKey) => {
+                  setOpenInboxMessageKey(messageKey || null);
+                  setOpenInboxSeq((n) => n + 1);
+                  setNav("inbox");
+                }}
+              />
+            </TabPanel>
           ) : null}
-          {mainNav === "estimates" ? (
-            <EstimatesListPage authToken={sessionToken} initialEstimateId={openEstimateId} />
+          {visitedNav.has("estimates") ? (
+            <TabPanel active={mainNav === "estimates"} testId="qf-tab-estimates">
+              <EstimatesListPage
+                authToken={sessionToken}
+                isActive={mainNav === "estimates"}
+                initialEstimateId={openEstimateId}
+                openRequestSeq={openEstimateSeq}
+              />
+            </TabPanel>
           ) : null}
         </main>
       </div>

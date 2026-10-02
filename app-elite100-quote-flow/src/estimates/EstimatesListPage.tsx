@@ -27,7 +27,13 @@ import OfficialSoldAccountingPanel from "./OfficialSoldAccountingPanel";
 type Props = {
   authToken: string;
   initialEstimateId?: string | null;
+  /** Increments on every cross-tab "open estimate" request so repeat requests for the same id still open it. */
+  openRequestSeq?: number;
+  /** False while the Estimates tab is hidden (page stays mounted). */
+  isActive?: boolean;
 };
+
+const DISCARD_UNSAVED_PROMPT = "This estimate has unsaved changes. Discard them?";
 
 type ViewKey = "all" | "ai" | "manual" | "recent";
 type SourceFilter = "any" | "ai" | "manual" | "unknown";
@@ -137,7 +143,7 @@ function formatOpenEdgeCell(item: QuoteFlowEstimateListItem): string {
 }
 
 export default function EstimatesListPage(props: Props) {
-  const { authToken, initialEstimateId = null } = props;
+  const { authToken, initialEstimateId = null, openRequestSeq = 0, isActive = true } = props;
   const [items, setItems] = useState<QuoteFlowEstimateListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -200,7 +206,16 @@ export default function EstimatesListPage(props: Props) {
     modalOpen &&
     (roomsFingerprint(rooms) !== savedRoomsFp ||
       String(estimateName || "").trim() !== String(savedName || "").trim());
+  const [pricingDirty, setPricingDirty] = useState(false);
+  const hasUnsavedWork = dirty || pricingDirty;
+  const hasUnsavedWorkRef = useRef(false);
+  hasUnsavedWorkRef.current = hasUnsavedWork;
   const showSyncing = isRefreshing || saving;
+
+  function confirmDiscardUnsaved(): boolean {
+    if (!hasUnsavedWorkRef.current) return true;
+    return window.confirm(DISCARD_UNSAVED_PROMPT);
+  }
 
   function applyLoadedEstimate(est: QuoteFlowEstimateDetail) {
     setDetail(est);
@@ -256,6 +271,7 @@ export default function EstimatesListPage(props: Props) {
   }
 
   function closeModal() {
+    if (!confirmDiscardUnsaved()) return;
     setModalOpen(false);
     setNotice(null);
     setSection("scope");
@@ -276,17 +292,44 @@ export default function EstimatesListPage(props: Props) {
     setPageOffset(0);
   }
 
+  // Load once per mount; a session token refresh must not reload the list or reopen the estimate.
   useEffect(() => {
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken]);
+  }, []);
+
+  // Returning to a hidden Estimates tab refreshes the list only; an open estimate is untouched.
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) void loadList("refresh");
+    wasActiveRef.current = isActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   useEffect(() => {
-    if (initialEstimateId) {
-      void openEstimate(initialEstimateId);
-    }
+    if (!initialEstimateId) return;
+    if (modalOpen && selectedId === initialEstimateId) return;
+    if (!confirmDiscardUnsaved()) return;
+    void openEstimate(initialEstimateId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialEstimateId, authToken]);
+  }, [initialEstimateId, openRequestSeq]);
+
+  useEffect(() => {
+    if (!hasUnsavedWork) return;
+    const onBeforeUnload = (ev: BeforeUnloadEvent) => {
+      ev.preventDefault();
+      ev.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedWork]);
+
+  function requestSection(next: WorkspaceSection) {
+    if (section === "pricing" && next !== "pricing" && pricingDirty && !window.confirm(DISCARD_UNSAVED_PROMPT)) {
+      return;
+    }
+    setSection(next);
+  }
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -803,7 +846,7 @@ export default function EstimatesListPage(props: Props) {
                           : "qf-estimates__section-tab is-later"
                     }
                     data-testid={`qf-estimates-tab-${s.key}`}
-                    onClick={() => setSection(s.key)}
+                    onClick={() => requestSection(s.key)}
                   >
                     {s.label}
                   </button>
@@ -840,6 +883,7 @@ export default function EstimatesListPage(props: Props) {
                     estimateName={estimateName || resolveEstimateDisplayName(workspaceItem)}
                     customerLabel={resolveEstimateCustomer(workspaceItem)}
                     disabled={saving || detailLoading || dirty}
+                    onDirtyChange={setPricingDirty}
                   />
                   {dirty ? (
                     <p className="qf-muted" data-testid="qf-pricing-scope-dirty-hint">

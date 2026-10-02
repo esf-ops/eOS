@@ -42,6 +42,8 @@ type Props = {
   authToken: string;
   onOpenEstimates?: (estimateId?: string | null) => void;
   onOpenInbox?: (messageKey?: string | null) => void;
+  /** False while the Queue tab is hidden (page stays mounted). */
+  isActive?: boolean;
 };
 
 type DetailMode = "idle" | "review" | "manual" | "success";
@@ -173,7 +175,7 @@ function ProcessedPlanPacketCard({ item }: { item: QuoteFlowQueueItem | null }) 
 }
 
 export default function EstimateQueuePage(props: Props) {
-  const { authToken, onOpenEstimates, onOpenInbox } = props;
+  const { authToken, onOpenEstimates, onOpenInbox, isActive = true } = props;
   const [items, setItems] = useState<QuoteFlowQueueItem[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [detail, setDetail] = useState<QuoteFlowQueueItem | null>(null);
@@ -379,11 +381,20 @@ export default function EstimateQueuePage(props: Props) {
 
   const archiveViewBootRef = useRef(true);
 
+  // Load once per mount; a session token refresh must not reload the queue.
   useEffect(() => {
     archiveViewRef.current = archiveView;
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken]);
+  }, []);
+
+  // Returning to a hidden Queue picks up takeoffs that finished meanwhile; selection is kept.
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) void loadList("refresh");
+    wasActiveRef.current = isActive;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   useEffect(() => {
     archiveViewRef.current = archiveView;

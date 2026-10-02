@@ -5204,3 +5204,18 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files/docs** | `elite100QuoteFlow/quoteFlowDigitalEstimate.mjs`, `elite100EstimateStudio/studioEstimateService.mjs`, `quoteFlowColorPriceGroup.test.mjs`. |
 
 ---
+
+### 393. Quote Flow request overhead — reuse the auth-loaded profile, cache CORS preflights, opt-in request timing
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-10-02 |
+| **Decision** | `requireAuth` already reads the caller's `user_profiles` row. It now records `{userId, userKind, organizationId}` in a request-scoped WeakMap (`authLoadedProfileFor(req)`), valid only while `req.user.id` still matches. `assertInternalQuoteOperator` and `resolveOrganizationContext` use it instead of re-reading `user_profiles`; the organization-by-id read runs in parallel with the default-organization read. Requests that did not pass through `requireAuth` keep the original database reads. Partner refusal, default-org fallback and warnings are unchanged. CORS responses carry `Access-Control-Max-Age: 600`. `requestTimingMiddleware` (on `/api/elite100-quote-flow`, enabled by `ELITEOS_REQUEST_TIMING=1`, or `?perf=1` outside production) logs `[eliteos-perf]` and, outside production only, returns an `X-Eliteos-Perf` header, with route template, status, total ms and Supabase call counts/ms by table name only — no bodies, ids, query values or tokens. |
+| **Why** | Measured: Brain runs in Vercel iad1 and Supabase in us-west-1, so each sequential Supabase call costs ~75–100 ms. Every Quote Flow request made 6 (admin) / 7 (non-admin) sequential calls before handler work. Browsers re-preflighted every ~5 s per URL. |
+| **Measured (local, Marshal's 5 estimates as sanitized benchmark rows)** | Database calls per request 6→4 (list, detail, pricing, review), 9→7 (Digital Estimate), 13→11 (activity), 10→8 (queue). Sequential pre-handler depth 6→3 (admin), 7→4 (non-admin): modeled ~225–300 ms saved per production request. |
+| **Not changed** | Authorization rules, organization scoping, pricing and acceptance safeguards. Moving Brain to sfo1 (next to Supabase) is recommended separately and needs approval. |
+| **Status** | Released with this commit (Brain, then Quote Flow). Decision #392 is reserved for the pending QuickBooks sales order plan v2. |
+| **Verification** | `lib/requestTimingMiddleware.test.mjs` (4: route template only, no header or `?perf=1` in production). `auth/authLoadedProfile.test.mjs` (6: call counts, partner refusal without a query, no-org fallback, non-`requireAuth` request still queries, swapped `req.user` invalidates, invalid token 401). Local and origin/main Brains return identical status codes for an org A admin, an org B admin (404 on org A estimates), a dealer partner (403) and missing / invalid tokens (401). Release tree backend suite, 355 files: 339 pass; 15 fail identically on origin/main (12 source-contract / UI assertions, 2 need Moraware env, 1 needs an untracked local workbook); 1 (`studioIdentityOptionalPublish`) passes its assertions but never exits, also on origin/main. |
+| **Impacted files/docs** | `lib/requestStageTimer.mjs`, `auth/authMiddleware.js`, `quotes/partnerContext.js`, `organizations/organizationContext.js`, `server.js`, `elite100QuoteFlow/elite100QuoteFlowRoutes.js`, `scripts/nonprod/benchQuoteFlowEndpoints.mjs`. |
+
+---

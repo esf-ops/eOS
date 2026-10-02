@@ -6,6 +6,7 @@
 import { isMissingRelationError } from "./quotePersist.js";
 import { resolveOrganizationContext, tableHasOrganizationId } from "../organizations/organizationContext.js";
 import { pickPartnerAccountFromAccesses } from "./partnerQuoteSanitize.js";
+import { authLoadedProfileFor } from "../auth/authMiddleware.js";
 
 export class PartnerContextError extends Error {
   /**
@@ -245,6 +246,16 @@ export async function assertInternalQuoteOperator(req, supabase) {
     err.statusCode = 403;
     err.code = "partner_use_partner_routes";
     throw err;
+  }
+  const loaded = authLoadedProfileFor(req);
+  if (loaded) {
+    if (loaded.userKind.trim() === "dealer_partner") {
+      const err = new Error("Partner users must use /api/partner-quote routes.");
+      err.statusCode = 403;
+      err.code = "partner_use_partner_routes";
+      throw err;
+    }
+    return;
   }
   const { data, error } = await supabase.from("user_profiles").select("user_kind").eq("id", userId).limit(1);
   if (error) {

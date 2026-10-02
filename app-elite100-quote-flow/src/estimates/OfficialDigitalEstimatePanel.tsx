@@ -3,7 +3,7 @@
  * Requires current internal Review approval. Customer accepts on the public DE link.
  * Publishing does not mark sold, create handoff, or send email.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import {
   fetchQuoteFlowDigitalEstimate,
@@ -66,6 +66,9 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
     }
   }
 
+  const authTokenRef = useRef(authToken);
+  authTokenRef.current = authToken;
+
   useEffect(() => {
     let cancelled = false;
     async function run() {
@@ -74,7 +77,7 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
       setNotice(null);
       setCopyNotice(null);
       try {
-        const res = await fetchQuoteFlowDigitalEstimate(authToken, estimateId);
+        const res = await fetchQuoteFlowDigitalEstimate(authTokenRef.current, estimateId);
         if (!cancelled) setPayload(res);
       } catch (e) {
         if (!cancelled) setError(errorMessage(e));
@@ -86,7 +89,7 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [authToken, estimateId]);
+  }, [estimateId]);
 
   async function publish() {
     setBusy(true);

@@ -125,6 +125,7 @@ type Props = {
   estimateName?: string | null;
   customerLabel?: string | null;
   disabled?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 function errorMessage(e: unknown): string {
@@ -438,7 +439,7 @@ function LineItemsGroup(props: {
 }
 
 export default function OfficialPricingPanel(props: Props) {
-  const { authToken, estimateId, estimateName, customerLabel, disabled = false } = props;
+  const { authToken, estimateId, estimateName, customerLabel, disabled = false, onDirtyChange } = props;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [calculating, setCalculating] = useState(false);
@@ -478,6 +479,12 @@ export default function OfficialPricingPanel(props: Props) {
 
   const dirty =
     pricingFingerprint(pricing, customLines, selections, vanityElections, slabPackages, sinkEdits) !== savedFp;
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    onDirtyChangeRef.current?.(dirty && !loading);
+  }, [dirty, loading]);
+  useEffect(() => () => onDirtyChangeRef.current?.(false), []);
   const colorGroupByKey = useMemo(
     () => new Map(colorCatalog.map((c) => [colorKey(c.colorName), c.group])),
     [colorCatalog]
