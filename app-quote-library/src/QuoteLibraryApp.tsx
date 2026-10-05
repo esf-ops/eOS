@@ -117,6 +117,71 @@ function statusPillClass(raw: unknown): string {
   return "pill pill-status-neutral";
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Date inputs are local calendar days; send the full local day as UTC instants. */
+function localDayStartIso(day: string): string {
+  return DATE_ONLY_RE.test(day) ? new Date(`${day}T00:00:00`).toISOString() : day;
+}
+
+function localDayEndIso(day: string): string {
+  return DATE_ONLY_RE.test(day) ? new Date(`${day}T23:59:59.999`).toISOString() : day;
+}
+
+function ymd(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+const CREATED_PERIODS = [
+  ["last_7", "Last 7 days"],
+  ["last_30", "Last 30 days"],
+  ["this_week", "This week (Mon–today)"],
+  ["last_week", "Last week (Mon–Sun)"],
+  ["this_month", "This month"],
+  ["last_month", "Last month"],
+  ["this_quarter", "This quarter"],
+  ["last_quarter", "Last quarter"],
+  ["ytd", "Year to date"],
+  ["last_year", "Last year"]
+] as const;
+
+type CreatedPeriodId = (typeof CREATED_PERIODS)[number][0];
+
+function createdPeriodRange(id: CreatedPeriodId, now = new Date()): { from: string; to: string } {
+  const y = now.getFullYear();
+  const mo = now.getMonth();
+  const today = new Date(y, mo, now.getDate());
+  const daysSinceMonday = (today.getDay() + 6) % 7;
+  const q = Math.floor(mo / 3);
+  switch (id) {
+    case "last_7":
+      return { from: ymd(new Date(y, mo, today.getDate() - 6)), to: ymd(today) };
+    case "last_30":
+      return { from: ymd(new Date(y, mo, today.getDate() - 29)), to: ymd(today) };
+    case "this_week":
+      return { from: ymd(new Date(y, mo, today.getDate() - daysSinceMonday)), to: ymd(today) };
+    case "last_week":
+      return {
+        from: ymd(new Date(y, mo, today.getDate() - daysSinceMonday - 7)),
+        to: ymd(new Date(y, mo, today.getDate() - daysSinceMonday - 1))
+      };
+    case "this_month":
+      return { from: ymd(new Date(y, mo, 1)), to: ymd(today) };
+    case "last_month":
+      return { from: ymd(new Date(y, mo - 1, 1)), to: ymd(new Date(y, mo, 0)) };
+    case "this_quarter":
+      return { from: ymd(new Date(y, q * 3, 1)), to: ymd(today) };
+    case "last_quarter":
+      return { from: ymd(new Date(y, q * 3 - 3, 1)), to: ymd(new Date(y, q * 3, 0)) };
+    case "ytd":
+      return { from: ymd(new Date(y, 0, 1)), to: ymd(today) };
+    case "last_year":
+      return { from: ymd(new Date(y - 1, 0, 1)), to: ymd(new Date(y - 1, 11, 31)) };
+  }
+}
+
 function canBatchArchiveRow(row: Record<string, unknown>): boolean {
   const status = str(row.quote_status).toLowerCase();
   return !row.archived_at && status !== "sold" && status !== "won" && Boolean(str(row.id));
@@ -255,6 +320,7 @@ export default function QuoteLibraryApp() {
   const [salesRep, setSalesRep] = useState("");
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
+  const [createdPeriod, setCreatedPeriod] = useState<CreatedPeriodId | "" | "custom">("");
   const [handoffStatus, setHandoffStatus] = useState("");
   const [sort, setSort] = useState("updated_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
@@ -347,13 +413,11 @@ export default function QuoteLibraryApp() {
     if (accountQ.trim()) n += 1;
     if (branch.trim()) n += 1;
     if (salesRep.trim()) n += 1;
-    if (createdFrom) n += 1;
-    if (createdTo) n += 1;
     if (handoffStatus) n += 1;
     if (showArchived) n += 1;
     if (showAllRevisions) n += 1;
     return n;
-  }, [accountQ, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
+  }, [accountQ, branch, salesRep, handoffStatus, showArchived, showAllRevisions]);
 
   const listContextKey = useMemo(
     () =>
@@ -387,6 +451,7 @@ export default function QuoteLibraryApp() {
     setSalesRep("");
     setCreatedFrom("");
     setCreatedTo("");
+    setCreatedPeriod("");
     setHandoffStatus("");
     setShowArchived(false);
     setShowAllRevisions(false);
@@ -508,8 +573,8 @@ export default function QuoteLibraryApp() {
     if (fs.quoteSource) params.set("quote_source", fs.quoteSource);
     if (fs.branch.trim()) params.set("branch", fs.branch.trim());
     if (fs.salesRep.trim()) params.set("sales_rep", fs.salesRep.trim());
-    if (fs.createdFrom) params.set("created_from", fs.createdFrom);
-    if (fs.createdTo) params.set("created_to", fs.createdTo);
+    if (fs.createdFrom) params.set("created_from", localDayStartIso(fs.createdFrom));
+    if (fs.createdTo) params.set("created_to", localDayEndIso(fs.createdTo));
     if (fs.showArchived) params.set("include_archived", "1");
     if (fs.showAllRevisions) params.set("latest_revision_only", "0");
     if (fs.tab === "my") params.set("my", "1");
@@ -554,8 +619,8 @@ export default function QuoteLibraryApp() {
       if (quoteSource) params.set("quote_source", quoteSource);
       if (branch.trim()) params.set("branch", branch.trim());
       if (salesRep.trim()) params.set("sales_rep", salesRep.trim());
-      if (createdFrom) params.set("created_from", createdFrom);
-      if (createdTo) params.set("created_to", createdTo);
+      if (createdFrom) params.set("created_from", localDayStartIso(createdFrom));
+      if (createdTo) params.set("created_to", localDayEndIso(createdTo));
       if (handoffStatus) params.set("handoff_status", handoffStatus);
       if (showArchived) params.set("include_archived", "1");
       if (showAllRevisions) params.set("latest_revision_only", "0");
@@ -1107,6 +1172,54 @@ export default function QuoteLibraryApp() {
                 />
               </label>
               <label>
+                Created
+                <select
+                  value={createdPeriod}
+                  onChange={(e) => {
+                    const id = e.target.value as CreatedPeriodId | "" | "custom";
+                    setCreatedPeriod(id);
+                    if (id === "") {
+                      setCreatedFrom("");
+                      setCreatedTo("");
+                    } else if (id !== "custom") {
+                      const r = createdPeriodRange(id);
+                      setCreatedFrom(r.from);
+                      setCreatedTo(r.to);
+                    }
+                  }}
+                >
+                  <option value="">Any time</option>
+                  {CREATED_PERIODS.map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value="custom">Custom range</option>
+                </select>
+              </label>
+              <label>
+                Created from
+                <input
+                  type="date"
+                  value={createdFrom}
+                  onChange={(e) => {
+                    setCreatedFrom(e.target.value);
+                    setCreatedPeriod(e.target.value || createdTo ? "custom" : "");
+                  }}
+                />
+              </label>
+              <label>
+                Created to
+                <input
+                  type="date"
+                  value={createdTo}
+                  onChange={(e) => {
+                    setCreatedTo(e.target.value);
+                    setCreatedPeriod(e.target.value || createdFrom ? "custom" : "");
+                  }}
+                />
+              </label>
+              <label>
                 Status
                 <select value={status} onChange={(e) => setStatus(e.target.value)}>
                   {STATUS_FILTER_VALUES.map((s) => (
@@ -1160,14 +1273,6 @@ export default function QuoteLibraryApp() {
                 <label>
                   Sales rep
                   <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} placeholder="Rep" />
-                </label>
-                <label>
-                  Created from
-                  <input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
-                </label>
-                <label>
-                  Created to
-                  <input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
                 </label>
                 <label>
                   Handoff
