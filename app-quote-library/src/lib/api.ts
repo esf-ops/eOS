@@ -1,4 +1,4 @@
-function backendBase(): string {
+export function backendBase(): string {
   return String(import.meta.env.VITE_BACKEND_URL || "http://localhost:3001")
     .trim()
     .replace(/\/+$/, "")

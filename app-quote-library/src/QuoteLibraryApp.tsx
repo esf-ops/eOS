@@ -11,6 +11,7 @@ import {
 } from "./lib/labels";
 import { getSupabase } from "./lib/supabase";
 import { QuoteDetailModal } from "./QuoteDetailModal";
+import { QuickBooksEstimatesView } from "./QuickBooksEstimatesView";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
@@ -293,6 +294,15 @@ export default function QuoteLibraryApp() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabId>("all");
+  const [librarySource, setLibrarySource] = useState<"eliteos" | "quickbooks">(() =>
+    new URLSearchParams(window.location.search).get("source") === "quickbooks" ? "quickbooks" : "eliteos"
+  );
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (librarySource === "quickbooks") url.searchParams.set("source", "quickbooks");
+    else url.searchParams.delete("source");
+    window.history.replaceState(null, "", url.toString());
+  }, [librarySource]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1092,6 +1102,19 @@ export default function QuoteLibraryApp() {
           {msg ? <div className="banner banner-info" role="status">{msg}</div> : null}
           {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
 
+          <div className="tabs library-source" role="tablist" aria-label="Quote source">
+            <button type="button" className={librarySource === "eliteos" ? "on" : ""} onClick={() => setLibrarySource("eliteos")}>
+              eliteOS quotes
+            </button>
+            <button type="button" className={librarySource === "quickbooks" ? "on" : ""} onClick={() => setLibrarySource("quickbooks")}>
+              QuickBooks estimates
+            </button>
+          </div>
+
+          {librarySource === "quickbooks" ? (
+            <QuickBooksEstimatesView sessionToken={sessionToken} accountDirectoryUrl={accountDirectoryBase} />
+          ) : (
+          <>
           <div className="metrics-section">
             {metricsIsFiltered ? (
               <p className="metrics-filter-note" aria-live="polite">
@@ -1562,6 +1585,8 @@ export default function QuoteLibraryApp() {
                 </div>
               )}
             </section>
+          )}
+          </>
           )}
         </>
       ) : null}

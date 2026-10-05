@@ -41,6 +41,7 @@ import {
 } from "../elite100EstimateStudio/studioQuoteLibraryBridge.mjs";
 import { createStudioAllEstimatesService } from "../elite100EstimateStudio/studioAllEstimatesService.mjs";
 import { createStudioEstimateRepository } from "../elite100EstimateStudio/studioEstimateRepository.mjs";
+import { attachQuoteLibraryQuickbooksRoutes } from "./quoteLibraryQuickbooksEstimates.mjs";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -369,6 +370,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
   };
   /** Partner users blocked before head check so 403 always uses partner_use_partner_routes. */
   const stack = [requireAuth(), rejectPartnerOnlyUser, requireHeadAccess("quote_library", { getSupabase })];
+  attachQuoteLibraryQuickbooksRoutes(app, { stack, getSupabase, logAction });
 
   function rejectStudioBridgeIdParam(req, res) {
     const id = pickStr(req.params.id);
