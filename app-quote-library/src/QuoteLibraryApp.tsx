@@ -412,12 +412,11 @@ export default function QuoteLibraryApp() {
     let n = 0;
     if (accountQ.trim()) n += 1;
     if (branch.trim()) n += 1;
-    if (salesRep.trim()) n += 1;
     if (handoffStatus) n += 1;
     if (showArchived) n += 1;
     if (showAllRevisions) n += 1;
     return n;
-  }, [accountQ, branch, salesRep, handoffStatus, showArchived, showAllRevisions]);
+  }, [accountQ, branch, handoffStatus, showArchived, showAllRevisions]);
 
   const listContextKey = useMemo(
     () =>
@@ -1241,6 +1240,10 @@ export default function QuoteLibraryApp() {
                 </select>
               </label>
               <label>
+                Sales rep
+                <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} placeholder="Rep" />
+              </label>
+              <label>
                 Sort by
                 <select value={sort} onChange={(e) => setSort(e.target.value)}>
                   <option value="updated_at">Updated</option>
@@ -1269,10 +1272,6 @@ export default function QuoteLibraryApp() {
                 <label>
                   Branch
                   <input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" />
-                </label>
-                <label>
-                  Sales rep
-                  <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} placeholder="Rep" />
                 </label>
                 <label>
                   Handoff
@@ -1478,8 +1477,9 @@ export default function QuoteLibraryApp() {
                         </th>
                         <th className="col-num">Quote #</th>
                         <th className="col-account">Account / project</th>
+                        <th className="col-location">Location</th>
                         <th>Status</th>
-                        <th className="hide-sm">Rep / branch</th>
+                        <th className="col-rep">Sales rep</th>
                         <th className="col-total">Total</th>
                         <th className="col-date">Updated</th>
                         <th className="hide-md col-handoff">Handoff</th>
@@ -1513,11 +1513,7 @@ export default function QuoteLibraryApp() {
                             <td className="account-cell col-account">
                               <div className="primary">{ac.primary}</div>
                               {ac.subline ? <div className="sub">Customer: {ac.subline}</div> : null}
-                              {ac.projectCell || loc(r) !== "—" ? (
-                                <div className="sub">
-                                  {[ac.projectCell, loc(r) !== "—" ? loc(r) : ""].filter(Boolean).join(" · ")}
-                                </div>
-                              ) : null}
+                              {ac.projectCell ? <div className="sub">{ac.projectCell}</div> : null}
                               <div className="account-link-meta">
                                 {ac.accountLinked ? (
                                   <span className="pill pill-account-linked">Account linked</span>
@@ -1526,13 +1522,14 @@ export default function QuoteLibraryApp() {
                                 )}
                               </div>
                             </td>
+                            <td className="col-location">{loc(r)}</td>
                             <td>
                               <div className="cell-stack">
                                 <span className={statusPillClass(r.quote_status)}>{labelQuoteStatus(r.quote_status)}</span>
                                 <span className="pill pill-source">{labelQuoteSource(r.quote_source)}</span>
                               </div>
                             </td>
-                            <td className="hide-sm">
+                            <td className="col-rep">
                               <div>{str(r.sales_rep) || "—"}</div>
                               {str(r.branch) ? <div className="sub">{str(r.branch)}</div> : null}
                               {str(r.prepared_by) ? (

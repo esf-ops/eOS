@@ -952,7 +952,7 @@ input[type="checkbox"] {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.84rem;
-  min-width: 760px;
+  min-width: 880px;
 }
 
 .ql-table th {
@@ -992,6 +992,16 @@ input[type="checkbox"] {
 
 .ql-table .col-date {
   white-space: nowrap;
+}
+
+.ql-table td.col-location {
+  min-width: 120px;
+  max-width: 180px;
+  color: var(--eos-ink-muted);
+}
+
+.ql-table .col-rep {
+  min-width: 120px;
 }
 
 .ql-table .col-handoff {
