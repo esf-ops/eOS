@@ -1,5 +1,7 @@
 # Moraware cloud worker runbook (Phase 1 production)
 
+> **Current production host is the Mac mini, not a cloud VM** (FEATURE_DECISIONS §344). See [Mac mini production host](#mac-mini-production-host) below. The Ubuntu VM sections remain as the documented alternative deploy target.
+
 This runbook describes how to run the **Moraware → Sales Dashboard** scheduled pipeline on a small **always-on Ubuntu cloud VM**. It is the **production** replacement for scheduling on a developer MacBook.
 
 **Architecture rule:** The VM is a **deploy target only**, not a second codebase. All sync logic lives in this Git repo (`npm run eos:moraware:run-scheduled-pipeline`). The VM stores only a repo checkout, secrets outside Git, scheduler config, and logs.
@@ -28,6 +30,81 @@ This runbook describes how to run the **Moraware → Sales Dashboard** scheduled
 - Cron example: `deploy/moraware-worker/crontab.example`
 - Optional systemd: `deploy/moraware-worker/systemd/`
 - Scheduling overview: `backend-core/SCHEDULING.md`
+
+## Mac mini production host
+
+| Item | Value |
+|------|-------|
+| Checkout | `/Users/chrishenely/eOS-worker` |
+| Secrets | `/Users/chrishenely/.eliteos/moraware-worker.env` (outside Git) |
+| Hourly | LaunchAgent `com.eliteos.moraware-incremental` → `deploy/moraware-worker/run-moraware-incremental.sh` (plist is **not** in the repo) |
+| Nightly | LaunchAgent `com.eliteos.moraware-nightly` (01:30 America/Chicago, `RunAtLoad=false`) → `run-moraware-nightly-macos.sh` → `run-moraware-worker.sh` (incl. View 219) |
+| Logs | `~/Library/Logs/eliteOS/` |
+| Lock | `eos_sync_locks.lock_name = moraware_population` (shared by both jobs) |
+
+Do not add a crontab, a second worker host, or a second copy of either job.
+
+### Reboot behavior (important)
+
+Both jobs are **LaunchAgents** in `~/Library/LaunchAgents`, which load into the `gui/<uid>` domain **only after that user logs in**. After a restart that stops at the login window (or a FileVault unlock screen), neither job runs. `StartCalendarInterval` runs missed while the agent was unloaded are not replayed. A powered-on Mac mini is therefore not proof the feed is running.
+
+**Approved fix (2026-10-05, §395): convert both jobs to LaunchDaemons** that run as the worker user and start at boot without a login. Run on the Mac mini as the worker user:
+
+```bash
+cd ~/eOS-worker && git pull --ff-only
+deploy/moraware-worker/convert-macos-agents-to-daemons.sh          # dry run: prints program/schedule per job
+deploy/moraware-worker/convert-macos-agents-to-daemons.sh --apply  # sudo; installs daemons, boots out agents
+sudo launchctl print system/com.eliteos.moraware-incremental | grep -E 'state|runs|last exit'
+```
+
+The script converts the plists already installed in `~/Library/LaunchAgents`, so the hourly job keeps its exact schedule. It adds only `UserName`, `GroupName` and `HOME`, boots out each agent before loading its daemon, and backs up the agent plists to `~/.eliteos/launchagent-backup/`. `--rollback` restores the agents. After converting, `install-macos-nightly-launchagent.sh` refuses to run so a second copy can't be created.
+
+**Reboot test:** restart the Mac mini, do **not** log in, wait one hourly interval, then confirm a new production run (`moraware_sync_runs` / the stale-feed check). Until that passes, reboot survival is unverified.
+
+Once converted, use `sudo launchctl print system/<label>` in the checks below instead of `gui/$(id -u)/<label>`.
+
+### Checks when the stale-feed alert fires
+
+Run on the Mac mini as the worker user:
+
+```bash
+# 1. Uptime / reboot / who is logged in
+sysctl -n kern.boottime; last reboot | head -3; who
+
+# 2. Are the agents loaded in this user's GUI domain? ("Could not find service" = not loaded)
+launchctl print gui/$(id -u)/com.eliteos.moraware-incremental | grep -E 'state|runs|last exit|path ='
+launchctl print gui/$(id -u)/com.eliteos.moraware-nightly    | grep -E 'state|runs|last exit|path ='
+ls -la ~/Library/LaunchAgents/com.eliteos.*
+plutil -p ~/Library/LaunchAgents/com.eliteos.moraware-incremental.plist   # RunAtLoad / StartInterval / KeepAlive
+
+# 3. Reboot persistence prerequisites
+fdesetup status
+sudo defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || echo "no auto-login"
+pmset -g | grep -E 'sleep|autorestart|womp'
+
+# 4. Logs (newest first)
+ls -lt ~/Library/Logs/eliteOS/ | head
+tail -n 80 ~/Library/Logs/eliteOS/moraware-*.log
+log show --last 6h --predicate 'eventMessage CONTAINS "com.eliteos.moraware"' | tail -n 40
+
+# 5. Runtime dependencies the wrappers assume
+ls -la /usr/local/bin/npm $(command -v node)   # incremental wrapper hard-codes /usr/local/bin/npm
+test -f ~/.eliteos/moraware-worker.env && echo "env file present"
+git -C ~/eOS-worker log -1 --oneline
+curl -sS -o /dev/null -w 'brain %{http_code}\n' https://api.eliteosfab.com/api/health
+```
+
+If an agent is not loaded, load the **existing** one (not a copy): `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.eliteos.moraware-incremental.plist`, then `launchctl kickstart -p gui/$(id -u)/com.eliteos.moraware-incremental` for one supervised run.
+
+### Confirming recovery (production, not the host)
+
+The feed is healthy only when production shows it: a new `moraware_sync_runs` row (`mode = incremental-worker-import`, `status = success`), `organization_integration_configs.moraware_incremental_cursor.config.cursor.last_success_at` advancing, and `brain_moraware_jobs.updated_at` moving. The Brain stale-feed check (`/api/internal/integration-feeds/stale-check`, hourly Vercel Cron) reports each of these.
+
+### Catch-up after a long outage
+
+- The hourly incremental resumes its creation window from `cursor.advanced_to − 1h`, so after a 30-day gap the first run scans the whole gap. If creation candidates + the 100-job rolling batch exceed the live ceiling (default 150), it stops with `LIVE_CANDIDATE_CEILING_EXCEEDED` (no silent truncation). The stale-feed alert reports that as "running but failing".
+- Existing-job changes are caught by the rolling refresh (100 jobs/run ≈ 41 runs for ~4,100 jobs).
+- **Known defect (2026-10-05 audit):** from 2026-08-18 to 2026-09-02, 332 incremental runs reported `creation_window_candidates = 0`, and the newest `created_at_source` in `brain_moraware_jobs` is 2026-08-17. New Moraware jobs were not being discovered even before the outage. The `moraware_new_jobs` signal in the stale-feed check monitors this independently of run success. Resolve before trusting job counts.
 
 ---
 

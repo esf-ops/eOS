@@ -56,6 +56,21 @@ assert.match(plist, /Library\/Logs\/eliteOS\/moraware-nightly\.stderr\.log/);
 assert.match(plist, /<key>RunAtLoad<\/key>\s*<false\/>/);
 assert.equal(/PASSWORD|SERVICE_ROLE|cookie/i.test(plist), false);
 
+const converter = readFileSync(join(root, "deploy/moraware-worker/convert-macos-agents-to-daemons.sh"), "utf8");
+const installer = readFileSync(join(root, "deploy/moraware-worker/install-macos-nightly-launchagent.sh"), "utf8");
+assert.match(converter, /MODE="\$\{1:---dry-run\}"/, "converter defaults to dry run");
+assert.match(converter, /com\.eliteos\.moraware-incremental/);
+assert.match(converter, /com\.eliteos\.moraware-nightly/);
+assert.match(converter, /Add :UserName string/, "daemon must run as the worker user, not root");
+assert.match(converter, /\/Library\/LaunchDaemons/);
+assert.ok(
+  converter.indexOf('launchctl bootout "gui/') < converter.indexOf("sudo launchctl bootstrap system"),
+  "agent must be booted out before the daemon loads (never two copies)"
+);
+assert.match(converter, /--rollback/);
+assert.equal(/PASSWORD|SERVICE_ROLE|cookie|crontab -/i.test(converter), false);
+assert.match(installer, /Refusing to add a second copy/, "nightly agent installer must not duplicate a converted daemon");
+
 assert.match(pipeline, /syncSalesWorksheetFactsFeed\.js/);
 assert.match(pipeline, /MORAWARE_VIEW_219_SYNC/);
 assert.match(pipeline, /acquireScheduledPopulationLock/);

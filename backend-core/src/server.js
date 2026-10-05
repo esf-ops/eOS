@@ -31,6 +31,7 @@ import { attachSalesOpsRoutes } from "./salesOps/salesOpsApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
 import { attachSalesOpsMondayScheduleRoutes } from "./salesOps/salesOpsMondayScheduleApi.mjs";
+import { attachIntegrationFeedRoutes } from "./integrationHealth/integrationFeedRoutes.mjs";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
 import { attachSlabsmithImageUploadRoutes } from "./slabsmith/slabsmithImageUploadApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
@@ -1349,6 +1350,10 @@ attachTakeoffInternalRoutes(app, {
 });
 
 attachSalesOpsMondayScheduleRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachIntegrationFeedRoutes(app, {
   getSupabase: supabaseServerClient
 });
 

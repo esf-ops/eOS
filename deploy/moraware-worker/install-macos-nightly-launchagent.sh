@@ -14,6 +14,11 @@ LOG_DIR="${HOME}/Library/Logs/eliteOS"
 UID_NUM="$(id -u)"
 GUI_DOMAIN="gui/${UID_NUM}"
 
+if [[ -f "/Library/LaunchDaemons/${LABEL}.plist" ]]; then
+  echo "${LABEL} is installed as a LaunchDaemon (convert-macos-agents-to-daemons.sh). Refusing to add a second copy as a LaunchAgent." >&2
+  exit 1
+fi
+
 if [[ ! -f "${PLIST_SRC}" ]]; then
   echo "Missing plist: ${PLIST_SRC}" >&2
   exit 1

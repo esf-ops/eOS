@@ -101,6 +101,18 @@ See `backend-core/SCHEDULING.md` and `docs/eliteos/moraware-sync-foundation.md`.
 
 ---
 
+## Backend-only — integration feed stale alerts
+
+| Variable | Description |
+|----------|-------------|
+| `INTEGRATION_ALERT_EMAILS` | Comma-separated platform-operator recipients for stale/recovered feed emails. Unset → alerts are logged only and the cron reports `not_configured`. |
+| `INTEGRATION_ALERT_EMAIL_PROVIDER` | Defaults to `QUOTE_EMAIL_PROVIDER` (`resend`). |
+| `INTEGRATION_ALERT_EMAIL_FROM` | Defaults to `QUOTE_EMAIL_FROM`. |
+| `INTEGRATION_ALERT_REMIND_HOURS` | Re-alert interval while a feed stays stale (default 12). |
+| `INTEGRATION_FEED_STALE_HOURS_<FEED>` | Per-feed window override, e.g. `INTEGRATION_FEED_STALE_HOURS_MORAWARE_INCREMENTAL=3`. Feeds: `MORAWARE_INCREMENTAL`, `MORAWARE_NEW_JOBS`, `MORAWARE_NIGHTLY_REPORT`, `QB_SALES_SYNC`, `QB_CUSTOMER_SYNC`, `QB_FINANCE_SYNC`. |
+
+---
+
 ## Backend — optional tooling / audits
 
 | Variable | Description |
