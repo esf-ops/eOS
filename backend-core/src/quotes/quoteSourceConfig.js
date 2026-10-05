@@ -42,6 +42,16 @@ const DEFAULT_ROWS = {
     public_safe: false,
     is_active: true,
     metadata: { monday_sync_default: "disabled" }
+  },
+  estimate_builder: {
+    quote_source: "estimate_builder",
+    display_name: "Estimate Builder quote",
+    monday_board_env_key: null,
+    default_pricing_structure_code: null,
+    requires_auth: true,
+    public_safe: false,
+    is_active: true,
+    metadata: { monday_sync_default: "disabled" }
   }
 };
 

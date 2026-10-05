@@ -160,6 +160,7 @@ const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
   quote: "Estimating Tool",
   quote_library: "Quote Library",
   custom_quote: "Custom Quote",
+  estimate_builder: "Estimate Builder",
   pricing_admin: "Pricing Admin",
   system_admin: "System Admin",
   public_quote: "Public Quote Tool",
@@ -191,6 +192,7 @@ const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
   quote: "burgundy",
   quote_library: "navy",
   custom_quote: "burgundy",
+  estimate_builder: "burgundy",
   pricing_admin: "amber",
   system_admin: "slate",
   public_quote: "teal",
@@ -227,6 +229,7 @@ function headTintFor(slug: string): HeadTint {
 const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
   quote: "Quote",
   quote_library: "Quote",
+  estimate_builder: "Quote",
   pricing_admin: "Admin",
   system_admin: "Admin",
   org_directory: "Platform",
@@ -277,6 +280,7 @@ const HEAD_BUSINESS_GROUP_BY_SLUG: Record<string, BusinessGroupLabel> = {
   quote: "Quote Platform",
   quote_library: "Quote Platform",
   custom_quote: "Quote Platform",
+  estimate_builder: "Quote Platform",
   elite100_estimate_studio: "Quote Platform",
   elite100_quote_flow: "Quote Platform",
   public_quote: "Quote Platform",
@@ -344,7 +348,8 @@ function resolveDisplayBadges(head: HeadCard, roadmapSection: boolean): DisplayB
     Live: 2,
     Preview: 2,
     Available: 2,
-    Admin: 3
+    Admin: 3,
+    Beta: 3
   };
   const sorted = [...all].sort((a, b) => (rank[a] ?? 9) - (rank[b] ?? 9));
   return sorted.slice(0, 2).map((text, i) => ({ text, tier: i === 0 ? "primary" : "secondary" }));
@@ -593,6 +598,7 @@ function resolveCardBadges(head: HeadCard, roadmapSection: boolean): string[] {
   if (!head.enabled && head.slug !== "public_quote") badges.push("Not assigned");
   if (head.slug === "public_quote") badges.push("Public");
   if (head.slug === "system_admin" || head.slug === "pricing_admin") badges.push("Admin");
+  if (head.slug === "estimate_builder") badges.push("Beta");
 
   if (isEliteosfabProductionUrl(url)) badges.push("Live");
   else if (url.includes("vercel.app")) badges.push("Preview");

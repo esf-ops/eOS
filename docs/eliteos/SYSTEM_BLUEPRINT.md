@@ -158,6 +158,16 @@ The homeowner-facing wizard supports (or will support):
 - **Future:** page/PDF preview, async processing, page artifacts, provider/model hardening, gated Internal Estimate import. Dealer upload remains **future** (`FEATURE_DECISIONS.md` §85).
 - **Details:** [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md), `FEATURE_DECISIONS.md` §87.
 
+### Estimate Builder (staff — line-item estimates)
+
+- **Head:** **`app-estimate-builder/`** (slug `estimate_builder`, dev port 5181, controlled beta via System Admin grants). Separate from Internal Estimate, which is unchanged.
+- **Model:** an estimate is an ordered list of typed items (Elite 100 / Out-of-Collection countertop, standard / full-height backsplash, vanity, cutouts, outlet, edges, services, custom, credit), optionally grouped into rooms. The browser sends inputs only; it never computes or stores prices.
+- **Pricing authority:** `POST /api/estimate-builder/price` prices through the production engines (`calculateQuote` `internal_quote` with Direct/Wholesale basis; `calculateCustomQuote` for Out-of-Collection; the Vanity Program inside `calculateQuote`). Elite countertop and backsplash items are rounded up once per room and material, like Internal Estimate rooms; use tax follows `internalEstimateMaterialTaxPolicy`. The catalog route returns option labels only, no rates.
+- **Totals:** `grand_total` is the exact engine total; the customer PDF total (`customer_display_total`) is the sum of summary rows each rounded up to the next $5 — the Internal Estimate rule. Both are frozen at save.
+- **Persistence:** `quote_headers` with `quote_source = estimate_builder` (no migration), ESF numbering and `save_mode` revisions like Internal Estimate, item document kept in `calculation_snapshot.estimate_builder`, customer print snapshot v1 for the shared customer estimate document.
+- **Access:** `requireAuth` → `rejectPartnerOnlyUser` → `requireHeadAccess("estimate_builder")` + internal-operator check; organization-scoped reads and writes. No Monday, QuickBooks or Moraware writes.
+- **Details:** `FEATURE_DECISIONS.md` §398.
+
 ---
 
 ## 8. Public pricing logic
@@ -264,6 +274,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | **`app-internal-estimate` changed** | `npm install --prefix app-internal-estimate` (first clone) then `npm run build --prefix app-internal-estimate` |
 | **`app-pricing-admin` changed** | `npm install --prefix app-pricing-admin` (first clone) then `npm run build --prefix app-pricing-admin` |
 | **`app-elite100-quote-flow` changed** | `npm install --prefix app-elite100-quote-flow` (first clone) then `npm run build --prefix app-elite100-quote-flow` |
+| **`app-estimate-builder` or `backend-core/src/estimateBuilder` changed** | `npm install --prefix app-estimate-builder` (first clone), `npm run eos:test:estimate-builder`, `npm run eos:build:estimate-builder` |
 | **`app-elite100-estimate-studio` changed** | `npm run build --prefix app-elite100-estimate-studio` |
 | **`app-slab-ai` changed** | `npm install --prefix app-slab-ai` (first clone) then `npm test --prefix app-slab-ai` and `npm run build --prefix app-slab-ai` |
 | **Backend JS touched** | `node --check <path-to-changed-file.js>` |

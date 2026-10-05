@@ -40,6 +40,8 @@ assert(DEALER_SAFE_HEAD_SLUG_SET.size >= 2, "dealer-safe set should list partner
 assert(!isDealerSafeHeadSlug("quote"), "quote (Internal Estimate) must not be dealer-safe after hardening");
 assert(isKnownHeadSlug("custom_quote"), "custom_quote is a known head slug");
 assert(!isDealerSafeHeadSlug("custom_quote"), "custom_quote must not be dealer-safe");
+assert(isKnownHeadSlug("estimate_builder"), "estimate_builder is a known head slug");
+assert(!isDealerSafeHeadSlug("estimate_builder"), "estimate_builder must not be dealer-safe");
 assert(isKnownHeadSlug("install_dashboard"), "install_dashboard is a known head slug");
 assert(!isDealerSafeHeadSlug("install_dashboard"), "install_dashboard must not be dealer-safe");
 assert(isKnownHeadSlug("quickbooks_intelligence"), "quickbooks_intelligence is a known head slug");

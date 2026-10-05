@@ -98,6 +98,15 @@ export const HEAD_LAUNCHER_CATALOG = [
       "ESF internal only — not for dealers, partners, or public users. Saves to Quote Library with quote_source custom_quote."
   },
   {
+    slug: "estimate_builder",
+    label: "eliteOS Estimate Builder",
+    description: "Beta: blank-canvas estimate built from smart line items, priced by the existing eliteOS engines.",
+    category: "Revenue",
+    href: "/estimate-builder",
+    roleNote:
+      "ESF internal only — beta. Grant per user in System Admin. Saves to Quote Library with quote_source estimate_builder."
+  },
+  {
     slug: "production",
     label: "eliteOS Production Head",
     description: "Production pacing and throughput views.",

@@ -1,0 +1,289 @@
+/**
+ * Estimate Builder document contracts — mirrors `backend-core/src/estimateBuilder/estimateBuilderContracts.mjs`.
+ * Nothing here carries a price; every amount comes back from `POST /api/estimate-builder/price`.
+ */
+
+export type PricingChannel = "direct" | "wholesale";
+
+export type ItemProvenance =
+  | "manually_added"
+  | "imported_unmodified"
+  | "imported_edited"
+  | "imported_excluded"
+  | "template"
+  | "duplicated";
+
+export type ItemSourceKind = "manual" | "template" | "ai_takeoff" | "digital_estimate" | "duplicate";
+
+export type ItemSource = {
+  kind: ItemSourceKind;
+  provenance: ItemProvenance;
+  reference: string | null;
+};
+
+export type EliteCountertopInputs = {
+  sqft: number | null;
+  materialColorId: string | null;
+  materialColorName: string;
+};
+
+export type OutOfCollectionInputs = {
+  sqft: number | null;
+  materialName: string;
+  supplier: string;
+  materialType: string;
+  slabWidthIn: number | null;
+  slabHeightIn: number | null;
+  slabSqftOverride: number | null;
+  slabQuantity: number;
+  materialCostInputType: "per_slab" | "per_sqft";
+  costPerSlab: number | null;
+  costPerSqft: number | null;
+  freight: number;
+  wasteFactor: number | null;
+  installCost: number;
+  otherCost: number;
+};
+
+export type BacksplashInputs = {
+  sqft: number | null;
+  materialSource: "room_countertop" | "explicit";
+  materialColorId: string | null;
+  materialColorName: string;
+};
+
+export type VanitySinkType = "oval_white" | "oval_bisque" | "rectangular_white" | "rectangular_bisque";
+export type VanityTier = "kitchen_over_35" | "kitchen_under_35";
+
+export type VanityInputs = {
+  sizeCode: string;
+  qty: number;
+  sinkType: VanitySinkType;
+  sideSplashQty: number;
+  extraTrips: number;
+  depthIn: number | null;
+  materialColorId: string | null;
+  materialColorName: string;
+  tierOverride: VanityTier | null;
+  tierOverrideReason: string;
+};
+
+export type CutoutInputs = { cutoutCode: string; qty: number };
+export type OutletInputs = { qty: number };
+
+export type EdgeMode = "upgraded" | "mitered" | "manual";
+export type EdgeInputs = {
+  edgeMode: EdgeMode;
+  profile: string;
+  linearFeet: number | null;
+  miterHeight: string;
+  buildUpSqft: number | null;
+  manualAmount: number | null;
+  manualReason: string;
+  customerLabel: string;
+};
+
+export type ServiceCode = "additional_trip" | "tear_out";
+export type ServiceInputs = { serviceCode: ServiceCode; qty: number };
+
+export type CustomCategory = "other" | "labor" | "fee" | "sink" | "faucet" | "accessory" | "credit";
+export type CustomInputs = {
+  description: string;
+  qty: number;
+  unit: string;
+  unitPrice: number | null;
+  category: CustomCategory;
+  customerFacing: boolean;
+  customerNote: string;
+  internalNote: string;
+};
+
+type ItemBase = {
+  id: string;
+  roomId: string | null;
+  sortOrder: number;
+  label: string;
+  source: ItemSource;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type EstimateItem =
+  | (ItemBase & { itemType: "countertop"; pricingStrategy: "elite_100"; inputs: EliteCountertopInputs })
+  | (ItemBase & { itemType: "countertop"; pricingStrategy: "out_of_collection"; inputs: OutOfCollectionInputs })
+  | (ItemBase & { itemType: "backsplash"; pricingStrategy: "standard" | "full_height"; inputs: BacksplashInputs })
+  | (ItemBase & { itemType: "vanity"; pricingStrategy: "vanity_program_2026"; inputs: VanityInputs })
+  | (ItemBase & { itemType: "cutout"; pricingStrategy: "addon_catalog"; inputs: CutoutInputs })
+  | (ItemBase & { itemType: "outlet"; pricingStrategy: "addon_catalog"; inputs: OutletInputs })
+  | (ItemBase & { itemType: "edge"; pricingStrategy: "edge_v2"; inputs: EdgeInputs })
+  | (ItemBase & { itemType: "service"; pricingStrategy: "service_catalog"; inputs: ServiceInputs })
+  | (ItemBase & { itemType: "custom"; pricingStrategy: "custom_line"; inputs: CustomInputs });
+
+export type ItemType = EstimateItem["itemType"];
+export type PricingStrategy = EstimateItem["pricingStrategy"];
+
+export type EstimateRoom = { id: string; name: string; sortOrder: number };
+
+export type EstimateHeader = {
+  customerName: string;
+  accountName: string;
+  customerEmail: string;
+  customerPhone: string;
+  projectName: string;
+  projectAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+  branch: string;
+  salesRep: string;
+  preparedBy: string;
+  customerNotes: string;
+  internalNotes: string;
+};
+
+export type EstimateDocument = {
+  version: 1;
+  pricingChannel: PricingChannel;
+  header: EstimateHeader;
+  rooms: EstimateRoom[];
+  items: EstimateItem[];
+};
+
+// --- Pricing response (Brain-authored) ---
+
+export type WarningSeverity = "block" | "warn" | "review";
+export type ItemWarning = { code: string; severity: WarningSeverity; message: string };
+
+export type PricedItem = {
+  itemId: string;
+  itemType: ItemType;
+  pricingStrategy: PricingStrategy;
+  roomId: string | null;
+  status: "priced" | "incomplete" | "error";
+  description: string;
+  customerCategory: string;
+  quantity: number | null;
+  unit: string;
+  rate: number | null;
+  amount: number;
+  taxBase: { countertop: number; backsplash: number };
+  warnings: ItemWarning[];
+  details: Array<{ label: string; value: string }>;
+  pricingSource: { engine: string; reference: string };
+};
+
+export type EstimateTotals = {
+  subtotal: number;
+  useTax: {
+    percent: number;
+    scope: string;
+    countertopBase: number;
+    backsplashBase: number;
+    countertopAmount: number;
+    backsplashAmount: number;
+    amount: number;
+  };
+  total: number;
+  qualifyingKitchenCounterSf: number;
+  itemCount: number;
+  pricedCount: number;
+};
+
+export type EstimatePricing = {
+  ok: boolean;
+  pricingChannel: PricingChannel;
+  items: PricedItem[];
+  totals: EstimateTotals;
+  readiness: { ready: boolean; blockers: string[] };
+  customerPreview?: unknown;
+  pdfFilename?: string;
+};
+
+// --- Catalog (labels only) ---
+
+export type EstimateTemplate = {
+  id: string;
+  label: string;
+  rooms: string[];
+  items: Array<{ room: string; itemType: ItemType; pricingStrategy: PricingStrategy; inputs: Record<string, unknown> }>;
+};
+
+export type MaterialColor = {
+  id: string;
+  colorName: string;
+  priceGroupLabel: string;
+  supplier: string | null;
+  materialType: string | null;
+};
+
+export type EstimateCatalog = {
+  ok: boolean;
+  itemTypes: Array<{ type: ItemType; label: string; strategies: PricingStrategy[]; defaultStrategy: PricingStrategy }>;
+  materialColors: MaterialColor[];
+  materialCatalogWarnings: string[];
+  cutouts: Array<{ code: string; label: string }>;
+  services: Array<{ code: ServiceCode; label: string }>;
+  edge: { upgradedProfiles: string[]; miterHeights: string[] };
+  vanity: {
+    programYear: number;
+    sizes: Array<{ code: string; label: string; widthIn: number; bowlCount: number }>;
+    sinkTypes: Array<{ code: VanitySinkType; label: string }>;
+  };
+  outOfCollection: { materialTypes: string[] };
+  customCategories: CustomCategory[];
+  roomSuggestions: string[];
+  templates: EstimateTemplate[];
+};
+
+export type SaveMode = "create" | "update_existing" | "save_revision";
+
+export type SaveResult = {
+  ok: boolean;
+  quote_id: string;
+  quote_number: string;
+  revision_number: number;
+  revision_label: string | null;
+  save_mode: SaveMode;
+  quote_status: string;
+  pricing: EstimatePricing;
+};
+
+export type SavedQuoteSummary = {
+  id: string;
+  quote_number: string;
+  revision_label: string | null;
+  quote_status: string | null;
+  customer_name: string | null;
+  account_name: string | null;
+  project_name: string | null;
+  grand_total: number | null;
+  updated_at: string | null;
+};
+
+export type SavedQuoteRef = {
+  id: string;
+  quote_number: string;
+  revision_number: number | null;
+  revision_label: string | null;
+  quote_status: string | null;
+  is_current_revision: boolean;
+  archived_at: string | null;
+  updated_at: string | null;
+};
+
+/** What Brain persisted for a saved estimate: authoritative total, customer PDF total, and the frozen PDF snapshot. */
+export type SavedPrint = {
+  grand_total: number | null;
+  customer_display_total: number | null;
+  customer_print_snapshot: unknown;
+  pdf_filename: string;
+};
+
+export type LoadedQuote = {
+  ok: boolean;
+  quote: SavedQuoteRef;
+  document: EstimateDocument;
+  pricing: EstimatePricing;
+  savedPricing: EstimateTotals | null;
+  saved: SavedPrint;
+};

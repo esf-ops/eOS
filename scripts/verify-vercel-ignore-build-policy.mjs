@@ -27,6 +27,7 @@ const REQUIRED_IGNORE_COMMAND = [
   "app-home",
   "app-elite100-estimate-studio",
   "app-elite100-quote-flow",
+  "app-estimate-builder",
   "app-ai-takeoff",
   "app-digital-estimate",
   "app-quote-library",

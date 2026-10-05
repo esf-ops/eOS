@@ -17,6 +17,7 @@ const EXPECTED_WITH_POLICY = [
   "app-home/vercel.json",
   "app-elite100-estimate-studio/vercel.json",
   "app-elite100-quote-flow/vercel.json",
+  "app-estimate-builder/vercel.json",
   "app-ai-takeoff/vercel.json",
   "app-quote/vercel.json",
   "app-quote-library/vercel.json",

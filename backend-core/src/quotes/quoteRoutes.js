@@ -14,6 +14,7 @@ import { maybeAttachElite100QuoteFlowRoutes } from "../elite100QuoteFlow/elite10
 import { maybeAttachStudioFinalAcceptanceRoutes } from "../elite100EstimateStudio/studioFinalAcceptanceRoutes.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
+import { attachEstimateBuilderRoutes } from "../estimateBuilder/estimateBuilderRoutes.js";
 import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
 import { assertInternalQuoteOperator } from "./partnerContext.js";
 import { attachQuoteLibraryRoutes } from "./quoteLibraryApi.js";
@@ -285,6 +286,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachInternalQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachCustomQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
+  attachEstimateBuilderRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteDeliveryRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateRoutes(app, { requireAuth, getSupabase });
