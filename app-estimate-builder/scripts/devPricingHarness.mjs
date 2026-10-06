@@ -16,6 +16,7 @@ import http from "node:http";
 
 import { fetchEliteProgramMaterialColors } from "../../backend-core/src/quotes/materialColorsCatalog.js";
 import { buildEstimateBuilderCatalog } from "../../backend-core/src/estimateBuilder/estimateBuilderCatalog.mjs";
+import { buildDirectory, normalizeDirectoryConfig } from "../../backend-core/src/estimateBuilder/estimateBuilderDirectory.mjs";
 import {
   buildEstimatePriceResponse,
   buildEstimateProposalPreviewResponse
@@ -32,6 +33,38 @@ const ALLOWED_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 const MAX_BODY = 2 * 1024 * 1024;
 
 const { colors, warnings } = await fetchEliteProgramMaterialColors(null);
+
+/** Synthetic preview directory and customers (fake ListIDs, sample names) — never real QuickBooks data. */
+const PREVIEW_DIRECTORY = buildDirectory(
+  normalizeDirectoryConfig({
+    branches: [
+      { code: "branch_a", label: "Dyersville", qbClassListId: "PREVIEW-C1" },
+      { code: "branch_b", label: "Lisbon - North", qbClassListId: "PREVIEW-C2" },
+      { code: "branch_c", label: "Lisbon - South", qbClassListId: "PREVIEW-C3" }
+    ],
+    salesReps: [
+      { code: "SR1", name: "Sample Rep One", qbSalesRepListId: "PREVIEW-R1" },
+      { code: "SR2", name: "Sample Rep Two", qbSalesRepListId: "PREVIEW-R2" },
+      { code: "SR3", name: "Sample Rep Three", qbSalesRepListId: "PREVIEW-R3" }
+    ]
+  }),
+  new Map([
+    ["PREVIEW-C1", { fullName: "Preview - Branch A", active: true }],
+    ["PREVIEW-C2", { fullName: "Preview - Branch B", active: true }],
+    ["PREVIEW-C3", { fullName: "Preview - Branch C", active: true }]
+  ]),
+  new Map([
+    ["PREVIEW-R1", { initials: "SR1", fullName: "Sample Rep One", active: true }],
+    ["PREVIEW-R2", { initials: "SR2", fullName: "Sample Rep Two", active: true }],
+    ["PREVIEW-R3", { initials: "SR3", fullName: "Sample Rep Three", active: true }]
+  ])
+);
+const PREVIEW_CUSTOMERS = ["Sample Homes LLC", "Sample Builders Inc", "Example Remodeling", "Sample Cabinet Co"].map((fullName, i) => ({
+  listId: `PREVIEW-CU${i + 1}`,
+  fullName,
+  city: "Sampletown",
+  state: "IA"
+}));
 
 function send(res, status, body, origin) {
   const headers = { "content-type": "application/json" };
@@ -75,7 +108,13 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") return send(res, 204, null, origin);
     if (req.method === "GET" && url.pathname === "/api/estimate-builder/catalog") {
-      return send(res, 200, buildEstimateBuilderCatalog(colors, [...warnings, "Dev pricing harness — not connected to Supabase."]), origin);
+      const catalog = buildEstimateBuilderCatalog(colors, [...warnings, "Dev pricing harness — not connected to Supabase."]);
+      return send(res, 200, { ...catalog, directory: PREVIEW_DIRECTORY }, origin);
+    }
+    if (req.method === "GET" && url.pathname === "/api/estimate-builder/qb-customers") {
+      const q = String(url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const customers = q.length < 2 ? [] : PREVIEW_CUSTOMERS.filter((c) => c.fullName.toLowerCase().includes(q));
+      return send(res, 200, { ok: true, customers }, origin);
     }
     if (req.method === "POST" && url.pathname === "/api/estimate-builder/price") {
       return send(res, 200, await buildEstimatePriceResponse(await readJson(req), colors), origin);

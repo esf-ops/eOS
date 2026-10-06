@@ -140,6 +140,7 @@ export default function ItemEditor({
             setInputs={setInputs}
             pickMaterial={pickMaterial}
             openCalc={readOnly ? null : openCalc}
+            priced={priced}
           />
 
           {item.itemType !== "note" ? (
@@ -217,7 +218,8 @@ function ItemFields({
   recentMaterials,
   setInputs,
   pickMaterial,
-  openCalc
+  openCalc,
+  priced
 }: {
   item: EstimateItem;
   catalog: EstimateCatalog;
@@ -226,6 +228,7 @@ function ItemFields({
   setInputs: (i: Record<string, unknown>) => void;
   pickMaterial: (c: MaterialColor) => void;
   openCalc: OpenCalc | null;
+  priced: PricedItem | null;
 }) {
   const calcFor = (kind: CalculatorTarget["kind"]) => (openCalc ? <CalcLink onClick={() => openCalc(kind, (sqft) => setInputs({ sqft }))} /> : null);
   switch (item.itemType) {
@@ -233,7 +236,7 @@ function ItemFields({
       return item.pricingStrategy === "elite_100" ? (
         <EliteFields inputs={item.inputs} catalog={catalog} recent={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} calcLink={calcFor("counter")} />
       ) : (
-        <OutOfCollectionFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} calcLink={calcFor("counter")} />
+        <OutOfCollectionFields inputs={item.inputs} catalog={catalog} priced={priced} setInputs={setInputs} calcLink={calcFor("counter")} />
       );
     case "backsplash":
       return (
@@ -404,59 +407,76 @@ function ProductFields({ inputs, catalog, setInputs }: { inputs: ProductInputs; 
 function OutOfCollectionFields({
   inputs,
   catalog,
+  priced,
   setInputs,
   calcLink
 }: {
   inputs: OutOfCollectionInputs;
   catalog: EstimateCatalog;
+  priced: PricedItem | null;
   setInputs: SetInputs;
   calcLink: ReactNode;
 }) {
+  const { costMultiplier, defaultWastePercent } = catalog.outOfCollection;
+  const slabs = priced?.slabs ?? null;
+  const [overrideOpen, setOverrideOpen] = useState(inputs.slabQuantityOverride != null);
   return (
     <>
       <div className="eb-grid-2">
         <TextField label="Material name" value={inputs.materialName} autoFocus onChange={(v) => setInputs({ materialName: v })} />
         <TextField label="Supplier" value={inputs.supplier} onChange={(v) => setInputs({ supplier: v })} />
       </div>
-      <div className="eb-grid-2">
-        <label className="eb-field">
-          <span>Material type</span>
-          <select value={inputs.materialType} onChange={(e) => setInputs({ materialType: e.target.value })}>
-            {catalog.outOfCollection.materialTypes.map((t) => (
-              <option key={t} value={t}>
-                {t[0].toUpperCase() + t.slice(1)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <NumField label="Countertop square feet" value={inputs.sqft} suffix="sf" min={0} onChange={(v) => setInputs({ sqft: v })} />
-      </div>
+      <NumField label="Countertop square feet" value={inputs.sqft} suffix="sf" min={0} onChange={(v) => setInputs({ sqft: v })} />
       {calcLink}
       <div className="eb-grid-3">
-        <NumField label="Slab width" value={inputs.slabWidthIn} suffix="in" min={0} onChange={(v) => setInputs({ slabWidthIn: v })} />
-        <NumField label="Slab height" value={inputs.slabHeightIn} suffix="in" min={0} onChange={(v) => setInputs({ slabHeightIn: v })} />
-        <NumField label="Slabs" value={inputs.slabQuantity} integer min={1} onChange={(v) => setInputs({ slabQuantity: v ?? 1 })} />
+        <NumField label="Slab length" value={inputs.slabLengthIn} suffix="in" min={0} placeholder="126" onChange={(v) => setInputs({ slabLengthIn: v })} />
+        <NumField label="Slab width" value={inputs.slabWidthIn} suffix="in" min={0} placeholder="63" onChange={(v) => setInputs({ slabWidthIn: v })} />
+        <NumField label="Cost per slab" value={inputs.costPerSlab} prefix="$" min={0} onChange={(v) => setInputs({ costPerSlab: v })} />
       </div>
-      <div className="eb-field">
-        <span>Material cost</span>
-        <div className="eb-segmented">
-          {(["per_slab", "per_sqft"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={inputs.materialCostInputType === t ? "is-active" : ""}
-              aria-pressed={inputs.materialCostInputType === t}
-              onClick={() => setInputs({ materialCostInputType: t })}
-            >
-              {t === "per_slab" ? "Per slab" : "Per sq ft"}
-            </button>
-          ))}
+      <div className="eb-grid-2">
+        <NumField
+          label="Waste"
+          value={inputs.wastePercent ?? defaultWastePercent}
+          suffix="%"
+          min={0}
+          onChange={(v) => setInputs({ wastePercent: v == null || v === defaultWastePercent ? null : v })}
+        />
+        <div className="eb-field">
+          <span>Slabs needed</span>
+          <div className="eb-slab-count">
+            {slabs ? (
+              <>
+                <strong>{slabs.priced}</strong>
+                <span className="eb-muted">
+                  {slabs.requiredWithWasteSf} sf ÷ {slabs.slabAreaSf} sf per slab
+                  {slabs.priced !== slabs.suggested ? ` · calculated ${slabs.suggested}` : ""}
+                </span>
+              </>
+            ) : (
+              <span className="eb-muted">Enter sf, slab size and cost</span>
+            )}
+          </div>
         </div>
       </div>
-      {inputs.materialCostInputType === "per_slab" ? (
-        <NumField label="Cost per slab" value={inputs.costPerSlab} prefix="$" min={0} onChange={(v) => setInputs({ costPerSlab: v })} />
+      <p className="eb-hint">
+        Price = slabs × cost per slab × {costMultiplier} (covers fabrication and install). Waste defaults to {defaultWastePercent}%.
+      </p>
+      {overrideOpen ? (
+        <div className="eb-grid-2">
+          <NumField
+            label="Slabs (override)"
+            value={inputs.slabQuantityOverride}
+            integer
+            min={1}
+            placeholder={slabs ? String(slabs.suggested) : ""}
+            onChange={(v) => setInputs({ slabQuantityOverride: v })}
+          />
+          <TextField label="Reason" value={inputs.overrideReason} placeholder="e.g. bookmatch, seam layout" onChange={(v) => setInputs({ overrideReason: v })} />
+        </div>
       ) : (
-        <NumField label="Cost per sq ft" value={inputs.costPerSqft} prefix="$" min={0} onChange={(v) => setInputs({ costPerSqft: v })} />
+        <button type="button" className="eb-link" onClick={() => setOverrideOpen(true)}>
+          Use a different slab count…
+        </button>
       )}
     </>
   );
@@ -708,22 +728,7 @@ function PricingPanel({ priced, pending }: { priced: PricedItem | null; pending:
 function Advanced({ item, priced, setInputs }: { item: EstimateItem; priced: PricedItem | null; setInputs: SetInputs }) {
   const [open, setOpen] = useState(false);
   let extra: ReactNode = null;
-  if (item.itemType === "countertop" && item.pricingStrategy === "out_of_collection") {
-    const i = item.inputs;
-    extra = (
-      <>
-        <div className="eb-grid-2">
-          <NumField label="Freight" value={i.freight} prefix="$" min={0} onChange={(v) => setInputs({ freight: v ?? 0 })} />
-          <NumField label="Waste factor" value={i.wasteFactor} min={1} step={0.05} placeholder="Policy default" onChange={(v) => setInputs({ wasteFactor: v })} />
-        </div>
-        <div className="eb-grid-2">
-          <NumField label="Install cost" value={i.installCost} prefix="$" min={0} onChange={(v) => setInputs({ installCost: v ?? 0 })} />
-          <NumField label="Other cost" value={i.otherCost} prefix="$" min={0} onChange={(v) => setInputs({ otherCost: v ?? 0 })} />
-        </div>
-        <NumField label="Slab sq ft override" value={i.slabSqftOverride} suffix="sf" min={0} onChange={(v) => setInputs({ slabSqftOverride: v })} />
-      </>
-    );
-  } else if (item.itemType === "vanity") {
+  if (item.itemType === "vanity") {
     const i = item.inputs;
     extra = (
       <>

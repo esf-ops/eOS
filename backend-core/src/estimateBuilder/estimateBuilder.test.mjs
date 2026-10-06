@@ -6,11 +6,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { calculateQuote } from "../quotes/quoteCalculator.js";
-import { calculateCustomQuote } from "../quotes/customQuoteCalculator.js";
+import { slabPackageTotalCents } from "../elite100EstimateStudio/elite100SlabPackagePricing.mjs";
 import { computeInternalEstimateMaterialUseTaxAmounts } from "../quotes/internalEstimateMaterialTaxPolicy.js";
 import { printSnapshotSummaryRowsReconcile } from "../quoteDelivery/customerEstimatePrintSnapshot.js";
 import { buildEstimateBuilderCatalog } from "./estimateBuilderCatalog.mjs";
 import { cloneEstimateDocument, normalizeEstimateDocument } from "./estimateBuilderContracts.mjs";
+import { loadEstimatingDirectory, resolveHeaderQuickbooks, searchQuickbooksCustomers } from "./estimateBuilderDirectory.mjs";
 import { ceilToFive, priceEstimateDocument } from "./estimateBuilderPricing.mjs";
 import { buildEstimateProposalPdfFilename, buildEstimateProposalSnapshot, renderEstimateProposalHtml } from "./estimateBuilderProposal.mjs";
 import { ESTIMATE_BUILDER_QUOTE_SOURCE, buildQuoteLibraryArtifacts } from "./estimateBuilderQuoteLibrary.mjs";
@@ -62,13 +63,9 @@ const OOC_INPUTS = {
   sqft: 20,
   materialName: "Taj Mahal",
   supplier: "Cosmos",
-  materialType: "quartzite",
-  slabWidthIn: 126,
-  slabHeightIn: 63,
-  slabQuantity: 1,
-  materialCostInputType: "per_slab",
-  costPerSlab: 1850,
-  freight: 475
+  slabLengthIn: 126,
+  slabWidthIn: 63,
+  costPerSlab: 1850
 };
 
 /** Phase 1 acceptance estimate. */
@@ -198,34 +195,61 @@ test("Vanity Program matches production engine (tier auto-derived, side splash, 
   assert.ok(small.items[1].amount > van.amount, "under-35 tier is priced higher");
 });
 
-test("Out-of-Collection countertop uses the Custom Quote calculator with channel → pricing mode", async () => {
-  for (const [channel, mode] of [["direct", "retail"], ["wholesale", "wholesale"]]) {
-    const r = await price(
-      doc([{ id: "o", roomId: "laundry", itemType: "countertop", pricingStrategy: "out_of_collection", inputs: OOC_INPUTS }], { pricingChannel: channel })
-    );
-    const engine = await calculateCustomQuote({
-      materialType: "quartzite",
-      colorName: "Taj Mahal",
-      slabWidth: 126,
-      slabHeight: 63,
-      slabQuantity: 1,
-      materialCostInputType: "per_slab",
-      costPerSlab: 1850,
-      freightCostToEsf: 475,
-      projectSqft: 20,
-      pricingMode: mode
-    });
-    assert.equal(r.items[0].exactAmount, engine.sellPrice);
-    assert.equal(r.items[0].taxBase.countertop, 0, "Custom Quote policy: no material use tax");
+const ooc = (inputs, extra) => doc([{ id: "o", roomId: "laundry", itemType: "countertop", pricingStrategy: "out_of_collection", inputs }], extra);
+
+test("Out-of-Collection = slab package: sf + 20% waste → whole slabs × cost × 2.25, same on both channels", async () => {
+  // 50 sf × 1.2 = 60 sf; 126 × 63 = 55.125 sf per slab → 2 slabs; 2 × $1,850 × 2.25 = $8,325.
+  const expected = slabPackageTotalCents(2, 1850) / 100;
+  assert.equal(expected, 8325);
+  for (const channel of ["direct", "wholesale"]) {
+    const r = await price(ooc({ ...OOC_INPUTS, sqft: 50 }, { pricingChannel: channel }));
+    const line = r.items[0];
+    assert.equal(line.status, "priced");
+    assert.equal(line.exactAmount, expected);
+    assert.equal(line.amount, 8325);
+    assert.equal(line.taxBase.countertop, 0, "no material use tax on custom slab pricing");
+    assert.deepEqual(line.slabs, { suggested: 2, priced: 2, slabAreaSf: 55.125, requiredWithWasteSf: 60, wastePercent: 20 });
+    assert.equal(line.quantity, 50);
   }
 });
 
-test("Out-of-Collection validation surfaces as an item warning, not a thrown error", async () => {
-  const r = await price(
-    doc([{ id: "o", itemType: "countertop", pricingStrategy: "out_of_collection", inputs: { ...OOC_INPUTS, costPerSlab: null } }])
+test("Out-of-Collection: waste %, slab override and its warnings", async () => {
+  const noWaste = await price(ooc({ ...OOC_INPUTS, sqft: 50, wastePercent: 0 }));
+  assert.equal(noWaste.items[0].slabs.priced, 1, "50 sf fits one 55 sf slab with no waste");
+  assert.equal(noWaste.items[0].amount, ceilToFive(1850 * 2.25));
+
+  const over = await price(ooc({ ...OOC_INPUTS, sqft: 50, slabQuantityOverride: 3, overrideReason: "Bookmatch" }));
+  assert.equal(over.items[0].exactAmount, slabPackageTotalCents(3, 1850) / 100);
+  assert.equal(over.items[0].warnings[0].code, "slab_quantity_override");
+  assert.match(over.items[0].warnings[0].message, /Bookmatch/);
+
+  const under = await price(ooc({ ...OOC_INPUTS, sqft: 50, slabQuantityOverride: 1 }));
+  assert.equal(under.items[0].warnings[0].code, "slab_quantity_below_suggestion");
+  assert.equal(under.items[0].warnings[0].severity, "review");
+});
+
+test("Out-of-Collection missing inputs are incomplete items, never thrown errors", async () => {
+  for (const [patch, code] of [
+    [{ materialName: "" }, "missing_material"],
+    [{ sqft: null }, "missing_sqft"],
+    [{ slabWidthIn: null }, "missing_slab_size"],
+    [{ costPerSlab: null }, "missing_slab_cost"],
+    [{ slabLengthIn: 1260 }, "slab_size_invalid"]
+  ]) {
+    const r = await price(ooc({ ...OOC_INPUTS, ...patch }));
+    assert.equal(r.items[0].status, "incomplete", code);
+    assert.equal(r.items[0].warnings[0].code, code);
+  }
+});
+
+test("Out-of-Collection documents saved with Custom Quote fields map onto the slab package", () => {
+  const d = ooc({ sqft: 30, materialName: "Taj", materialType: "quartzite", slabWidthIn: 126, slabHeightIn: 63, slabQuantity: 1, costPerSlab: 1850, freight: 475 });
+  const i = d.items[0].inputs;
+  assert.deepEqual(
+    { l: i.slabLengthIn, w: i.slabWidthIn, cost: i.costPerSlab, override: i.slabQuantityOverride },
+    { l: 126, w: 63, cost: 1850, override: null }
   );
-  assert.equal(r.items[0].status, "incomplete");
-  assert.equal(r.items[0].warnings[0].code, "custom_quote_validation");
+  assert.equal("freight" in i, false);
 });
 
 test("add-ons, outlet, tear-out, trip, edge, and custom lines price through production paths with no use tax", async () => {
@@ -346,7 +370,7 @@ test("qualifying kitchen sf excludes countertops in Vanity Program rooms (produc
   assert.ok(r.items[2].details.some((d) => d.value.startsWith("Kitchen < 35 sf")), "30 sf kitchen stays in the under-35 tier");
 });
 
-test("mixed estimate total equals production calculateQuote (Elite + vanity) plus calculateCustomQuote (OOC)", async () => {
+test("mixed estimate total equals production calculateQuote (Elite + vanity) plus the slab package (OOC)", async () => {
   const r = await price(
     doc([
       { id: "k", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 48, materialColorId: "c-promo" } },
@@ -368,19 +392,8 @@ test("mixed estimate total equals production calculateQuote (Elite + vanity) plu
     qualifyingKitchenCounterSf: 68,
     vanities: [{ code: "61_D", qty: 1, programYear: 2026, materialGroup: "Group B", vanity: { sideSplashQty: 2, depth: 22.5 } }]
   });
-  const ooc = await calculateCustomQuote({
-    materialType: "quartzite",
-    colorName: "Taj Mahal",
-    slabWidth: 126,
-    slabHeight: 63,
-    slabQuantity: 1,
-    materialCostInputType: "per_slab",
-    costPerSlab: 1850,
-    freightCostToEsf: 475,
-    projectSqft: 20,
-    pricingMode: "retail"
-  });
-  near(r.totals.exactTotal, round2(elite.totals.wholesale + ooc.sellPrice), "mixed exact total");
+  const slabs = slabPackageTotalCents(1, 1850) / 100;
+  near(r.totals.exactTotal, round2(elite.totals.wholesale + slabs), "mixed exact total");
   assertLineRule(r);
 });
 
@@ -766,4 +779,138 @@ test("proposal and Quote Library name catalog products and services", async () =
   const sinkLine = art.calc.lineItems.find((l) => l.category === "product");
   assert.equal(sinkLine.item_code, "product:3218UM18SS");
   assert.equal(sinkLine.line_subtotal, 160);
+});
+
+// ─── Directory: branch / sales rep / QuickBooks account ──────────────────────
+
+const DIR_CONFIG = {
+  branches: [
+    { code: "dyersville", label: "Dyersville", qbClassListId: "C-DY" },
+    { code: "lisbon_north", label: "Lisbon - North", qbClassListId: "C-LN" },
+    { code: "lisbon_south", label: "Lisbon - South", qbClassListId: "C-GONE" }
+  ],
+  salesReps: [
+    { code: "CJS", name: "Casey Schenke", qbSalesRepListId: "R-CJS" },
+    { code: "MJ", name: "Michael Joseph", qbSalesRepListId: "R-MJ" }
+  ]
+};
+
+/** Minimal query fake recording filters; rows keyed by table. */
+function dirDb(tables) {
+  const calls = [];
+  return {
+    calls,
+    from(table) {
+      const q = { table, filters: [] };
+      const b = {
+        select: () => b,
+        eq: (k, v) => (q.filters.push(["eq", k, v]), b),
+        in: (k, v) => (q.filters.push(["in", k, v]), b),
+        ilike: (k, v) => (q.filters.push(["ilike", k, v]), b),
+        order: () => b,
+        limit: () => b,
+        maybeSingle: async () => (calls.push(q), { data: (tables[table] ?? [])[0] ?? null, error: null }),
+        then: (resolve) => (calls.push(q), resolve({ data: tables[table] ?? [], error: null }))
+      };
+      return b;
+    }
+  };
+}
+
+const DIR_TABLES = {
+  organization_integration_configs: [{ is_enabled: true, config: DIR_CONFIG }],
+  brain_quickbooks_classes: [
+    { qb_list_id: "C-DY", is_active: true, raw_payload: { FullName: { "#text": "ESF - Dyersville" } } },
+    { qb_list_id: "C-LN", is_active: true, raw_payload: { FullName: { "#text": "ESF - Lisbon:Lisbon - North" } } }
+  ],
+  brain_quickbooks_sales_reps: [
+    { qb_list_id: "R-CJS", is_active: true, raw_payload: { Initial: { "#text": "CJS" }, SalesRepEntityRef: { FullName: { "#text": "Casey J Schenke" } } } },
+    { qb_list_id: "R-MJ", is_active: false, raw_payload: { Initial: { "#text": "MJ" }, SalesRepEntityRef: { FullName: { "#text": "Michael Joseph" } } } }
+  ]
+};
+
+test("directory joins config to the QuickBooks mirrors by ListID, org-scoped, with per-entry status", async () => {
+  const db = dirDb(DIR_TABLES);
+  const dir = await loadEstimatingDirectory(db, "org-esf");
+  assert.equal(dir.configured, true);
+  assert.deepEqual(
+    dir.branches.map((b) => [b.code, b.quickbooks.classFullName, b.quickbooks.status]),
+    [["dyersville", "ESF - Dyersville", "linked"], ["lisbon_north", "ESF - Lisbon:Lisbon - North", "linked"], ["lisbon_south", null, "missing"]]
+  );
+  assert.deepEqual(dir.salesReps.map((r) => [r.code, r.quickbooks.initials, r.quickbooks.status]), [["CJS", "CJS", "linked"], ["MJ", "MJ", "inactive"]]);
+  for (const c of db.calls) assert.ok(c.filters.some(([op, k, v]) => op === "eq" && k === "organization_id" && v === "org-esf"), `${c.table} is org-scoped`);
+  assert.deepEqual(await loadEstimatingDirectory(dirDb({}), "org-other"), { configured: false, branches: [], salesReps: [] });
+  assert.deepEqual(await loadEstimatingDirectory(db, null), { configured: false, branches: [], salesReps: [] });
+});
+
+test("header resolution: codes win, exact legacy labels match, unknown/forged values never become QuickBooks refs", async () => {
+  const dir = await loadEstimatingDirectory(dirDb(DIR_TABLES), "org-esf");
+  const customer = { listId: "CU-1", fullName: "Northbridge Homes", active: true, isJob: false };
+  const ok = resolveHeaderQuickbooks({ branchCode: "dyersville", branch: "x", salesRepCode: "CJS", salesRep: "x", qbCustomerListId: "CU-1", accountName: "typed" }, dir, customer);
+  assert.equal(ok.header.branch, "Dyersville");
+  assert.equal(ok.header.salesRep, "Casey Schenke");
+  assert.equal(ok.header.accountName, "Northbridge Homes");
+  assert.deepEqual(ok.quickbooks.class, { listId: "C-DY", fullName: "ESF - Dyersville" });
+  assert.deepEqual(ok.quickbooks.salesRep, { listId: "R-CJS", initials: "CJS", fullName: "Casey J Schenke" });
+  assert.deepEqual(ok.quickbooks.customer, { listId: "CU-1", fullName: "Northbridge Homes" });
+  assert.equal(ok.quickbooks.ready, true);
+
+  const legacy = resolveHeaderQuickbooks({ branch: "lisbon - north", salesRep: "Casey Schenke", qbCustomerListId: "" }, dir, null);
+  assert.equal(legacy.header.branchCode, "lisbon_north");
+  assert.equal(legacy.header.salesRepCode, "CJS");
+  assert.equal(legacy.quickbooks.ready, false);
+  assert.ok(legacy.quickbooks.issues.some((i) => i.code === "qb_customer_missing"));
+
+  const bad = resolveHeaderQuickbooks({ branchCode: "lisbon_south", salesRepCode: "MJ", qbCustomerListId: "JOB-1" }, dir, { ...customer, listId: "JOB-1", isJob: true });
+  assert.equal(bad.quickbooks.class, null, "missing class is not sent");
+  assert.equal(bad.quickbooks.salesRep, null, "inactive rep is not sent");
+  assert.equal(bad.quickbooks.customer, null, "jobs are not accounts");
+  assert.equal(bad.header.qbCustomerListId, "");
+  assert.deepEqual(bad.quickbooks.issues.map((i) => i.code).sort(), ["branch_class_unlinked", "qb_customer_invalid", "sales_rep_unlinked"]);
+
+  const forged = resolveHeaderQuickbooks({ branchCode: "hq", branch: "HQ", salesRepCode: "ZZ" }, dir, null);
+  assert.equal(forged.header.branchCode, "");
+  assert.equal(forged.header.salesRepCode, "");
+  assert.ok(forged.quickbooks.issues.some((i) => i.code === "branch_unknown"));
+
+  const unconfigured = resolveHeaderQuickbooks({ branch: "Main", salesRep: "Pat" }, { configured: false, branches: [], salesReps: [] }, null);
+  assert.equal(unconfigured.header.branch, "Main", "orgs without a directory keep free-text values");
+  assert.deepEqual(unconfigured.quickbooks.issues, []);
+});
+
+test("QuickBooks customer search: org-scoped, top-level active only, wildcards escaped, 2-char minimum", async () => {
+  const db = dirDb({ ad_qb_customer_facts: [{ qb_list_id: "CU-1", full_name: "Northbridge Homes", bill_city: "Cedar Rapids", bill_state: "IA" }] });
+  assert.deepEqual(await searchQuickbooksCustomers(db, "org-esf", "n"), []);
+  assert.equal(db.calls.length, 0);
+  const rows = await searchQuickbooksCustomers(db, "org-esf", "50%_off");
+  assert.deepEqual(rows, [{ listId: "CU-1", fullName: "Northbridge Homes", city: "Cedar Rapids", state: "IA" }]);
+  const f = db.calls[0].filters;
+  assert.ok(f.some(([op, k, v]) => op === "eq" && k === "organization_id" && v === "org-esf"));
+  assert.ok(f.some(([op, k, v]) => op === "eq" && k === "is_job" && v === false));
+  assert.ok(f.some(([op, k, v]) => op === "eq" && k === "is_active" && v === true));
+  assert.ok(f.some(([op, k, v]) => op === "ilike" && k === "full_name" && v === "%50\\%\\_off%"));
+  assert.deepEqual(await searchQuickbooksCustomers(db, null, "homes"), []);
+});
+
+test("save stores Brain-resolved header labels and QuickBooks refs in the snapshot", async () => {
+  const db = fakeDb();
+  const dir = await loadEstimatingDirectory(dirDb(DIR_TABLES), "org-esf");
+  const res = await processEstimateBuilderSave(db, {
+    body: { document: { ...doc(ACCEPTANCE_ITEMS), header: { customerName: "Pat", branchCode: "lisbon_north", salesRepCode: "CJS", qbCustomerListId: "CU-1" } } },
+    userEmail: "e@example.com",
+    organizationContext: { organizationId: "org-1" },
+    materialColors: COLORS,
+    resolveQuickbooks: async (h) => resolveHeaderQuickbooks(h, dir, { listId: "CU-1", fullName: "Northbridge Homes", active: true, isJob: false })
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.quoteNumber, "ESF-LIS-000042", "branch label keeps the ESF number prefix");
+  const header = db.calls.find((c) => c.table === "quote_headers" && c.op === "insert").payload;
+  assert.equal(header.branch, "Lisbon - North");
+  assert.equal(header.sales_rep, "Casey Schenke");
+  assert.equal(header.account_name, "Northbridge Homes");
+  const qb = header.calculation_snapshot.estimate_builder.quickbooks;
+  assert.equal(qb.class.listId, "C-LN");
+  assert.equal(qb.salesRep.listId, "R-CJS");
+  assert.equal(qb.customer.listId, "CU-1");
+  assert.equal(res.document.header.branch, "Lisbon - North");
 });

@@ -54,7 +54,8 @@ function revisionNote(body) {
  *   body: Record<string, unknown>,
  *   userEmail: string,
  *   organizationContext: { organizationId?: string|null } | null,
- *   materialColors?: Array<Record<string, unknown>>
+ *   materialColors?: Array<Record<string, unknown>>,
+ *   resolveQuickbooks?: (header: Record<string, any>) => Promise<{ header: Record<string, any>, quickbooks: Record<string, unknown> }>
  * }} opts
  */
 export async function processEstimateBuilderSave(db, opts) {
@@ -64,6 +65,12 @@ export async function processEstimateBuilderSave(db, opts) {
   const hasOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
 
   const doc = normalizeEstimateDocument(body.document);
+  let quickbooks = null;
+  if (opts.resolveQuickbooks) {
+    const resolved = await opts.resolveQuickbooks(doc.header);
+    doc.header = resolved.header;
+    quickbooks = resolved.quickbooks;
+  }
   const rawStatus = String(body.quote_status ?? "draft").trim();
   const quoteStatus = ESTIMATE_BUILDER_STATUSES.has(rawStatus) ? rawStatus : "draft";
   const existingId = String(body.quote_id ?? "").trim();
@@ -79,7 +86,7 @@ export async function processEstimateBuilderSave(db, opts) {
   }
 
   const build = (quoteNumber) => {
-    const artifacts = buildQuoteLibraryArtifacts(doc, pricing, { quoteNumber });
+    const artifacts = buildQuoteLibraryArtifacts(doc, pricing, { quoteNumber, quickbooks });
     artifacts.snapshotToStore = patchPrintSnapshotQuoteNumber(artifacts.snapshotToStore, quoteNumber);
     return artifacts;
   };
@@ -133,7 +140,7 @@ export async function processEstimateBuilderSave(db, opts) {
     ub = scope(ub, orgId, hasOrg);
     const { error } = await ub;
     if (error) throw error;
-    return { ok: true, quoteId, quoteNumber, revisionNumber: 1, revisionLabel: "R1", saveMode, quoteStatus, pricing };
+    return { ok: true, quoteId, quoteNumber, revisionNumber: 1, revisionLabel: "R1", saveMode, quoteStatus, pricing, document: doc, quickbooks };
   }
 
   if (!existingId) return { ok: false, httpStatus: 400, error: `quote_id is required for ${saveMode}` };
@@ -203,7 +210,9 @@ export async function processEstimateBuilderSave(db, opts) {
       revisionLabel: row.revision_label ?? "R1",
       saveMode,
       quoteStatus,
-      pricing
+      pricing,
+      document: doc,
+      quickbooks
     };
   }
 
@@ -239,7 +248,7 @@ export async function processEstimateBuilderSave(db, opts) {
       revised_from_quote_id: row.id,
       revision_note: revisionNote(body)
     });
-    return { ok: true, quoteId, quoteNumber, revisionNumber: nextRev, revisionLabel, saveMode, quoteStatus, pricing };
+    return { ok: true, quoteId, quoteNumber, revisionNumber: nextRev, revisionLabel, saveMode, quoteStatus, pricing, document: doc, quickbooks };
   }
 
   return { ok: false, httpStatus: 400, error: `Unknown save_mode: ${saveMode}` };

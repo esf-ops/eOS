@@ -43,7 +43,7 @@ async function request<T>(method: "GET" | "POST", path: string, token: string, b
   return json as T;
 }
 
-export const apiGet = <T>(path: string, token: string) => request<T>("GET", path, token);
+export const apiGet = <T>(path: string, token: string, signal?: AbortSignal) => request<T>("GET", path, token, undefined, signal);
 
 /** Authenticated binary download (e.g. proposal PDF). */
 export async function apiGetBlob(path: string, token: string): Promise<Blob> {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DocAction } from "../lib/estimateDocument";
-import type { EstimateDocument, EstimateHeader as Header } from "../lib/estimateTypes";
+import type { EstimateDocument, EstimateHeader as Header, EstimatingDirectory, QbCustomer } from "../lib/estimateTypes";
+import AccountPicker from "./AccountPicker";
 import type { SavedRef } from "./EstimateBuilder";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -20,7 +21,9 @@ export default function EstimateHeader({
   dirty,
   onNew,
   onOpen,
-  onDuplicate
+  onDuplicate,
+  directory,
+  searchCustomers
 }: {
   doc: EstimateDocument;
   dispatch: (a: DocAction) => void;
@@ -29,10 +32,19 @@ export default function EstimateHeader({
   onNew: () => void;
   onOpen: () => void;
   onDuplicate: () => void;
+  directory: EstimatingDirectory | null;
+  searchCustomers: (q: string, signal: AbortSignal) => Promise<QbCustomer[]>;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const h = doc.header;
   const set = (patch: Partial<Header>) => dispatch({ type: "set_header", patch });
+  const useDirectory = Boolean(directory?.configured);
+  const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const branchCode = h.branchCode || (useDirectory ? directory!.branches.find((b) => sameLabel(b.label, h.branch))?.code ?? "" : "");
+  const repCode = h.salesRepCode || (useDirectory ? directory!.salesReps.find((r) => sameLabel(r.name, h.salesRep))?.code ?? "" : "");
+  const missing = useDirectory ? [!h.qbCustomerListId && "account", !branchCode && "branch", !repCode && "sales rep"].filter(Boolean) as string[] : [];
+  const pickAccount = (c: QbCustomer) =>
+    set({ accountName: c.fullName, qbCustomerListId: c.listId, ...(h.customerName.trim() ? {} : { customerName: c.fullName }) });
 
   return (
     <header className="eb-header">
@@ -82,8 +94,14 @@ export default function EstimateHeader({
           </div>
         </div>
         <div className="eb-header-tools">
-          <button type="button" className="eb-btn" onClick={() => setDetailsOpen(true)}>
+          <button
+            type="button"
+            className="eb-btn"
+            onClick={() => setDetailsOpen(true)}
+            title={missing.length ? `For QuickBooks, choose the ${listJoin(missing)}` : undefined}
+          >
             Details
+            {missing.length ? <span className="eb-details-badge" aria-label={`${missing.length} QuickBooks fields missing`}>{missing.length}</span> : null}
           </button>
           <HeaderMenu onNew={onNew} onOpen={onOpen} onDuplicate={onDuplicate} />
         </div>
@@ -99,10 +117,27 @@ export default function EstimateHeader({
               </button>
             </div>
             <div className="eb-drawer-body">
+              {useDirectory ? (
+                <p className={`eb-qb-status ${missing.length ? "" : "is-ready"}`}>
+                  {missing.length
+                    ? `To line up with QuickBooks, choose the ${listJoin(missing)}.`
+                    : "Account, branch and sales rep are linked to QuickBooks."}
+                </p>
+              ) : null}
               <fieldset className="eb-fieldset">
                 <legend>Customer</legend>
+                {useDirectory ? (
+                  <AccountPicker
+                    value={h.accountName}
+                    linked={Boolean(h.qbCustomerListId)}
+                    onType={(text) => set({ accountName: text, qbCustomerListId: "" })}
+                    onPick={pickAccount}
+                    search={searchCustomers}
+                  />
+                ) : (
+                  <Field label="Account" value={h.accountName} onChange={(v) => set({ accountName: v })} />
+                )}
                 <Field label="Customer name" value={h.customerName} onChange={(v) => set({ customerName: v })} />
-                <Field label="Account" value={h.accountName} onChange={(v) => set({ accountName: v })} />
                 <div className="eb-grid-2">
                   <Field label="Email" type="email" value={h.customerEmail} onChange={(v) => set({ customerEmail: v })} />
                   <Field label="Phone" type="tel" value={h.customerPhone} onChange={(v) => set({ customerPhone: v })} />
@@ -128,10 +163,52 @@ export default function EstimateHeader({
               </fieldset>
               <fieldset className="eb-fieldset">
                 <legend>Elite</legend>
-                <div className="eb-grid-2">
-                  <Field label="Branch" value={h.branch} onChange={(v) => set({ branch: v })} />
-                  <Field label="Sales rep" value={h.salesRep} onChange={(v) => set({ salesRep: v })} />
-                </div>
+                {useDirectory ? (
+                  <div className="eb-grid-2">
+                    <label className="eb-field">
+                      <span>Branch</span>
+                      <select
+                        value={branchCode}
+                        onChange={(e) => {
+                          const b = directory!.branches.find((x) => x.code === e.target.value);
+                          set({ branchCode: b?.code ?? "", branch: b?.label ?? "" });
+                        }}
+                      >
+                        <option value="">Choose a branch…</option>
+                        {directory!.branches.map((b) => (
+                          <option key={b.code} value={b.code} disabled={b.quickbooks.status !== "linked" && b.code !== branchCode}>
+                            {b.label}
+                            {b.quickbooks.status !== "linked" ? " (no QuickBooks class)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="eb-field">
+                      <span>Sales rep</span>
+                      <select
+                        value={repCode}
+                        onChange={(e) => {
+                          const r = directory!.salesReps.find((x) => x.code === e.target.value);
+                          set({ salesRepCode: r?.code ?? "", salesRep: r?.name ?? "" });
+                        }}
+                      >
+                        <option value="">Choose a sales rep…</option>
+                        {directory!.salesReps.map((r) => (
+                          <option key={r.code} value={r.code} disabled={r.quickbooks.status !== "linked" && r.code !== repCode}>
+                            {r.name}
+                            {r.quickbooks.initials ? ` (${r.quickbooks.initials})` : ""}
+                            {r.quickbooks.status !== "linked" ? " — not in QuickBooks" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="eb-grid-2">
+                    <Field label="Branch" value={h.branch} onChange={(v) => set({ branch: v })} />
+                    <Field label="Sales rep" value={h.salesRep} onChange={(v) => set({ salesRep: v })} />
+                  </div>
+                )}
                 <Field label="Prepared by (shown on the customer PDF)" value={h.preparedBy} onChange={(v) => set({ preparedBy: v })} />
               </fieldset>
               <fieldset className="eb-fieldset">
@@ -156,6 +233,10 @@ export default function EstimateHeader({
       ) : null}
     </header>
   );
+}
+
+function listJoin(parts: string[]): string {
+  return parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 function Field({

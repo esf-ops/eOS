@@ -10,6 +10,7 @@ import type {
   LoadedQuote,
   SavedPrint,
   PricedItem,
+  QbCustomer,
   SaveMode,
   SaveResult,
   SavedQuoteSummary
@@ -277,6 +278,20 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           isCurrentRevision: true
         });
         setSavedTotals(res.pricing.totals);
+        if (res.document) {
+          const h = res.document.header;
+          dispatchRaw({
+            type: "set_header",
+            patch: {
+              branch: h.branch,
+              branchCode: h.branchCode,
+              salesRep: h.salesRep,
+              salesRepCode: h.salesRepCode,
+              accountName: h.accountName,
+              qbCustomerListId: h.qbCustomerListId
+            }
+          });
+        }
         setDirty(false);
         // Re-read what Brain persisted so review and PDF show the stored quote, not browser state.
         try {
@@ -286,11 +301,12 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
         } catch {
           setSavedPrint(null);
         }
+        const qbIssues = res.quickbooks?.issues ?? [];
         setNotice({
-          tone: "ok",
+          tone: qbIssues.length ? "warn" : "ok",
           text: `${mode === "save_revision" ? "Revision saved" : "Saved"} to Quote Library as ${res.quote_number}${
             res.revision_label ? ` (${res.revision_label})` : ""
-          }.`
+          }.${qbIssues.length ? ` Before pushing to QuickBooks: ${qbIssues.map((i) => i.message).join(" ")}` : ""}`
         });
         return res;
       } catch (e) {
@@ -303,6 +319,14 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
       }
     },
     [doc, saved, token]
+  );
+
+  const searchCustomers = useCallback(
+    async (q: string, signal: AbortSignal) => {
+      const res = await apiGet<{ customers: QbCustomer[] }>(`/api/estimate-builder/qb-customers?q=${encodeURIComponent(q)}`, token, signal);
+      return res.customers ?? [];
+    },
+    [token]
   );
 
   const saveDraft = useCallback(() => {
@@ -443,6 +467,8 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           onNew={newEstimate}
           onOpen={() => void openSavedList()}
           onDuplicate={duplicateEstimate}
+          directory={catalog?.directory ?? null}
+          searchCustomers={searchCustomers}
         />
 
         {notice ? (

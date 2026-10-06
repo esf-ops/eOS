@@ -106,7 +106,8 @@ test("switching countertop strategy resets inputs but keeps sqft", () => {
   const item = doc.items.find((i) => i.id === "ct")!;
   assert.equal(item.pricingStrategy, "out_of_collection");
   assert.equal((item.inputs as { sqft: number }).sqft, 48);
-  assert.equal((item.inputs as { materialType: string }).materialType, "quartz");
+  assert.equal((item.inputs as { wastePercent: number | null }).wastePercent, null, "waste defaults to the Brain's 20%");
+  assert.equal((item.inputs as { slabQuantityOverride: number | null }).slabQuantityOverride, null, "slab count is calculated");
   assert.ok(!("materialColorId" in item.inputs));
 });
 

@@ -3,7 +3,10 @@
  * staff can choose (no costs or margins). Every line amount still comes from `/price`.
  */
 
-import { CUSTOM_QUOTE_MATERIAL_TYPES } from "../quotes/customQuotePricingResolver.js";
+import {
+  SLAB_PACKAGE_COST_MULTIPLIER,
+  SLAB_PACKAGE_DEFAULT_WASTE_PERCENT
+} from "../elite100EstimateStudio/elite100SlabPackagePricing.mjs";
 import { VANITY_PROGRAM_2026_BY_CODE, VANITY_PROGRAM_YEAR } from "../quotes/vanityProgram2026.js";
 import {
   CUSTOM_ITEM_CATEGORIES,
@@ -71,7 +74,7 @@ export function buildEstimateBuilderCatalog(colors, warnings = []) {
       })),
       sinkTypes: VANITY_SINK_TYPES.map((code) => ({ code, label: VANITY_SINK_LABELS[code] ?? code }))
     },
-    outOfCollection: { materialTypes: CUSTOM_QUOTE_MATERIAL_TYPES },
+    outOfCollection: { costMultiplier: SLAB_PACKAGE_COST_MULTIPLIER, defaultWastePercent: SLAB_PACKAGE_DEFAULT_WASTE_PERCENT },
     products: buildEstimateBuilderProductCatalog(),
     customCategories: CUSTOM_ITEM_CATEGORIES,
     roomSuggestions: DEFAULT_ROOM_SUGGESTIONS,

@@ -5,7 +5,7 @@
  *
  * Every Elite-program item is priced by sending a minimal single-item `internal_quote` probe through
  * the production `calculateQuote` engine (the same engine `POST /api/internal-quotes/calculate|save`
- * uses). Out-of-Collection countertops run through the production Custom Quote calculator. Sinks, faucets
+ * uses). Out-of-Collection countertops are custom slab packages (`elite100SlabPackagePricing.mjs`). Sinks, faucets
  * and accessories are priced at the ESF plumbing catalog sell price (`estimateBuilderProducts.mjs`).
  * This module never defines a $/sf, add-on, product, vanity, or tax constant.
  *
@@ -17,8 +17,12 @@
  */
 
 import { calculateQuote } from "../quotes/quoteCalculator.js";
-import { calculateCustomQuote, normalizeCustomQuoteInput, validateCustomQuoteInput } from "../quotes/customQuoteCalculator.js";
-import { MULTIPLIER_WARN_THRESHOLD, UTILIZATION_WARN_PERCENT } from "../quotes/customQuotePricingResolver.js";
+import {
+  SLAB_PACKAGE_COST_MULTIPLIER,
+  SLAB_PACKAGE_DEFAULT_WASTE_PERCENT,
+  slabPackageTotalCents,
+  suggestSlabQuantity
+} from "../elite100EstimateStudio/elite100SlabPackagePricing.mjs";
 import { resolveInternalEstimateMaterialTaxPolicy } from "../quotes/internalEstimateMaterialTaxPolicy.js";
 import {
   VANITY_PROGRAM_2026_BY_CODE,
@@ -274,60 +278,51 @@ async function priceEliteCountertop(item, ctx, res) {
   return res;
 }
 
-async function priceOutOfCollectionCountertop(item, ctx, res) {
+/**
+ * Out-of-Collection countertop = custom slab package (same authority as Quote Flow / Studio):
+ * slabs needed = ceil(sf × (1 + waste %) ÷ slab area), price = slabs × cost per slab × 2.25.
+ * The multiplier already covers fabrication and installation; no use tax.
+ */
+function priceOutOfCollectionCountertop(item, res) {
   const i = item.inputs;
   res.customerCategory = "Countertops";
   res.unit = "sf";
-  res.description = i.materialName ? `${i.materialName} countertop` : "Out-of-collection countertop";
-  res.pricingSource = { engine: "customQuoteCalculator.calculateCustomQuote", reference: "Custom Quote slab-cost pricing" };
-  const pricingMode = ctx.channel === "direct" ? "retail" : "wholesale";
-  const raw = {
-    materialType: i.materialType,
-    colorName: i.materialName,
-    supplierName: i.supplier,
-    slabWidth: i.slabWidthIn,
-    slabHeight: i.slabHeightIn,
-    slabSqft: i.slabSqftOverride,
-    slabQuantity: i.slabQuantity,
-    materialCostInputType: i.materialCostInputType,
-    costPerSlab: i.costPerSlab,
-    costPerSqft: i.costPerSqft,
-    freightCostToEsf: i.freight,
-    wasteFactor: i.wasteFactor,
-    installCost: i.installCost,
-    otherCostBasis: i.otherCost,
-    projectSqft: i.sqft,
-    pricingMode
+  res.description = i.materialName ? `${i.materialName} countertop` : "Out-of-Collection countertop";
+  res.pricingSource = {
+    engine: "elite100SlabPackagePricing",
+    reference: `Custom slab package · slabs × cost per slab × ${SLAB_PACKAGE_COST_MULTIPLIER}`
   };
   if (!i.materialName) return incomplete(res, "missing_material", "Enter the material name.");
-  const validation = validateCustomQuoteInput(normalizeCustomQuoteInput(raw));
-  if (validation) return incomplete(res, "custom_quote_validation", validation);
-  const calc = await calculateCustomQuote(raw);
-  res.quantity = Number(calc.projectSqft) || 0;
-  res.amount = round2(calc.sellPrice);
-  res.rate = res.quantity > 0 ? round2(res.amount / res.quantity) : 0;
-  for (const message of calc.warnings || []) {
-    const isMultiplier = /^Multiplier /.test(String(message));
+  if (!(i.sqft > 0)) return incomplete(res, "missing_sqft", "Enter countertop square footage.");
+  if (!(i.slabLengthIn > 0 && i.slabWidthIn > 0)) return incomplete(res, "missing_slab_size", "Enter the slab length and width.");
+  if (!(i.costPerSlab > 0)) return incomplete(res, "missing_slab_cost", "Enter the cost per slab.");
+  if (i.slabLengthIn > 240 || i.slabWidthIn > 120) {
+    return incomplete(res, "slab_size_invalid", "Slab dimensions look wrong — enter them in inches (e.g. 126 × 63).");
+  }
+  const wastePercent = i.wastePercent ?? SLAB_PACKAGE_DEFAULT_WASTE_PERCENT;
+  const s = suggestSlabQuantity({ requiredSf: i.sqft, slabLengthIn: i.slabLengthIn, slabWidthIn: i.slabWidthIn, wastePercent });
+  const slabs = i.slabQuantityOverride ?? s.suggestedQuantity;
+  const overridden = i.slabQuantityOverride != null && i.slabQuantityOverride !== s.suggestedQuantity;
+  res.quantity = i.sqft;
+  res.amount = slabPackageTotalCents(slabs, i.costPerSlab) / 100;
+  res.rate = round2(res.amount / i.sqft);
+  res.slabs = { suggested: s.suggestedQuantity, priced: slabs, slabAreaSf: s.slabAreaSf, requiredWithWasteSf: s.requiredWithWasteSf, wastePercent };
+  if (overridden) {
+    const below = slabs < s.suggestedQuantity;
     res.warnings.push({
-      code: isMultiplier ? "multiplier_below_threshold" : "slab_yield",
-      severity: isMultiplier ? "review" : "warn",
-      message: String(message)
+      code: below ? "slab_quantity_below_suggestion" : "slab_quantity_override",
+      severity: below || !i.overrideReason ? "review" : "warn",
+      message: `${slabs} slab${slabs === 1 ? "" : "s"} entered vs ${s.suggestedQuantity} calculated${i.overrideReason ? ` — ${i.overrideReason}` : " — add a reason"}.`
     });
   }
   res.details.push(
-    { label: "Material type", value: String(calc.input?.materialType || "") },
     { label: "Supplier", value: i.supplier || "—" },
-    { label: "Usable sf / slab", value: String(calc.usableSlabSqftPerSlab) },
-    { label: "Waste factor", value: String(calc.wasteFactor) },
-    { label: "Slabs required / priced", value: `${calc.slabsRequired} / ${calc.pricedSlabQuantity}` },
-    { label: "Utilization", value: `${calc.utilizationPercent}% (warn ≥ ${UTILIZATION_WARN_PERCENT}%)` },
-    { label: "Material cost", value: money(calc.materialCost) },
-    { label: "Freight", value: money(calc.freightCost) },
-    { label: "Fabrication", value: `${money(calc.fabricationCost)} (${money(calc.fabricationInstallShopRate)} / sf)` },
-    { label: "Total cost basis", value: money(calc.totalCostBasis) },
-    { label: "Uplift", value: `${calc.pricingUpliftPercent}% (${pricingMode})` },
-    { label: "Multiplier", value: `${calc.multiplier} (review < ${MULTIPLIER_WARN_THRESHOLD})` },
-    { label: "Material use tax", value: "Not applied — Custom Quote pricing policy" }
+    { label: "Slab size", value: `${i.slabLengthIn}″ × ${i.slabWidthIn}″ (${s.slabAreaSf} sf per slab)` },
+    { label: "Waste", value: `${wastePercent}% → ${s.requiredWithWasteSf} sf needed` },
+    { label: "Slabs", value: overridden ? `${slabs} (calculated ${s.suggestedQuantity})` : `${slabs} (calculated)` },
+    { label: "Cost per slab", value: money(i.costPerSlab) },
+    { label: "Price", value: `${slabs} × ${money(i.costPerSlab)} × ${SLAB_PACKAGE_COST_MULTIPLIER} = ${money(res.amount)} (includes fabrication & install)` },
+    { label: "Material use tax", value: "Not applied (custom slab pricing)" }
   );
   return res;
 }
@@ -625,7 +620,7 @@ export async function priceEstimateItem(item, ctx) {
     switch (item.itemType) {
       case "countertop":
         return item.pricingStrategy === "out_of_collection"
-          ? await priceOutOfCollectionCountertop(item, ctx, res)
+          ? priceOutOfCollectionCountertop(item, res)
           : await priceEliteCountertop(item, ctx, res);
       case "backsplash":
         return await priceBacksplash(item, ctx, res);

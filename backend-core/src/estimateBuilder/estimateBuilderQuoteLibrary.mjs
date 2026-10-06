@@ -181,7 +181,7 @@ export function buildCustomerPrintSnapshot(doc, pricing, opts = {}) {
 /**
  * @param {ReturnType<import("./estimateBuilderContracts.mjs").normalizeEstimateDocument>} doc
  * @param {Awaited<ReturnType<import("./estimateBuilderPricing.mjs").priceEstimateDocument>>} pricing
- * @param {{ quoteNumber?: string, estimateDate?: string, pricedAt?: string }} [opts]
+ * @param {{ quoteNumber?: string, estimateDate?: string, pricedAt?: string, quickbooks?: Record<string, unknown>|null }} [opts]
  */
 export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
   const h = doc.header;
@@ -256,6 +256,7 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
       version: ESTIMATE_DOCUMENT_VERSION,
       document: doc,
       pricing: { items: pricing.items, totals: pricing.totals, readiness: pricing.readiness },
+      quickbooks: opts.quickbooks ?? null,
       priced_at: opts.pricedAt ?? new Date().toISOString()
     },
     internal_ui: {

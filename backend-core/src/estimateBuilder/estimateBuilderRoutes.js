@@ -1,7 +1,8 @@
 /**
  * Estimate Builder head — authenticated ESF-only APIs (head slug `estimate_builder`).
  *
- * GET  /api/estimate-builder/catalog      item types, options, Elite 100 colors (no prices), templates
+ * GET  /api/estimate-builder/catalog      item types, options, Elite 100 colors (no prices), templates, branch/rep directory
+ * GET  /api/estimate-builder/qb-customers?q=  account type-ahead (org QuickBooks customer mirror)
  * POST /api/estimate-builder/price        price an item document through production engines
  * POST /api/estimate-builder/save         save to Quote Library (quote_source estimate_builder)
  * GET  /api/estimate-builder/quotes       recent current-revision Estimate Builder quotes (org-scoped)
@@ -28,6 +29,12 @@ import {
   buildEstimateProposalSnapshot,
   renderEstimateProposalHtml
 } from "./estimateBuilderProposal.mjs";
+import {
+  findQuickbooksCustomer,
+  loadEstimatingDirectory,
+  resolveHeaderQuickbooks,
+  searchQuickbooksCustomers
+} from "./estimateBuilderDirectory.mjs";
 import { estimateDocumentFromQuoteRow, fetchScopedEstimateBuilderQuote, processEstimateBuilderSave } from "./estimateBuilderSave.mjs";
 
 const HEAD = "estimate_builder";
@@ -103,10 +110,35 @@ export function attachEstimateBuilderRoutes(app, deps) {
     res.status(Number(e?.statusCode) || 500).json({ ok: false, error: String(e?.message || e) });
   };
 
-  app.get("/api/estimate-builder/catalog", ...stack, async (_req, res) => {
+  const orgIdFor = async (req, db) => {
+    const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+    return { orgCtx, orgId: orgCtx.organizationId ? String(orgCtx.organizationId) : null };
+  };
+
+  app.get("/api/estimate-builder/catalog", ...stack, async (req, res) => {
     try {
+      const db = getSupabase();
       const { colors, warnings } = await materialColors();
-      res.json(buildEstimateBuilderCatalog(colors, warnings));
+      const { orgId } = await orgIdFor(req, db);
+      let directory;
+      try {
+        directory = await loadEstimatingDirectory(db, orgId);
+      } catch (e) {
+        console.warn("[estimate-builder] directory unavailable", { organizationId: orgId, error: String(e?.message || e) });
+        directory = { configured: false, branches: [], salesReps: [], unavailable: true };
+      }
+      res.json({ ...buildEstimateBuilderCatalog(colors, warnings), directory });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** Account type-ahead over the org's QuickBooks customer mirror (top-level, active). */
+  app.get("/api/estimate-builder/qb-customers", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const { orgId } = await orgIdFor(req, db);
+      res.json({ ok: true, customers: await searchQuickbooksCustomers(db, orgId, String(req.query.q ?? "")) });
     } catch (e) {
       fail(res, e);
     }
@@ -128,7 +160,21 @@ export function attachEstimateBuilderRoutes(app, deps) {
       const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const userEmail = String(req.user?.email || req.user?.id || "unknown");
       const { colors } = await materialColors();
-      const result = await processEstimateBuilderSave(db, { body, userEmail, organizationContext: orgCtx, materialColors: colors });
+      const orgId = orgCtx.organizationId ? String(orgCtx.organizationId) : null;
+      const resolveQuickbooks = async (header) => {
+        const [directory, customer] = await Promise.all([
+          loadEstimatingDirectory(db, orgId),
+          findQuickbooksCustomer(db, orgId, header.qbCustomerListId)
+        ]);
+        return resolveHeaderQuickbooks(header, directory, customer);
+      };
+      const result = await processEstimateBuilderSave(db, {
+        body,
+        userEmail,
+        organizationContext: orgCtx,
+        materialColors: colors,
+        resolveQuickbooks
+      });
       if (!result.ok) {
         return res.status(result.httpStatus || 400).json({ ok: false, error: result.error, blockers: result.blockers ?? [], pricing: result.pricing ?? null });
       }
@@ -145,6 +191,7 @@ export function attachEstimateBuilderRoutes(app, deps) {
           revision_label: result.revisionLabel,
           item_count: result.pricing.totals.itemCount,
           grand_total: result.pricing.totals.total,
+          quickbooks_ready: result.quickbooks?.ready ?? null,
           organization_id: orgCtx.organizationId ?? null
         },
         req
@@ -157,7 +204,9 @@ export function attachEstimateBuilderRoutes(app, deps) {
         revision_label: result.revisionLabel,
         quote_status: result.quoteStatus,
         save_mode: result.saveMode,
-        pricing: result.pricing
+        pricing: result.pricing,
+        document: result.document,
+        quickbooks: result.quickbooks ?? null
       });
     } catch (e) {
       fail(res, e);
@@ -216,6 +265,7 @@ export function attachEstimateBuilderRoutes(app, deps) {
         document,
         pricing: await priceEstimateDocument(document, { materialColors: colors }),
         savedPricing: row.calculation_snapshot?.estimate_builder?.pricing?.totals ?? null,
+        quickbooks: row.calculation_snapshot?.estimate_builder?.quickbooks ?? null,
         saved: {
           grand_total: row.grand_total != null ? Number(row.grand_total) : null,
           customer_display_total: row.calculation_snapshot?.internal_ui?.customer_display_total ?? null,

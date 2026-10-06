@@ -172,22 +172,20 @@ function normalizeInputs(itemType, strategy, raw) {
   switch (itemType) {
     case "countertop":
       if (strategy === "out_of_collection") {
+        // Documents saved before the slab-package calculator carried Custom Quote fields (slabWidthIn × slabHeightIn).
+        const legacy = !("slabLengthIn" in i) && i.slabHeightIn != null;
+        const override = nonNeg(i.slabQuantityOverride);
+        const waste = nonNeg(i.wastePercent);
         return {
           sqft: nonNeg(i.sqft),
           materialName: str(i.materialName, 160),
           supplier: str(i.supplier, 160),
-          materialType: str(i.materialType, 40).toLowerCase(),
-          slabWidthIn: nonNeg(i.slabWidthIn),
-          slabHeightIn: nonNeg(i.slabHeightIn),
-          slabSqftOverride: nonNeg(i.slabSqftOverride),
-          slabQuantity: intQty(i.slabQuantity, 1),
-          materialCostInputType: oneOf(i.materialCostInputType, ["per_slab", "per_sqft"], "per_slab"),
+          slabLengthIn: legacy ? nonNeg(i.slabWidthIn) : nonNeg(i.slabLengthIn),
+          slabWidthIn: legacy ? nonNeg(i.slabHeightIn) : nonNeg(i.slabWidthIn),
           costPerSlab: nonNeg(i.costPerSlab),
-          costPerSqft: nonNeg(i.costPerSqft),
-          freight: nonNeg(i.freight) ?? 0,
-          wasteFactor: nonNeg(i.wasteFactor),
-          installCost: nonNeg(i.installCost) ?? 0,
-          otherCost: nonNeg(i.otherCost) ?? 0
+          wastePercent: waste == null ? null : Math.min(100, waste),
+          slabQuantityOverride: override != null && override > 0 ? Math.floor(override) : null,
+          overrideReason: str(i.overrideReason, 500)
         };
       }
       return {
@@ -314,7 +312,10 @@ export function normalizeEstimateDocument(raw) {
       state: str(h.state, 40),
       zip: str(h.zip, 20),
       branch: str(h.branch, 60),
+      branchCode: str(h.branchCode, 60),
       salesRep: str(h.salesRep, 120),
+      salesRepCode: str(h.salesRepCode, 60),
+      qbCustomerListId: str(h.qbCustomerListId, 60),
       preparedBy: str(h.preparedBy, 120),
       billToAddress: str(h.billToAddress, 500),
       county: str(h.county, 80),

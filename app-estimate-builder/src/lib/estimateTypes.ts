@@ -27,22 +27,19 @@ export type EliteCountertopInputs = {
   materialColorName: string;
 };
 
+/** Custom slab package: slabs = ceil(sf × (1 + waste) ÷ slab area); price = slabs × cost × 2.25 (Brain). */
 export type OutOfCollectionInputs = {
   sqft: number | null;
   materialName: string;
   supplier: string;
-  materialType: string;
+  slabLengthIn: number | null;
   slabWidthIn: number | null;
-  slabHeightIn: number | null;
-  slabSqftOverride: number | null;
-  slabQuantity: number;
-  materialCostInputType: "per_slab" | "per_sqft";
   costPerSlab: number | null;
-  costPerSqft: number | null;
-  freight: number;
-  wasteFactor: number | null;
-  installCost: number;
-  otherCost: number;
+  /** Null = the default waste allowance (catalog `outOfCollection.defaultWastePercent`). */
+  wastePercent: number | null;
+  /** Null = use the calculated slab count. */
+  slabQuantityOverride: number | null;
+  overrideReason: string;
 };
 
 export type BacksplashInputs = {
@@ -142,8 +139,13 @@ export type EstimateHeader = {
   city: string;
   state: string;
   zip: string;
+  /** Display label; the Brain sets it from `branchCode` when the org has a directory. */
   branch: string;
+  branchCode: string;
   salesRep: string;
+  salesRepCode: string;
+  /** QuickBooks customer ListID for the account (Brain-verified at save). */
+  qbCustomerListId: string;
   preparedBy: string;
   billToAddress: string;
   county: string;
@@ -186,6 +188,8 @@ export type PricedItem = {
   warnings: ItemWarning[];
   details: Array<{ label: string; value: string }>;
   pricingSource: { engine: string; reference: string };
+  /** Out-of-Collection slab math (calculated vs priced slab count). */
+  slabs?: { suggested: number; priced: number; slabAreaSf: number; requiredWithWasteSf: number; wastePercent: number };
 };
 
 export type EstimateTotals = {
@@ -271,11 +275,36 @@ export type EstimateCatalog = {
     sizes: Array<{ code: string; label: string; widthIn: number; bowlCount: number }>;
     sinkTypes: Array<{ code: VanitySinkType; label: string }>;
   };
-  outOfCollection: { materialTypes: string[] };
+  outOfCollection: { costMultiplier: number; defaultWastePercent: number };
   products: { sourceVersion: string | null; tabs: Array<{ key: ProductTab; label: string }>; products: CatalogProduct[] };
   customCategories: CustomCategory[];
   roomSuggestions: string[];
   templates: EstimateTemplate[];
+  directory?: EstimatingDirectory;
+};
+
+export type QbLinkStatus = "linked" | "missing" | "inactive" | "unmapped";
+
+/** Org branch / sales rep choices, each tied to a QuickBooks ListID (Brain-resolved). */
+export type EstimatingDirectory = {
+  configured: boolean;
+  unavailable?: boolean;
+  branches: Array<{ code: string; label: string; quickbooks: { classListId: string | null; classFullName: string | null; status: QbLinkStatus } }>;
+  salesReps: Array<{
+    code: string;
+    name: string;
+    quickbooks: { salesRepListId: string | null; initials: string | null; fullName: string | null; status: QbLinkStatus };
+  }>;
+};
+
+export type QbCustomer = { listId: string; fullName: string; city: string | null; state: string | null };
+
+export type QuickbooksRefs = {
+  customer: { listId: string; fullName: string } | null;
+  class: { listId: string; fullName: string } | null;
+  salesRep: { listId: string; initials: string; fullName: string } | null;
+  ready: boolean;
+  issues: Array<{ code: string; message: string }>;
 };
 
 export type SaveMode = "create" | "update_existing" | "save_revision";
@@ -289,6 +318,9 @@ export type SaveResult = {
   save_mode: SaveMode;
   quote_status: string;
   pricing: EstimatePricing;
+  /** Document as stored (header labels resolved from the directory by the Brain). */
+  document?: EstimateDocument;
+  quickbooks: QuickbooksRefs | null;
 };
 
 export type SavedQuoteSummary = {
@@ -339,5 +371,6 @@ export type LoadedQuote = {
   document: EstimateDocument;
   pricing: EstimatePricing;
   savedPricing: EstimateTotals | null;
+  quickbooks: QuickbooksRefs | null;
   saved: SavedPrint;
 };

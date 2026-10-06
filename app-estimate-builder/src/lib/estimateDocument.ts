@@ -41,7 +41,10 @@ export function emptyHeader(): EstimateHeader {
     state: "",
     zip: "",
     branch: "",
+    branchCode: "",
     salesRep: "",
+    salesRepCode: "",
+    qbCustomerListId: "",
     preparedBy: "",
     billToAddress: "",
     county: "",
@@ -65,18 +68,12 @@ export function defaultInputs(itemType: ItemType, strategy: PricingStrategy): Re
           sqft: null,
           materialName: "",
           supplier: "",
-          materialType: "quartz",
+          slabLengthIn: null,
           slabWidthIn: null,
-          slabHeightIn: null,
-          slabSqftOverride: null,
-          slabQuantity: 1,
-          materialCostInputType: "per_slab",
           costPerSlab: null,
-          costPerSqft: null,
-          freight: 0,
-          wasteFactor: null,
-          installCost: 0,
-          otherCost: 0
+          wastePercent: null,
+          slabQuantityOverride: null,
+          overrideReason: ""
         };
       }
       return { sqft: null, materialColorId: null, materialColorName: "" };

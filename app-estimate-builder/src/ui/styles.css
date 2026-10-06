@@ -1729,6 +1729,95 @@ kbd {
   font-size: 0.82rem;
 }
 
+/* --- Estimate details: QuickBooks account / branch / rep --- */
+.eb-account-picker {
+  position: relative;
+}
+.eb-account-picker > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eb-qb-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--eos-warn-soft);
+  color: var(--eos-warn);
+}
+.eb-qb-chip.is-linked {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+}
+.eb-account-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line-strong);
+  border-radius: var(--r-sm);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+.eb-account-results li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.eb-account-results li.is-active {
+  background: var(--eos-accent-soft);
+}
+.eb-account-results li.eb-account-empty {
+  cursor: default;
+  color: var(--eos-ink-muted);
+}
+.eb-qb-status {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  font-size: 0.85rem;
+  background: var(--eos-warn-soft);
+  color: var(--eos-warn);
+}
+.eb-qb-status.is-ready {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+}
+.eb-details-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--eos-warn);
+  color: #fff;
+}
+.eb-slab-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 38px;
+  padding-top: 8px;
+}
+.eb-slab-count strong {
+  font-size: 1.3rem;
+}
+
 @media print {
   .eb-no-print,
   .eb-overlay {
