@@ -4,13 +4,16 @@
  * Produces the artifacts `persistQuoteSubmission` / `replaceQuoteLinesAndRooms` already accept, so
  * Estimate Builder quotes land in `quote_headers` (quote_source `estimate_builder`) with no migration:
  *  - `saveBody`        → header columns + `quote_rooms` rows (room-level sqft rollups)
- *  - `calc`            → totals + one `quote_line_items` row per priced estimate item (+ use tax line)
+ *  - `calc`            → totals + one `quote_line_items` row per priced estimate item (line amounts already
+ *                        include material use tax and the $5 round-up; notes are not line items)
  *  - `snapshotToStore` → `calculation_snapshot` holding the canonical item document, server pricing,
- *                        Quote Library `internal_ui` aliases, and a v1 customer print snapshot
- *                        (same contract as `CustomerEstimateDocument` / `customerEstimatePrintSnapshot.js`).
+ *                        Quote Library `internal_ui` aliases, a v1 customer print snapshot (same contract as
+ *                        `CustomerEstimateDocument` / `customerEstimatePrintSnapshot.js`), and the
+ *                        QuickBooks-style proposal snapshot (`internal_ui.estimate_builder_proposal`).
  */
 
 import { ESTIMATE_DOCUMENT_VERSION } from "./estimateBuilderContracts.mjs";
+import { buildEstimateProposalSnapshot } from "./estimateBuilderProposal.mjs";
 
 export const ESTIMATE_BUILDER_QUOTE_SOURCE = "estimate_builder";
 
@@ -60,29 +63,6 @@ const SUMMARY_ORDER = [
 
 const MATERIAL_CATEGORIES = new Set(["Countertops", "Backsplash", "Full height backsplash", "Vanity tops"]);
 
-/**
- * Per-item customer amount: pre-tax amount + its share of material use tax (production folds use tax into
- * customer material dollars). Shares are allocated so they sum exactly to the estimate-level tax.
- * @param {Array<Record<string, any>>} pricedItems
- * @param {Record<string, any>} totals
- */
-export function allocateUseTaxToItems(pricedItems, totals) {
-  const out = new Map();
-  const tax = totals.useTax;
-  const alloc = (key, baseTotal, taxTotal) => {
-    const rows = pricedItems.filter((r) => r.status === "priced" && r.taxBase[key] > 0);
-    let remaining = round2(taxTotal);
-    rows.forEach((r, idx) => {
-      const share = idx === rows.length - 1 ? remaining : round2((r.taxBase[key] / baseTotal) * taxTotal);
-      remaining = round2(remaining - share);
-      out.set(r.itemId, round2((out.get(r.itemId) ?? 0) + share));
-    });
-  };
-  if (tax.countertopBase > 0) alloc("countertop", tax.countertopBase, tax.countertopAmount);
-  if (tax.backsplashBase > 0) alloc("backsplash", tax.backsplashBase, tax.backsplashAmount);
-  return out;
-}
-
 function roomNameFor(doc, roomId) {
   if (!roomId) return null;
   return doc.rooms.find((r) => r.id === roomId)?.name ?? null;
@@ -94,9 +74,8 @@ function roomNameFor(doc, roomId) {
  */
 export function buildCustomerPrintSnapshot(doc, pricing, opts = {}) {
   const items = pricing.items.filter((r) => r.status === "priced");
-  const taxShare = allocateUseTaxToItems(items, pricing.totals);
   const docItems = new Map(doc.items.map((it) => [it.id, it]));
-  const customerAmount = (r) => round2(r.amount + (taxShare.get(r.itemId) ?? 0));
+  const customerAmount = (r) => round2(r.amount);
   const isInternalOnly = (r) => r.itemType === "custom" && docItems.get(r.itemId)?.inputs?.customerFacing === false;
 
   const byCategory = new Map();
@@ -221,24 +200,10 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
       room_name: roomNameFor(doc, r.roomId),
       quantity: r.quantity,
       unit_type: r.unit,
-      unit_price: r.rate,
+      unit_price: r.quantity > 0 ? round2(r.amount / r.quantity) : r.amount,
       line_subtotal: r.amount,
       sort_order: idx
     }));
-  if (pricing.totals.useTax.amount > 0) {
-    lineItems.push({
-      line_type: "use_tax",
-      category: "tax",
-      item_code: "material_use_tax",
-      item_name: `Material use tax (${pricing.totals.useTax.percent}%)`,
-      room_name: null,
-      quantity: 1,
-      unit_type: "each",
-      unit_price: pricing.totals.useTax.amount,
-      line_subtotal: pricing.totals.useTax.amount,
-      sort_order: lineItems.length
-    });
-  }
 
   const rooms = doc.rooms
     .map((room) => {
@@ -266,7 +231,7 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
       materialColor: r.description.replace(/ countertop$/, "").replace(/^.* — /, ""),
       sqft: r.quantity,
       ratePerSqft: r.rate,
-      wholesaleSubtotal: r.amount
+      wholesaleSubtotal: r.exactAmount
     }));
 
   const estimatedSqft = round2(
@@ -274,6 +239,7 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
   );
 
   const printSnapshot = buildCustomerPrintSnapshot(doc, pricing, opts);
+  const proposal = buildEstimateProposalSnapshot(doc, pricing, opts);
 
   const calc = {
     totals: { wholesale: total, retail: total, profit: 0, estimated_sqft: estimatedSqft },
@@ -297,6 +263,7 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
       internal_material_basis: doc.pricingChannel,
       customer_display_total: printSnapshot.finalRounded,
       customer_estimate_print_snapshot: printSnapshot,
+      estimate_builder_proposal: proposal,
       customer_facing_notes: h.customerNotes || null,
       internal_notes: h.internalNotes || null,
       entered_by: h.preparedBy || null,
@@ -326,5 +293,5 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
     rooms
   };
 
-  return { saveBody, calc, snapshotToStore, printSnapshot };
+  return { saveBody, calc, snapshotToStore, printSnapshot, proposal };
 }

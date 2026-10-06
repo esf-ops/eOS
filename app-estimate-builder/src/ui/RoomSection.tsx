@@ -1,7 +1,16 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { newId, type DocAction } from "../lib/estimateDocument";
 import type { EstimateItem, EstimateRoom, PricedItem } from "../lib/estimateTypes";
+import type { QuickAddChoice } from "./AddItemMenu";
 import { formatMoney, formatQty } from "./format";
+
+/** One-click adds shown under every room; everything else lives in the full add menu. */
+const ROOM_QUICK_ADDS: QuickAddChoice[] = [
+  { label: "Countertop", itemType: "countertop", pricingStrategy: "elite_100" },
+  { label: "Backsplash", itemType: "backsplash", pricingStrategy: "standard" },
+  { label: "Sink", itemType: "cutout", pricingStrategy: "addon_catalog", inputs: { cutoutCode: "qty-sink", qty: 1 } },
+  { label: "Note", itemType: "note", pricingStrategy: "text" }
+];
 
 const TYPE_LABELS: Record<string, string> = {
   countertop: "Countertop",
@@ -11,7 +20,8 @@ const TYPE_LABELS: Record<string, string> = {
   outlet: "Outlet cutout",
   edge: "Edge upgrade",
   service: "Service",
-  custom: "Custom item"
+  custom: "Custom item",
+  note: "Note"
 };
 
 const STRATEGY_TAGS: Record<string, string> = {
@@ -24,6 +34,7 @@ const STRATEGY_TAGS: Record<string, string> = {
 export function itemFallbackLabel(item: EstimateItem): string {
   if (item.label) return item.label;
   if (item.itemType === "custom" && item.inputs.description) return item.inputs.description;
+  if (item.itemType === "note") return item.inputs.text || "Note";
   if (item.itemType === "backsplash" && item.pricingStrategy === "full_height") return "Full-height backsplash";
   return TYPE_LABELS[item.itemType] ?? item.itemType;
 }
@@ -40,14 +51,34 @@ type Props = {
   dispatch: (a: DocAction) => void;
   onEdit: (id: string) => void;
   onAddItem: (roomId: string | null) => void;
+  onQuickAdd: (choice: QuickAddChoice, roomId: string | null) => void;
+  onAddNoteBelow: (roomId: string | null, afterId: string) => void;
+  focusNoteId: string | null;
   readOnly: boolean;
 };
 
-function RoomSection({ room, items, rooms, pricedById, roomTotal, isFirstRoom, isLastRoom, stale, dispatch, onEdit, onAddItem, readOnly }: Props) {
+function RoomSection({
+  room,
+  items,
+  rooms,
+  pricedById,
+  roomTotal,
+  isFirstRoom,
+  isLastRoom,
+  stale,
+  dispatch,
+  onEdit,
+  onAddItem,
+  onQuickAdd,
+  onAddNoteBelow,
+  focusNoteId,
+  readOnly
+}: Props) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(room?.name ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const title = room ? room.name : rooms.length ? "Project items" : "Items";
+  const pricedCount = items.filter((it) => it.itemType !== "note").length;
 
   const commitRename = () => {
     if (room && name.trim()) dispatch({ type: "rename_room", id: room.id, name });
@@ -84,14 +115,9 @@ function RoomSection({ room, items, rooms, pricedById, roomTotal, isFirstRoom, i
             {!room && rooms.length ? <span className="eb-muted eb-small"> · not tied to a room</span> : null}
           </h3>
         )}
-        <span className="eb-room-count">{items.length} item{items.length === 1 ? "" : "s"}</span>
+        <span className="eb-room-count">{pricedCount} item{pricedCount === 1 ? "" : "s"}</span>
         <span className="eb-spacer" />
         <span className={`eb-room-total${stale ? " is-stale" : ""}`}>{formatMoney(roomTotal)}</span>
-        {!readOnly ? (
-          <button type="button" className="eb-btn eb-btn-sm" onClick={() => onAddItem(room?.id ?? null)}>
-            + Item
-          </button>
-        ) : null}
         {room && !readOnly ? (
           <div className="eb-menu-wrap">
             <button
@@ -133,28 +159,50 @@ function RoomSection({ room, items, rooms, pricedById, roomTotal, isFirstRoom, i
         ) : null}
       </div>
 
-      {items.length === 0 ? (
-        <button type="button" className="eb-room-empty" onClick={() => onAddItem(room?.id ?? null)} disabled={readOnly}>
-          No items yet — add a countertop, vanity, sink, or anything else.
-        </button>
-      ) : (
+      {items.length ? (
         <ul className="eb-items">
-          {items.map((it, idx) => (
-            <ItemRow
-              key={it.id}
-              item={it}
-              priced={pricedById.get(it.id)}
-              rooms={rooms}
-              isFirst={idx === 0}
-              isLast={idx === items.length - 1}
-              stale={stale}
-              dispatch={dispatch}
-              onEdit={onEdit}
-              readOnly={readOnly}
-            />
-          ))}
+          {items.map((it, idx) =>
+            it.itemType === "note" ? (
+              <NoteRow
+                key={it.id}
+                item={it}
+                isFirst={idx === 0}
+                isLast={idx === items.length - 1}
+                autoFocus={focusNoteId === it.id}
+                dispatch={dispatch}
+                readOnly={readOnly}
+              />
+            ) : (
+              <ItemRow
+                key={it.id}
+                item={it}
+                priced={pricedById.get(it.id)}
+                rooms={rooms}
+                isFirst={idx === 0}
+                isLast={idx === items.length - 1}
+                stale={stale}
+                dispatch={dispatch}
+                onEdit={onEdit}
+                onAddNoteBelow={() => onAddNoteBelow(room?.id ?? null, it.id)}
+                readOnly={readOnly}
+              />
+            )
+          )}
         </ul>
-      )}
+      ) : null}
+      {!readOnly ? (
+        <div className="eb-quickadd" role="group" aria-label={`Add to ${title}`}>
+          {items.length === 0 ? <span className="eb-quickadd-hint">Add to {room ? room.name : "the estimate"}:</span> : null}
+          {ROOM_QUICK_ADDS.map((c) => (
+            <button key={c.label} type="button" className="eb-chip" onClick={() => onQuickAdd(c, room?.id ?? null)}>
+              + {c.label}
+            </button>
+          ))}
+          <button type="button" className="eb-chip eb-chip-more" onClick={() => onAddItem(room?.id ?? null)}>
+            More…
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -170,12 +218,13 @@ type RowProps = {
   stale: boolean;
   dispatch: (a: DocAction) => void;
   onEdit: (id: string) => void;
+  onAddNoteBelow: () => void;
   readOnly: boolean;
 };
 
-const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, stale, dispatch, onEdit, readOnly }: RowProps) {
+const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, stale, dispatch, onEdit, onAddNoteBelow, readOnly }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const label = priced?.description || itemFallbackLabel(item);
+  const label = item.label || priced?.description || itemFallbackLabel(item);
   const tag = STRATEGY_TAGS[item.pricingStrategy];
   const warnings = priced?.warnings ?? [];
   const blocking = warnings.filter((w) => w.severity === "block");
@@ -245,6 +294,9 @@ const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, st
                 <button type="button" role="menuitem" onClick={() => (setMenuOpen(false), onEdit(item.id))}>
                   Edit
                 </button>
+                <button type="button" role="menuitem" onClick={() => (setMenuOpen(false), onAddNoteBelow())}>
+                  Add note below
+                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -301,6 +353,88 @@ const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, st
               </div>
             </>
           ) : null}
+        </div>
+      ) : null}
+    </li>
+  );
+});
+
+type NoteRowProps = {
+  item: EstimateItem & { itemType: "note" };
+  isFirst: boolean;
+  isLast: boolean;
+  autoFocus: boolean;
+  dispatch: (a: DocAction) => void;
+  readOnly: boolean;
+};
+
+/** QuickBooks-style description line: typed straight into the list, prints on the proposal with no amount. */
+const NoteRow = memo(function NoteRow({ item, isFirst, isLast, autoFocus, dispatch, readOnly }: NoteRowProps) {
+  const [editing, setEditing] = useState(autoFocus || !item.inputs.text);
+  const [text, setText] = useState(item.inputs.text);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => setText(item.inputs.text), [item.inputs.text]);
+  useEffect(() => {
+    if (editing && autoFocus) ref.current?.focus();
+  }, [editing, autoFocus]);
+
+  const commit = () => {
+    const next = text.replace(/\s+$/, "");
+    if (!next.trim()) {
+      dispatch({ type: "remove_item", id: item.id });
+      return;
+    }
+    if (next !== item.inputs.text) dispatch({ type: "update_item", id: item.id, patch: { inputs: { text: next } }, now: new Date().toISOString() });
+    setEditing(false);
+  };
+
+  return (
+    <li className="eb-item eb-item-note">
+      <div className="eb-item-main">
+        {editing && !readOnly ? (
+          <textarea
+            ref={ref}
+            className="eb-note-input"
+            rows={Math.min(6, Math.max(1, text.split("\n").length))}
+            value={text}
+            placeholder="Type a note for the proposal (e.g. Eased edges / no backsplash)"
+            maxLength={1000}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                commit();
+              } else if (e.key === "Escape") {
+                e.stopPropagation();
+                if (!item.inputs.text) dispatch({ type: "remove_item", id: item.id });
+                else {
+                  setText(item.inputs.text);
+                  setEditing(false);
+                }
+              }
+            }}
+            aria-label="Note text"
+          />
+        ) : (
+          <button type="button" className="eb-note-text" onClick={() => !readOnly && setEditing(true)} disabled={readOnly} title="Click to edit note">
+            {item.inputs.text}
+          </button>
+        )}
+      </div>
+      <div className="eb-item-amount eb-muted eb-small">note</div>
+      {!readOnly ? (
+        <div className="eb-note-actions">
+          <button type="button" className="eb-icon-btn" aria-label="Move note up" disabled={isFirst} onClick={() => dispatch({ type: "move_item", id: item.id, direction: "up" })}>
+            ↑
+          </button>
+          <button type="button" className="eb-icon-btn" aria-label="Move note down" disabled={isLast} onClick={() => dispatch({ type: "move_item", id: item.id, direction: "down" })}>
+            ↓
+          </button>
+          <button type="button" className="eb-icon-btn" aria-label="Delete note" onClick={() => dispatch({ type: "remove_item", id: item.id })}>
+            ×
+          </button>
         </div>
       ) : null}
     </li>

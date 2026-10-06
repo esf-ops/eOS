@@ -24,7 +24,8 @@ export const DEFAULT_STRATEGY: Record<ItemType, PricingStrategy> = {
   outlet: "addon_catalog",
   edge: "edge_v2",
   service: "service_catalog",
-  custom: "custom_line"
+  custom: "custom_line",
+  note: "text"
 };
 
 export function emptyHeader(): EstimateHeader {
@@ -41,6 +42,10 @@ export function emptyHeader(): EstimateHeader {
     branch: "",
     salesRep: "",
     preparedBy: "",
+    billToAddress: "",
+    county: "",
+    poNumber: "",
+    customerMessage: "",
     customerNotes: "",
     internalNotes: ""
   };
@@ -117,6 +122,8 @@ export function defaultInputs(itemType: ItemType, strategy: PricingStrategy): Re
         customerNote: "",
         internalNote: ""
       };
+    case "note":
+      return { text: "" };
   }
 }
 

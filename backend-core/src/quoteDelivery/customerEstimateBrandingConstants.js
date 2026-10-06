@@ -25,6 +25,19 @@ export const CUSTOMER_ESTIMATE_BRANCH_LOCATIONS = [
   }
 ];
 
+/** QuickBooks-style proposal (Estimate Builder) company block + acceptance footer. */
+export const CUSTOMER_PROPOSAL_COMPANY = {
+  name: "Elite Stone Fabrication",
+  addressLines: ["200 Kraiburg Blvd", "Lisbon, IA 52253"],
+  phone: "(319) 455-4200 or (319) 455-4202",
+  fax: "(319) 455-4101"
+};
+
+export const CUSTOMER_PROPOSAL_FOOTER_LINES = [
+  "THE PRICES LISTED ABOVE INCLUDE MATERIALS, LABOR, AND APPLICABLE TAX.",
+  "ANY CHANGES MUST BE AGREED UPON IN WRITING."
+];
+
 export const CUSTOMER_ESTIMATE_TERMS_ITEMS = [
   "This estimate is valid for 30 days from the date shown unless otherwise noted in writing.",
   "Final pricing may change after field measure, material selection, template, and plan review.",

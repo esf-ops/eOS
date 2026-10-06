@@ -37,7 +37,8 @@ function buildChoices(catalog: EstimateCatalog): QuickAddChoice[] {
   }
   choices.push(
     { group: "Other", label: "Custom item", itemType: "custom", pricingStrategy: "custom_line", hint: "Any priced line" },
-    { group: "Other", label: "Credit / discount", itemType: "custom", pricingStrategy: "custom_line", inputs: { category: "credit" } }
+    { group: "Other", label: "Credit / discount", itemType: "custom", pricingStrategy: "custom_line", inputs: { category: "credit" } },
+    { group: "Other", label: "Note", itemType: "note", pricingStrategy: "text", hint: "Text line on the proposal — no price" }
   );
   return choices;
 }

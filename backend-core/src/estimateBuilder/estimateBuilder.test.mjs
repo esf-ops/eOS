@@ -11,7 +11,8 @@ import { computeInternalEstimateMaterialUseTaxAmounts } from "../quotes/internal
 import { printSnapshotSummaryRowsReconcile } from "../quoteDelivery/customerEstimatePrintSnapshot.js";
 import { buildEstimateBuilderCatalog } from "./estimateBuilderCatalog.mjs";
 import { cloneEstimateDocument, normalizeEstimateDocument } from "./estimateBuilderContracts.mjs";
-import { priceEstimateDocument } from "./estimateBuilderPricing.mjs";
+import { ceilToFive, priceEstimateDocument } from "./estimateBuilderPricing.mjs";
+import { buildEstimateProposalPdfFilename, buildEstimateProposalSnapshot, renderEstimateProposalHtml } from "./estimateBuilderProposal.mjs";
 import { ESTIMATE_BUILDER_QUOTE_SOURCE, buildQuoteLibraryArtifacts } from "./estimateBuilderQuoteLibrary.mjs";
 import { buildEstimatePriceResponse } from "./estimateBuilderRoutes.js";
 import { estimateDocumentFromQuoteRow, processEstimateBuilderSave } from "./estimateBuilderSave.mjs";
@@ -23,6 +24,21 @@ const COLORS = [
 ];
 
 const round2 = (n) => Math.round(n * 100) / 100;
+
+/** Per-line use tax rounds to the cent per line; production rounds per category — allow cent drift. */
+function near(actual, expected, msg) {
+  assert.ok(Math.abs(actual - expected) <= 0.05, `${msg ?? "amount"}: ${actual} vs ${expected}`);
+}
+
+/** Owner rule: every positive line is a $5 multiple and the estimate total is the sum of line amounts. */
+function assertLineRule(r) {
+  for (const it of r.items.filter((i) => i.status === "priced")) {
+    if (it.amount > 0) assert.equal(it.amount % 5, 0, `${it.itemId} rounds to $5`);
+  }
+  assert.ok(r.totals.total >= r.totals.exactTotal, "rounding only ever goes up");
+  assert.ok(r.totals.roundingAdjustment < 5 * r.totals.pricedCount, "at most one $5 step per line");
+  assert.equal(r.totals.total, round2(r.items.reduce((s, i) => s + (i.status === "priced" ? i.amount : 0), 0)));
+}
 
 function doc(items, extra = {}) {
   return normalizeEstimateDocument({
@@ -114,8 +130,9 @@ for (const channel of ["direct", "wholesale"]) {
     });
     assert.equal(r.items[0].quantity, 48, "countertop rounds up to whole sf");
     assert.equal(r.items[1].quantity, 12);
-    assert.equal(r.totals.total, engine.totals.wholesale);
+    assert.equal(r.totals.exactTotal, engine.totals.wholesale);
     assert.equal(r.totals.useTax.amount, engine.detail.useTaxAmount);
+    assertLineRule(r);
   });
 }
 
@@ -137,7 +154,7 @@ test("full-height backsplash prices as backsplash material (taxed), distinct ite
   );
   const fhb = r.items[1];
   assert.equal(fhb.customerCategory, "Full height backsplash");
-  assert.equal(fhb.taxBase.backsplash, fhb.amount);
+  assert.equal(fhb.taxBase.backsplash, fhb.exactAmount);
   assert.match(fhb.description, /^Full height backsplash — Statuario Maximus/);
 });
 
@@ -171,7 +188,9 @@ test("Vanity Program matches production engine (tier auto-derived, side splash, 
       }
     ]
   });
-  assert.equal(van.amount, engine.totals.wholesale, "side splash use tax is inside the vanity line, as in production");
+  assert.equal(van.exactAmount, engine.totals.wholesale, "side splash use tax is inside the vanity line, as in production");
+  assert.equal(van.useTaxAmount, 0);
+  assert.equal(van.amount, Math.ceil(van.exactAmount / 5) * 5);
   assert.equal(van.taxBase.backsplash, 0, "side splash is not taxed a second time at estimate level");
 
   const small = await price(doc([{ ...items[0], inputs: { sqft: 20, materialColorId: "c-b" } }, items[1]]));
@@ -196,7 +215,7 @@ test("Out-of-Collection countertop uses the Custom Quote calculator with channel
       projectSqft: 20,
       pricingMode: mode
     });
-    assert.equal(r.items[0].amount, engine.sellPrice);
+    assert.equal(r.items[0].exactAmount, engine.sellPrice);
     assert.equal(r.items[0].taxBase.countertop, 0, "Custom Quote policy: no material use tax");
   }
 });
@@ -234,7 +253,9 @@ test("add-ons, outlet, tear-out, trip, edge, and custom lines price through prod
   assert.ok(r.items.every((i) => i.status === "priced"));
   assert.equal(r.items.find((i) => i.itemId === "cr").amount, -50);
   assert.equal(r.totals.useTax.amount, 0);
-  assert.equal(r.totals.total, engine.totals.wholesale);
+  assert.equal(r.totals.exactTotal, engine.totals.wholesale);
+  assert.equal(r.items.find((i) => i.itemId === "x").amount, 125);
+  assertLineRule(r);
 });
 
 test("vanity bowl cutout in a Vanity Program room carries a contextual warning", async () => {
@@ -257,9 +278,10 @@ test("acceptance estimate total equals one production calculateQuote over the eq
       { code: "61_D", qty: 1, programYear: 2026, extraTrips: 1, materialGroup: "Group B", vanity: { sideSplashQty: 1, depth: 22.5 } }
     ]
   });
-  assert.equal(r.totals.total, engine.totals.wholesale);
+  near(r.totals.exactTotal, engine.totals.wholesale, "acceptance exact total");
+  assertLineRule(r);
   const expectTax = computeInternalEstimateMaterialUseTaxAmounts(r.totals.useTax.countertopBase, r.totals.useTax.backsplashBase);
-  assert.equal(r.totals.useTax.amount, expectTax.totalMaterialUseTaxAmount);
+  near(r.totals.useTax.amount, expectTax.totalMaterialUseTaxAmount, "use tax");
 });
 
 test("mixed estimate: Elite 100 + Out-of-Collection + Vanity Program in one document", async () => {
@@ -300,12 +322,16 @@ test("several countertop/backsplash items in one room round up once per room, li
       { name: "Project", roomType: "Kitchen", materialGroup: "Group Promo", countertopSqft: 7.2 }
     ]
   });
-  assert.equal(r.totals.total, engine.totals.wholesale);
+  near(r.totals.exactTotal, engine.totals.wholesale, "grouped exact total");
+  assertLineRule(r);
   const kitchenTops = r.items.filter((i) => ["p", "i"].includes(i.itemId));
   assert.equal(round2(kitchenTops.reduce((s, i) => s + i.quantity, 0)), 41, "40.7 sf → 41 chargeable, not 21 + 21");
   const splash = r.items.filter((i) => ["s", "f"].includes(i.itemId));
   assert.equal(round2(splash.reduce((s, i) => s + i.quantity, 0)), 17, "standard + FHB 16.5 sf → 17 chargeable per room");
-  for (const it of r.items) assert.equal(round2(it.quantity * it.rate), it.amount);
+  for (const it of r.items) assert.equal(round2(it.quantity * it.rate), it.exactAmount);
+  const kitchenSplash = round2(splash.reduce((s, i) => s + i.amount, 0));
+  const kitchenSplashExact = round2(splash.reduce((s, i) => s + i.exactAmount + i.useTaxAmount, 0));
+  assert.equal(kitchenSplash, Math.ceil(kitchenSplashExact / 5) * 5, "a room group rounds up once, then splits in $5 units");
 });
 
 test("qualifying kitchen sf excludes countertops in Vanity Program rooms (production rule)", async () => {
@@ -354,7 +380,8 @@ test("mixed estimate total equals production calculateQuote (Elite + vanity) plu
     projectSqft: 20,
     pricingMode: "retail"
   });
-  assert.equal(r.totals.total, round2(elite.totals.wholesale + ooc.sellPrice));
+  near(r.totals.exactTotal, round2(elite.totals.wholesale + ooc.sellPrice), "mixed exact total");
+  assertLineRule(r);
 });
 
 test("incomplete items are excluded from totals and block finalize readiness", async () => {
@@ -367,28 +394,116 @@ test("incomplete items are excluded from totals and block finalize readiness", a
 
 // ─── Quote Library compatibility ─────────────────────────────────────────────
 
-test("serializer emits line items, use tax line, room rollups, and a reconciled v1 print snapshot", async () => {
+test("owner example: wholesale Promo 60 sf = (60 × $45) × 1.02 rounded up to $5", async () => {
+  const r = await price(
+    doc([{ id: "p", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 60, materialColorId: "c-promo" } }], { pricingChannel: "wholesale" })
+  );
+  const line = r.items[0];
+  assert.equal(line.rate, 45);
+  assert.equal(line.exactAmount, 2700);
+  assert.equal(line.useTaxAmount, 54);
+  assert.equal(line.amount, 2755, "2,754.00 → 2,755");
+  assert.equal(line.roundingAdjustment, 1);
+  assert.equal(r.totals.total, 2755);
+  assert.equal(r.totals.exactTotal, 2754);
+  assert.equal(r.totals.roundingAdjustment, 1);
+});
+
+test("ceilToFive is cent-safe and leaves credits exact", () => {
+  assert.equal(ceilToFive(2754), 2755);
+  assert.equal(ceilToFive(2755), 2755);
+  assert.equal(ceilToFive(2755.01), 2760);
+  assert.equal(ceilToFive(0.1 + 0.2), 5);
+  assert.equal(ceilToFive(-50), -50);
+  assert.equal(ceilToFive(0), 0);
+});
+
+test("note items are description-only: no amount, no readiness blocker, not counted as items", async () => {
+  const r = await price(
+    doc([
+      { id: "p", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 30, materialColorId: "c-promo" } },
+      { id: "n", roomId: "kitchen", itemType: "note", inputs: { text: "Eased Edges / NO Backsplash" } }
+    ])
+  );
+  const note = r.items.find((i) => i.itemId === "n");
+  assert.equal(note.status, "note");
+  assert.equal(note.amount, 0);
+  assert.equal(note.description, "Eased Edges / NO Backsplash");
+  assert.equal(r.totals.itemCount, 1);
+  assert.equal(r.totals.noteCount, 1);
+  assert.equal(r.readiness.ready, true);
+  const notesOnly = await price(doc([{ id: "n", itemType: "note", inputs: { text: "Just a note" } }]));
+  assert.equal(notesOnly.readiness.ready, false, "a quote needs at least one priced item");
+});
+
+test("proposal: QuickBooks layout lines, notes in order, internal-only folded, lines sum to total", async () => {
+  const d = doc(
+    [
+      { id: "p", roomId: "kitchen", itemType: "countertop", label: "3 cm PROMO Granite/Quartz for KITCHEN", inputs: { sqft: 60, materialColorId: "c-promo" } },
+      { id: "n1", roomId: "kitchen", itemType: "note", inputs: { text: "Eased Edges / NO Backsplash" } },
+      { id: "s", roomId: "kitchen", itemType: "cutout", label: "Undermount Sink Cut Out (Std)", inputs: { cutoutCode: "qty-sink", qty: 1 } },
+      { id: "int", roomId: "kitchen", itemType: "custom", inputs: { description: "Internal adj", qty: 1, unitPrice: 40, customerFacing: false } },
+      { id: "n2", roomId: "kitchen", itemType: "note", inputs: { text: "COLOR OPTIONS : Prices Include Everything Listed Above\n3 cm MQ Lux Aurum : $4,610 TOTAL" } }
+    ],
+    {
+      pricingChannel: "wholesale",
+      header: { customerName: "Jon <Sample>", billToAddress: "1 Main St\nLisbon, IA 52253", county: "Linn", salesRep: "CH", customerMessage: "Thank you for your business!" }
+    }
+  );
+  const r = await price(d);
+  const p = buildEstimateProposalSnapshot(d, r, { quoteNumber: "ESF-LIS-000042-R2", estimateDate: "2026-10-06" });
+  assert.deepEqual(
+    p.lines.map((l) => [l.kind, l.item ?? "", l.description, l.amount ?? null]),
+    [
+      ["item", "Promo", "3 cm PROMO Granite/Quartz for KITCHEN", 2795],
+      ["note", "", "Eased Edges / NO Backsplash", null],
+      ["item", "Cutout", "Undermount Sink Cut Out (Std)", 200],
+      ["note", "", "COLOR OPTIONS : Prices Include Everything Listed Above", null],
+      ["note", "", "3 cm MQ Lux Aurum : $4,610 TOTAL", null]
+    ],
+    "single room → no room heading; internal-only $40 folds into the first item"
+  );
+  assert.equal(p.total, r.totals.total);
+  assert.deepEqual(p.header.billToLines, ["Jon <Sample>", "1 Main St", "Lisbon, IA 52253"]);
+  const html = renderEstimateProposalHtml(p);
+  assert.ok(html.includes("Jon &lt;Sample&gt;"), "customer text is escaped");
+  assert.ok(!html.includes("Internal adj"));
+  assert.ok(html.includes("ESF-LIS-000042-R2"));
+  assert.ok(html.includes("$2,995.00"));
+  assert.ok(html.includes("Eased Edges / NO Backsplash"));
+  assert.equal(buildEstimateProposalPdfFilename(p.header), "Elite Stone Fabrication Proposal - ESF-LIS-000042-R2.pdf");
+
+  const multi = buildEstimateProposalSnapshot(doc(ACCEPTANCE_ITEMS), await price(doc(ACCEPTANCE_ITEMS)), {});
+  assert.deepEqual(multi.lines.filter((l) => l.kind === "room").map((l) => l.description), ["Kitchen", "Primary Bath", "Additional items"]);
+  assert.equal(multi.header.quoteNumber, "");
+  assert.ok(renderEstimateProposalHtml(multi).includes("DRAFT"));
+});
+
+test("serializer emits tax-inclusive $5 line items, room rollups, proposal, and a reconciled v1 print snapshot", async () => {
   const d = doc([
     ...ACCEPTANCE_ITEMS,
-    { id: "int", roomId: "kitchen", itemType: "custom", inputs: { description: "Internal adj", qty: 1, unitPrice: 40, customerFacing: false } }
+    { id: "int", roomId: "kitchen", itemType: "custom", inputs: { description: "Internal adj", qty: 1, unitPrice: 40, customerFacing: false } },
+    { id: "note", roomId: "kitchen", itemType: "note", inputs: { text: "Eased edges" } }
   ]);
   const r = await price(d);
   const a = buildQuoteLibraryArtifacts(d, r, { quoteNumber: "ESF-DYER-000123" });
-  assert.equal(a.calc.lineItems.filter((l) => l.line_type === "estimate_item").length, 7);
-  assert.equal(a.calc.lineItems.at(-1).line_type, "use_tax");
+  assert.equal(a.calc.lineItems.length, 7, "notes are not Quote Library line items; no separate use tax line");
+  assert.ok(a.calc.lineItems.every((l) => l.line_type === "estimate_item"));
   assert.equal(round2(a.calc.lineItems.reduce((s, l) => s + l.line_subtotal, 0)), r.totals.total);
+  assert.equal(a.snapshotToStore.internal_ui.estimate_builder_proposal.total, r.totals.total);
+  assert.equal(a.proposal.header.quoteNumber, "ESF-DYER-000123");
   assert.equal(a.calc.totals.retail, r.totals.total);
   assert.deepEqual(
     a.saveBody.rooms.map((x) => [x.name, x.countertopSqft, x.backsplashSqft]),
     [["Kitchen", 48, 12], ["Primary Bath", 0, 0]]
   );
   assert.equal(a.snapshotToStore.quote_source, ESTIMATE_BUILDER_QUOTE_SOURCE);
-  assert.equal(a.snapshotToStore.estimate_builder.document.items.length, 7);
+  assert.equal(a.snapshotToStore.estimate_builder.document.items.length, 8);
   const ps = a.printSnapshot;
   assert.equal(ps.header.quoteNumber, "ESF-DYER-000123");
   assert.ok(printSnapshotSummaryRowsReconcile(ps));
   assert.equal(a.snapshotToStore.internal_ui.customer_display_total, ps.finalRounded);
-  assert.ok(ps.finalRounded >= r.totals.total, "customer rows round up to $5");
+  assert.equal(ps.finalRounded, r.totals.total, "lines are already $5 amounts, so the customer total equals the estimate total");
   assert.ok(!JSON.stringify(ps.display).includes("Internal adj"), "internal-only line hidden from customer");
   assert.equal(ps.display.preparedByDisplayName, "Chris Henely");
   assert.ok(ps.display.roomAreaPrintRows.find((x) => x.displayName === "Primary Bath").isVanity);
@@ -417,7 +532,7 @@ test("/price response adds the customer preview snapshot and production PDF file
   const draft = await buildEstimatePriceResponse({ document: d }, COLORS);
   assert.equal(draft.customerPreview.header.quoteNumber, "DRAFT");
   assert.equal(draft.pdfFilename, "Elite Stone Fabrication Estimate.pdf");
-  assert.equal(draft.customerPreview.finalRounded >= draft.totals.total, true);
+  assert.equal(draft.customerPreview.finalRounded, draft.totals.total);
   const saved = await buildEstimatePriceResponse({ document: d, quoteNumber: "ESF-DYER-000042" }, COLORS);
   assert.equal(saved.pdfFilename, "Elite Stone Fabrication Estimate - ESF-DYER-000042.pdf");
   assert.equal(saved.totals.total, draft.totals.total);

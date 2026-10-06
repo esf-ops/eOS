@@ -153,3 +153,20 @@ test("sortOrder stays dense after removals", () => {
   const doc = estimateReducer(acceptanceDoc(), { type: "remove_item", id: "bs" });
   assert.deepEqual(doc.items.map((i) => i.sortOrder), [0, 1, 2, 3]);
 });
+
+test("notes are text-only items placed after an anchor and moved like any line", () => {
+  const doc = run(
+    acceptanceDoc(),
+    { type: "add_item", spec: { id: "note", itemType: "note", roomId: "kitchen", inputs: { text: "Eased Edges / NO Backsplash" } }, afterId: "ct" },
+    { type: "move_item", id: "note", direction: "down" }
+  );
+  const note = doc.items.find((it) => it.id === "note")!;
+  assert.equal(note.pricingStrategy, "text");
+  assert.deepEqual(note.inputs, { text: "Eased Edges / NO Backsplash" });
+  assert.deepEqual(
+    groupItemsByRoom(doc)[0].items.map((it) => it.id),
+    ["ct", "bs", "note", "sink"]
+  );
+  assert.equal(emptyDocument().header.customerMessage, "");
+  assert.equal(emptyDocument().header.billToAddress, "");
+});

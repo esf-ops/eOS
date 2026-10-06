@@ -30,6 +30,7 @@ type Props = {
   onRememberMaterial: (id: string | null) => void;
   dispatch: (a: DocAction) => void;
   onClose: () => void;
+  onAddAnother: () => void;
   readOnly: boolean;
 };
 
@@ -52,10 +53,23 @@ const TITLES: Record<EstimateItem["itemType"], string> = {
   outlet: "Electrical outlet cutout",
   edge: "Edge / fabrication upgrade",
   service: "Trip / service",
-  custom: "Custom item"
+  custom: "Custom item",
+  note: "Note"
 };
 
-export default function ItemEditor({ item, priced, pricingPending, catalog, doc, recentMaterials, onRememberMaterial, dispatch, onClose, readOnly }: Props) {
+export default function ItemEditor({
+  item,
+  priced,
+  pricingPending,
+  catalog,
+  doc,
+  recentMaterials,
+  onRememberMaterial,
+  dispatch,
+  onClose,
+  onAddAnother,
+  readOnly
+}: Props) {
   const panelRef = useRef<HTMLElement>(null);
   const setInputs = (inputs: Record<string, unknown>) => dispatch({ type: "update_item", id: item.id, patch: { inputs }, now: new Date().toISOString() });
   const setStrategy = (pricingStrategy: PricingStrategy) =>
@@ -104,6 +118,15 @@ export default function ItemEditor({ item, priced, pricingPending, catalog, doc,
 
           <ItemFields item={item} catalog={catalog} doc={doc} recentMaterials={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} />
 
+          {item.itemType !== "note" ? (
+            <TextField
+              label="Description on proposal"
+              value={item.label}
+              placeholder={priced?.description || itemFallbackLabel(item)}
+              onChange={(v) => dispatch({ type: "update_item", id: item.id, patch: { label: v } })}
+            />
+          ) : null}
+
           <label className="eb-field">
             <span>Room</span>
             <select value={item.roomId ?? ""} onChange={(e) => dispatch({ type: "set_item_room", id: item.id, roomId: e.target.value || null })}>
@@ -116,9 +139,12 @@ export default function ItemEditor({ item, priced, pricingPending, catalog, doc,
             </select>
           </label>
 
-          <PricingPanel priced={priced} pending={pricingPending} />
-
-          <Advanced item={item} setInputs={setInputs} dispatch={dispatch} priced={priced} />
+          {item.itemType !== "note" ? (
+            <>
+              <PricingPanel priced={priced} pending={pricingPending} />
+              <Advanced item={item} setInputs={setInputs} priced={priced} />
+            </>
+          ) : null}
         </fieldset>
 
         <div className="eb-drawer-foot">
@@ -144,6 +170,11 @@ export default function ItemEditor({ item, priced, pricingPending, catalog, doc,
             </>
           ) : null}
           <span className="eb-spacer" />
+          {!readOnly ? (
+            <button type="button" className="eb-btn" onClick={onAddAnother} title="Close this item and add the next one to the same room">
+              Save &amp; add another
+            </button>
+          ) : null}
           <button type="button" className="eb-btn eb-btn-primary" onClick={onClose}>
             Done
           </button>
@@ -195,6 +226,13 @@ function ItemFields({
       return <ServiceFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} />;
     case "custom":
       return <CustomFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} />;
+    case "note":
+      return (
+        <label className="eb-field">
+          <span>Note (prints on the proposal, no price)</span>
+          <textarea rows={4} maxLength={1000} value={item.inputs.text} data-autofocus="" onChange={(e) => setInputs({ text: e.target.value })} />
+        </label>
+      );
   }
 }
 
@@ -550,6 +588,13 @@ function PricingPanel({ priced, pending }: { priced: PricedItem | null; pending:
         </span>
         <span className="eb-price-amount">{priced.status === "priced" ? formatMoney(priced.amount) : "—"}</span>
       </div>
+      {priced.status === "priced" && (priced.useTaxAmount > 0 || priced.roundingAdjustment !== 0) ? (
+        <p className="eb-price-math">
+          {formatMoney(priced.exactAmount)}
+          {priced.useTaxAmount > 0 ? ` + ${formatMoney(priced.useTaxAmount)} use tax` : ""}
+          {priced.roundingAdjustment !== 0 ? ` → rounded up to ${formatMoney(priced.amount)}` : ""}
+        </p>
+      ) : null}
       {priced.warnings.length ? (
         <ul className="eb-warning-list">
           {priced.warnings.map((w) => (
@@ -563,17 +608,7 @@ function PricingPanel({ priced, pending }: { priced: PricedItem | null; pending:
   );
 }
 
-function Advanced({
-  item,
-  priced,
-  setInputs,
-  dispatch
-}: {
-  item: EstimateItem;
-  priced: PricedItem | null;
-  setInputs: SetInputs;
-  dispatch: (a: DocAction) => void;
-}) {
+function Advanced({ item, priced, setInputs }: { item: EstimateItem; priced: PricedItem | null; setInputs: SetInputs }) {
   const [open, setOpen] = useState(false);
   let extra: ReactNode = null;
   if (item.itemType === "countertop" && item.pricingStrategy === "out_of_collection") {
@@ -635,17 +670,11 @@ function Advanced({
       </button>
       {open ? (
         <div className="eb-advanced-body">
-          <TextField
-            label="Line label override (internal)"
-            value={item.label}
-            placeholder={priced?.description || itemFallbackLabel(item)}
-            onChange={(v) => dispatch({ type: "update_item", id: item.id, patch: { label: v } })}
-          />
           {extra}
           {priced?.details.length ? (
             <dl className="eb-details">
-              {priced.details.map((d) => (
-                <div key={d.label}>
+              {priced.details.map((d, idx) => (
+                <div key={`${d.label}-${idx}`}>
                   <dt>{d.label}</dt>
                   <dd>{d.value}</dd>
                 </div>

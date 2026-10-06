@@ -6,6 +6,8 @@
  * POST /api/estimate-builder/save         save to Quote Library (quote_source estimate_builder)
  * GET  /api/estimate-builder/quotes       recent current-revision Estimate Builder quotes (org-scoped)
  * GET  /api/estimate-builder/quotes/:id   reopen a saved estimate document
+ * POST /api/estimate-builder/proposal/preview         proposal HTML for the open document (not persisted)
+ * GET  /api/estimate-builder/quotes/:id/proposal      saved proposal snapshot → PDF (default) or ?format=html
  */
 
 import express from "express";
@@ -20,6 +22,12 @@ import { buildEstimateBuilderCatalog } from "./estimateBuilderCatalog.mjs";
 import { normalizeEstimateDocument } from "./estimateBuilderContracts.mjs";
 import { priceEstimateDocument } from "./estimateBuilderPricing.mjs";
 import { ESTIMATE_BUILDER_QUOTE_SOURCE, buildCustomerPrintSnapshot } from "./estimateBuilderQuoteLibrary.mjs";
+import {
+  ESTIMATE_PROPOSAL_VERSION,
+  buildEstimateProposalPdfFilename,
+  buildEstimateProposalSnapshot,
+  renderEstimateProposalHtml
+} from "./estimateBuilderProposal.mjs";
 import { estimateDocumentFromQuoteRow, fetchScopedEstimateBuilderQuote, processEstimateBuilderSave } from "./estimateBuilderSave.mjs";
 
 const HEAD = "estimate_builder";
@@ -39,6 +47,24 @@ export async function buildEstimatePriceResponse(body, colors) {
     ...pricing,
     customerPreview: buildCustomerPrintSnapshot(doc, pricing, { quoteNumber: quoteNumber || "DRAFT" }),
     pdfFilename: buildCustomerEstimatePdfFilename(quoteNumber, String(body?.revisionLabel ?? "").trim() || null)
+  };
+}
+
+/**
+ * `/proposal/preview` response: proposal HTML for the open (possibly unsaved) document. Display only.
+ * @param {Record<string, unknown>|undefined} body
+ * @param {Array<Record<string, unknown>>} colors
+ */
+export async function buildEstimateProposalPreviewResponse(body, colors) {
+  const doc = normalizeEstimateDocument(body?.document);
+  const pricing = await priceEstimateDocument(doc, { materialColors: colors });
+  const proposal = buildEstimateProposalSnapshot(doc, pricing, { quoteNumber: String(body?.quoteNumber ?? "").trim() });
+  return {
+    ok: true,
+    html: renderEstimateProposalHtml(proposal),
+    total: proposal.total,
+    skippedIncomplete: proposal.skippedIncomplete,
+    filename: buildEstimateProposalPdfFilename(proposal.header)
   };
 }
 
@@ -174,6 +200,7 @@ export function attachEstimateBuilderRoutes(app, deps) {
       const document = estimateDocumentFromQuoteRow(row);
       if (!document) return res.status(422).json({ ok: false, error: "Saved quote has no Estimate Builder document." });
       const { colors } = await materialColors();
+      const proposal = row.calculation_snapshot?.internal_ui?.estimate_builder_proposal ?? null;
       res.json({
         ok: true,
         quote: {
@@ -193,9 +220,69 @@ export function attachEstimateBuilderRoutes(app, deps) {
           grand_total: row.grand_total != null ? Number(row.grand_total) : null,
           customer_display_total: row.calculation_snapshot?.internal_ui?.customer_display_total ?? null,
           customer_print_snapshot: row.calculation_snapshot?.internal_ui?.customer_estimate_print_snapshot ?? null,
-          pdf_filename: buildCustomerEstimatePdfFilename(String(row.quote_number ?? ""), row.revision_label ?? null)
+          pdf_filename: buildCustomerEstimatePdfFilename(String(row.quote_number ?? ""), row.revision_label ?? null),
+          has_proposal: Boolean(proposal),
+          proposal_total: proposal ? Number(proposal.total) : null,
+          proposal_filename: proposal ? buildEstimateProposalPdfFilename(proposal.header) : null
         }
       });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** Live proposal preview for the open (possibly unsaved) document. Display only; never persisted. */
+  app.post("/api/estimate-builder/proposal/preview", ...stack, jsonParser, async (req, res) => {
+    try {
+      const { colors } = await materialColors();
+      res.json(await buildEstimateProposalPreviewResponse(req.body, colors));
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+
+  /** Saved proposal (from the snapshot stored at save time) as HTML or PDF. */
+  app.get("/api/estimate-builder/quotes/:id/proposal", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const orgId = orgCtx.organizationId ? String(orgCtx.organizationId) : null;
+      const hasOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
+      const row = await fetchScopedEstimateBuilderQuote(db, String(req.params.id), orgId, hasOrg);
+      if (!row) return res.status(404).json({ ok: false, error: "Not found" });
+      const proposal = row.calculation_snapshot?.internal_ui?.estimate_builder_proposal;
+      if (!proposal || proposal.version !== ESTIMATE_PROPOSAL_VERSION) {
+        return res.status(409).json({ ok: false, error: "This quote was saved before proposals existed. Open it and save again to generate one." });
+      }
+      const html = renderEstimateProposalHtml(proposal);
+      const filename = buildEstimateProposalPdfFilename(proposal.header);
+      if (String(req.query.format ?? "pdf") === "html") {
+        return res.json({ ok: true, html, total: proposal.total, filename });
+      }
+      const { renderHtmlToPdfBytes } = await import("../quoteDelivery/customerEstimatePdfBuilder.js");
+      const pdf = await renderHtmlToPdfBytes(html);
+      if (!pdf.ok) {
+        console.warn("[estimate-builder] proposal pdf failed", { quoteId: row.id, reason: pdf.reason });
+        return res.status(503).json({ ok: false, error: "PDF generation is unavailable right now.", reason: pdf.reason });
+      }
+      await logAction({
+        user: req.user,
+        head: HEAD,
+        actionType: "estimate_builder_proposal_pdf",
+        entityType: "quote",
+        entityId: row.id,
+        metadata: {
+          quote_number: row.quote_number,
+          proposal_total: proposal.total,
+          byte_length: pdf.buffer.length,
+          organization_id: orgCtx.organizationId ?? null
+        },
+        req
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/"/g, "")}"`);
+      res.setHeader("Cache-Control", "no-store");
+      res.send(pdf.buffer);
     } catch (e) {
       fail(res, e);
     }

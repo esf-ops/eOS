@@ -21,12 +21,16 @@ export default function TotalsSummary({
       </div>
       <dl>
         <div>
-          <dt>Subtotal</dt>
+          <dt>Items before tax</dt>
           <dd>{formatMoney(totals?.subtotal ?? 0)}</dd>
         </div>
         <div>
-          <dt title="Applies to countertop and backsplash material">Use tax{totals ? ` (${totals.useTax.percent}%)` : ""}</dt>
+          <dt title="Added to each countertop and backsplash material line">Use tax{totals ? ` (${totals.useTax.percent}%, in lines)` : ""}</dt>
           <dd>{formatMoney(totals?.useTax.amount ?? 0)}</dd>
+        </div>
+        <div>
+          <dt title="Each line is rounded up to the next $5">Rounding to $5</dt>
+          <dd>{formatMoney(totals?.roundingAdjustment ?? 0)}</dd>
         </div>
         <div className="eb-totals-grand">
           <dt>Total</dt>
@@ -36,6 +40,7 @@ export default function TotalsSummary({
       {totals ? (
         <p className="eb-muted eb-small">
           {totals.pricedCount} of {totals.itemCount} item{totals.itemCount === 1 ? "" : "s"} priced
+          {totals.noteCount ? ` · ${totals.noteCount} note${totals.noteCount === 1 ? "" : "s"}` : ""}
           {totals.qualifyingKitchenCounterSf ? ` · ${totals.qualifyingKitchenCounterSf} countertop sf` : ""}
         </p>
       ) : null}

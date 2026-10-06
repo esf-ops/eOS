@@ -107,6 +107,10 @@ export default function EstimateHeader({
                   <Field label="Email" type="email" value={h.customerEmail} onChange={(v) => set({ customerEmail: v })} />
                   <Field label="Phone" type="tel" value={h.customerPhone} onChange={(v) => set({ customerPhone: v })} />
                 </div>
+                <label className="eb-field">
+                  <span>Bill-to address (proposal &ldquo;Quote For&rdquo; box — defaults to the project address)</span>
+                  <textarea rows={2} value={h.billToAddress} onChange={(e) => set({ billToAddress: e.target.value })} />
+                </label>
               </fieldset>
               <fieldset className="eb-fieldset">
                 <legend>Project</legend>
@@ -116,6 +120,10 @@ export default function EstimateHeader({
                   <Field label="City" value={h.city} onChange={(v) => set({ city: v })} />
                   <Field label="State" value={h.state} onChange={(v) => set({ state: v })} />
                   <Field label="ZIP" value={h.zip} onChange={(v) => set({ zip: v })} />
+                </div>
+                <div className="eb-grid-2">
+                  <Field label="County" value={h.county} onChange={(v) => set({ county: v })} />
+                  <Field label="P.O. No." value={h.poNumber} onChange={(v) => set({ poNumber: v })} />
                 </div>
               </fieldset>
               <fieldset className="eb-fieldset">
@@ -128,8 +136,13 @@ export default function EstimateHeader({
               </fieldset>
               <fieldset className="eb-fieldset">
                 <legend>Notes</legend>
+                <Field
+                  label="Customer message (bottom of the proposal, e.g. “Final bill — due on receipt. Thank you for your business!”)"
+                  value={h.customerMessage}
+                  onChange={(v) => set({ customerMessage: v })}
+                />
                 <label className="eb-field">
-                  <span>Customer-facing notes</span>
+                  <span>Customer-facing notes (below the proposal total)</span>
                   <textarea rows={3} value={h.customerNotes} onChange={(e) => set({ customerNotes: e.target.value })} />
                 </label>
                 <label className="eb-field">

@@ -8,30 +8,49 @@
  * uses). Out-of-Collection countertops run through the production Custom Quote calculator.
  * This module never defines a $/sf, add-on, vanity, or tax constant.
  *
- * Material use tax is aggregated at estimate level with the production Internal Estimate policy
- * (`computeInternalEstimateMaterialUseTaxAmounts`) over Elite countertop + backsplash/FHB material.
- * Vanity side splash carries its own use tax inside the vanity line, as `calculateVanities` does.
+ * Line amounts (owner rule, 2026-10-06): material use tax (Internal Estimate policy percent) is added to
+ * each Elite countertop / backsplash line — e.g. (60 sf × $45) × 1.02 — and every engine-priced line is
+ * rounded UP to the next $5 (credits stay exact). The estimate total is the sum of those line amounts.
+ * Vanity side splash already carries its use tax inside the vanity line, as `calculateVanities` does.
+ * Exact engine amounts stay on each line (`exactAmount`) for audit.
  */
 
 import { calculateQuote } from "../quotes/quoteCalculator.js";
 import { calculateCustomQuote, normalizeCustomQuoteInput, validateCustomQuoteInput } from "../quotes/customQuoteCalculator.js";
 import { MULTIPLIER_WARN_THRESHOLD, UTILIZATION_WARN_PERCENT } from "../quotes/customQuotePricingResolver.js";
-import {
-  computeInternalEstimateMaterialUseTaxAmounts,
-  resolveInternalEstimateMaterialTaxPolicy
-} from "../quotes/internalEstimateMaterialTaxPolicy.js";
+import { resolveInternalEstimateMaterialTaxPolicy } from "../quotes/internalEstimateMaterialTaxPolicy.js";
 import {
   VANITY_PROGRAM_2026_BY_CODE,
   VANITY_PROGRAM_YEAR,
   defaultVanityKitchenTier,
-  priceVanityProgram2026FromPayload,
-  roundCustomerDisplayVanity
+  priceVanityProgram2026FromPayload
 } from "../quotes/vanityProgram2026.js";
 import { STANDARD_VANITY_DEPTH_IN, vanitySideSplashSfPerPiece } from "../quotes/vanitySideSplash.js";
 import { ESTIMATE_ITEM_TYPES, VANITY_BOWL_CODES } from "./estimateBuilderContracts.mjs";
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** Round a positive dollar amount up to the next $5 (cent-safe). */
+export function ceilToFive(n) {
+  const cents = Math.round((Number(n) || 0) * 100);
+  if (cents <= 0) return round2(cents / 100);
+  return Math.ceil(cents / 500) * 5;
+}
+
+/** Largest-remainder split of a $5-multiple target across rows in $5 units; rows sum exactly to the target. */
+function allocateFives(exacts, target) {
+  const units = Math.round(target / 5);
+  const sum = exacts.reduce((a, b) => a + Math.max(0, b), 0);
+  if (!exacts.length || sum <= 0 || units <= 0) return exacts.map(() => 0);
+  const raw = exacts.map((e) => (Math.max(0, e) / sum) * units);
+  const floors = raw.map((r) => Math.floor(r));
+  let deficit = units - floors.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => ({ i, rem: r - floors[i] })).sort((a, b) => b.rem - a.rem || a.i - b.i);
+  const out = floors.map((f) => f * 5);
+  for (let k = 0; deficit > 0; k++, deficit--) out[order[k % order.length].i] += 5;
+  return out;
 }
 
 const money = (n) =>
@@ -113,6 +132,9 @@ function baseResult(item) {
     unit: "ea",
     rate: 0,
     amount: 0,
+    exactAmount: 0,
+    useTaxAmount: 0,
+    roundingAdjustment: 0,
     taxBase: { countertop: 0, backsplash: 0 },
     /** @type {ItemWarning[]} */
     warnings: [],
@@ -166,7 +188,7 @@ async function priceEliteAreaGroups(items, ctx) {
 
   const shares = new Map();
   await Promise.all(
-    [...groups.values()].map(async (g) => {
+    [...groups.entries()].map(async ([key, g]) => {
       const exactSf = round2(g.items.reduce((s, it) => s + Number(it.inputs.sqft), 0));
       const room = { name: "Item", roomType: "Kitchen", materialGroup: g.color.priceGroupLabel, materialColor: g.color.colorName };
       if (g.kind === "countertop") room.countertopSqft = exactSf;
@@ -187,6 +209,7 @@ async function priceEliteAreaGroups(items, ctx) {
           quantity,
           rate,
           amount,
+          groupKey: key,
           carriesRounding: last,
           groupExactSf: exactSf,
           groupChargeableSf: chargeableSf,
@@ -244,8 +267,7 @@ async function priceEliteCountertop(item, ctx, res) {
     { label: "Pricing channel", value: ctx.channel === "direct" ? "Direct" : "Wholesale" },
     { label: "Rate", value: `${money(res.rate)} / sf` },
     { label: "Entered sf", value: String(sqft) },
-    ...areaShareDetails(share, "countertop"),
-    { label: "Material use tax", value: "Applied in estimate totals" }
+    ...areaShareDetails(share, "countertop")
   );
   return res;
 }
@@ -337,8 +359,7 @@ async function priceBacksplash(item, ctx, res) {
     { label: "Price group", value: color.priceGroupLabel },
     { label: "Rate", value: `${money(res.rate)} / sf` },
     { label: "Entered sf", value: String(sqft) },
-    ...areaShareDetails(share, "backsplash / full-height backsplash"),
-    { label: "Material use tax", value: "Applied in estimate totals" }
+    ...areaShareDetails(share, "backsplash / full-height backsplash")
   );
   return res;
 }
@@ -397,7 +418,6 @@ async function priceVanity(item, ctx, res) {
     { label: "Sink", value: `${VANITY_SINK_LABELS[i.sinkType] ?? i.sinkType}${program.sinkUpgradeTotal ? ` (+${money(program.sinkUpgradeTotal)} upgrade)` : ""}` },
     { label: "Extra trips", value: program.extraTripsTotal ? `${i.extraTrips} · ${money(program.extraTripsTotal)}` : "None" },
     { label: "Side splash", value: i.sideSplashQty ? `${i.sideSplashQty} · ${sideSplashSf} sf @ ${materialGroup} · ${money(sideSplashTotal)} incl. use tax` : "None" },
-    { label: "Customer display (nearest $5)", value: money(roundCustomerDisplayVanity(program.exactTotal)) },
     { label: "Material use tax", value: i.sideSplashQty ? "Included in the side splash line, as production prices it (program price is tax-exempt)" : "Not applied (Vanity Program)" }
   );
   if (!color) res.details.push({ label: "Material", value: "Not selected — side splash priced at Group Promo" });
@@ -560,6 +580,12 @@ export async function priceEstimateItem(item, ctx) {
         return await priceService(item, ctx, res);
       case "custom":
         return await priceCustom(item, ctx, res);
+      case "note":
+        res.status = "note";
+        res.description = item.inputs.text || "";
+        res.unit = "";
+        res.pricingSource = { engine: "", reference: "Description-only line" };
+        return res;
       default:
         return incomplete(res, "unsupported_item", `Unsupported item type ${item.itemType}.`);
     }
@@ -569,6 +595,49 @@ export async function priceEstimateItem(item, ctx) {
     res.warnings.push({ code: "pricing_error", severity: "block", message: String(e?.message || e) });
     return res;
   }
+}
+
+/**
+ * Final line amounts. `amount` on entry is the exact engine amount; on exit it is the quoted line amount:
+ * exact + material use tax (Elite countertop/backsplash only), rounded up to the next $5. Several items in
+ * one room + material share a single round-up (the group total is rounded once and split in $5 units).
+ * Credits (negative lines) stay exact. Mutates `items`.
+ */
+export function applyLineAmounts(items, areaShares, useTaxPercent) {
+  const pct = Number(useTaxPercent) || 0;
+  const groups = new Map();
+  for (const r of items) {
+    r.exactAmount = round2(r.amount);
+    r.useTaxAmount = 0;
+    r.roundingAdjustment = 0;
+    if (r.status !== "priced") continue;
+    const taxable = round2(r.taxBase.countertop + r.taxBase.backsplash);
+    r.useTaxAmount = taxable > 0 ? round2((taxable * pct) / 100) : 0;
+    const withTax = round2(r.exactAmount + r.useTaxAmount);
+    const share = areaShares.get(r.itemId);
+    if (share && share.groupItemCount > 1) {
+      if (!groups.has(share.groupKey)) groups.set(share.groupKey, []);
+      groups.get(share.groupKey).push({ r, withTax });
+      continue;
+    } else {
+      r.amount = ceilToFive(withTax);
+    }
+    r.roundingAdjustment = round2(r.amount - withTax);
+  }
+  for (const members of groups.values()) {
+    const target = ceilToFive(members.reduce((s, m) => s + m.withTax, 0));
+    const split = allocateFives(members.map((m) => m.withTax), target);
+    members.forEach((m, idx) => {
+      m.r.amount = split[idx];
+      m.r.roundingAdjustment = round2(m.r.amount - m.withTax);
+    });
+  }
+  for (const r of items) {
+    if (r.status !== "priced") continue;
+    if (r.useTaxAmount > 0) r.details.push({ label: "Material use tax", value: `${pct}% added to this line · ${money(r.useTaxAmount)}` });
+    if (r.amount > 0) r.details.push({ label: "Line amount", value: `${money(r.exactAmount + r.useTaxAmount)} → ${money(r.amount)} (rounded up to the next $5)` });
+  }
+  return items;
 }
 
 /**
@@ -603,21 +672,28 @@ export async function priceEstimateDocument(doc, deps) {
   ctx.areaShares = await priceEliteAreaGroups(doc.items, ctx);
   const items = await Promise.all(doc.items.map((it) => priceEstimateItem(it, ctx)));
 
-  const priced = items.filter((r) => r.status === "priced");
-  const subtotal = round2(priced.reduce((s, r) => s + r.amount, 0));
-  const ctBase = round2(priced.reduce((s, r) => s + r.taxBase.countertop, 0));
-  const bsBase = round2(priced.reduce((s, r) => s + r.taxBase.backsplash, 0));
   const policy = resolveInternalEstimateMaterialTaxPolicy();
-  const tax = computeInternalEstimateMaterialUseTaxAmounts(ctBase, bsBase, policy);
-  const total = round2(subtotal + tax.totalMaterialUseTaxAmount);
+  applyLineAmounts(items, ctx.areaShares, policy.materialUseTaxPercent);
 
+  const priced = items.filter((r) => r.status === "priced");
+  const subtotal = round2(priced.reduce((s, r) => s + r.exactAmount, 0));
+  const sumOf = (pick) => round2(priced.reduce((s, r) => s + pick(r), 0));
+  const ctBase = sumOf((r) => r.taxBase.countertop);
+  const bsBase = sumOf((r) => r.taxBase.backsplash);
+  const ctTax = sumOf((r) => (r.taxBase.countertop > 0 ? r.useTaxAmount : 0));
+  const bsTax = sumOf((r) => (r.taxBase.backsplash > 0 ? r.useTaxAmount : 0));
+  const useTaxAmount = round2(ctTax + bsTax);
+  const exactTotal = round2(subtotal + useTaxAmount);
+  const total = sumOf((r) => r.amount);
+
+  const pricedItems = items.filter((r) => r.status !== "note");
   const blockers = [];
-  if (!doc.items.length) blockers.push("Add at least one item.");
-  const blocked = items.filter((r) => r.status !== "priced");
+  if (!pricedItems.length) blockers.push("Add at least one priced item.");
+  const blocked = pricedItems.filter((r) => r.status !== "priced");
   if (blocked.length) blockers.push(`${blocked.length} item${blocked.length === 1 ? "" : "s"} still need${blocked.length === 1 ? "s" : ""} information.`);
   if (!doc.header.customerName && !doc.header.accountName) blockers.push("Add a customer.");
 
-  for (const r of items) {
+  for (const r of pricedItems) {
     const def = ESTIMATE_ITEM_TYPES[r.itemType];
     r.accounting = {
       item: def?.accountingItem ?? "Custom",
@@ -638,16 +714,20 @@ export async function priceEstimateDocument(doc, deps) {
       useTax: {
         percent: policy.materialUseTaxPercent,
         scope: policy.materialUseTaxScope,
+        appliedTo: "material_lines",
         countertopBase: ctBase,
         backsplashBase: bsBase,
-        countertopAmount: tax.countertopMaterialUseTaxAmount,
-        backsplashAmount: tax.backsplashMaterialUseTaxAmount,
-        amount: tax.totalMaterialUseTaxAmount
+        countertopAmount: ctTax,
+        backsplashAmount: bsTax,
+        amount: useTaxAmount
       },
+      exactTotal,
+      roundingAdjustment: round2(total - exactTotal),
       total,
       qualifyingKitchenCounterSf,
-      itemCount: items.length,
-      pricedCount: priced.length
+      itemCount: pricedItems.length,
+      pricedCount: priced.length,
+      noteCount: items.length - pricedItems.length
     },
     readiness: { ready: blockers.length === 0, blockers },
     catalogSize: catalog.size

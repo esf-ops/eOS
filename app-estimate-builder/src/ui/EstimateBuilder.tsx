@@ -62,6 +62,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
   const [notice, setNotice] = useState<{ tone: "ok" | "warn" | "danger"; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addMenu, setAddMenu] = useState<{ roomId: string | null } | null>(null);
+  const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [openList, setOpenList] = useState<SavedQuoteSummary[] | null>(null);
   const [recentMaterials, setRecentMaterials] = useState<string[]>(loadRecentMaterials);
@@ -145,7 +146,17 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
         }
       });
       setAddMenu(null);
-      setEditingId(id);
+      if (choice.itemType === "note") setFocusNoteId(id);
+      else setEditingId(id);
+    },
+    [dispatch]
+  );
+
+  const addNoteBelow = useCallback(
+    (roomId: string | null, afterId: string) => {
+      const id = newId();
+      dispatch({ type: "add_item", spec: { id, itemType: "note", roomId, now: new Date().toISOString() }, afterId });
+      setFocusNoteId(id);
     },
     [dispatch]
   );
@@ -413,6 +424,9 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
                     dispatch={dispatch}
                     onEdit={setEditingId}
                     onAddItem={(roomId) => setAddMenu({ roomId })}
+                    onQuickAdd={addItem}
+                    onAddNoteBelow={addNoteBelow}
+                    focusNoteId={focusNoteId}
                     readOnly={readOnly}
                   />
                 ))}
@@ -483,6 +497,10 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           onRememberMaterial={rememberMaterial}
           dispatch={dispatch}
           onClose={() => setEditingId(null)}
+          onAddAnother={() => {
+            setEditingId(null);
+            setAddMenu({ roomId: editingItem.roomId });
+          }}
           readOnly={readOnly}
         />
       ) : null}
@@ -492,6 +510,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
       {reviewOpen ? (
         <Suspense fallback={<div className="eb-review"><p className="eb-page eb-muted">Loading review…</p></div>}>
         <ReviewPanel
+          token={token}
           doc={doc}
           pricing={pricing.data}
           pricingPending={pricing.pending}

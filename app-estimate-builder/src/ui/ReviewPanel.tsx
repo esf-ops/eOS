@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
-import CustomerEstimateDocument from "@quote-lib/customerEstimate/CustomerEstimateDocument";
-import { snapshotToDocumentProps } from "@quote-lib/customerEstimate/documentProps";
+import { useEffect, useMemo, useState } from "react";
+import { ApiError, apiGet, apiGetBlob, apiPost } from "../lib/api";
 import { groupItemsByRoom } from "../lib/estimateDocument";
-import type { EstimateDocument, EstimatePricing, PricedItem, SavedPrint, SaveResult } from "../lib/estimateTypes";
+import type { EstimateDocument, EstimatePricing, PricedItem, ProposalPreview, SavedPrint, SaveResult } from "../lib/estimateTypes";
 import type { SavedRef } from "./EstimateBuilder";
 import { itemFallbackLabel } from "./RoomSection";
 import { formatMoney, formatQty } from "./format";
@@ -13,7 +12,10 @@ const FINAL_STATUSES = [
   { value: "sent", label: "Sent to customer" }
 ];
 
+type ProposalState = { html: string; total: number | null; filename: string; fromSaved: boolean; error: string; loading: boolean };
+
 export default function ReviewPanel({
+  token,
   doc,
   pricing,
   pricingPending,
@@ -25,11 +27,12 @@ export default function ReviewPanel({
   onEditItem,
   onFinalize
 }: {
+  token: string;
   doc: EstimateDocument;
   pricing: EstimatePricing | null;
   pricingPending: boolean;
   saved: SavedRef | null;
-  /** Persisted customer snapshot; null when there are unsaved changes. */
+  /** What Brain persisted; null when there are unsaved changes. */
   savedPrint: SavedPrint | null;
   saving: boolean;
   canSave: boolean;
@@ -37,32 +40,67 @@ export default function ReviewPanel({
   onEditItem: (id: string) => void;
   onFinalize: (status: string) => Promise<SaveResult | null>;
 }) {
-  const [tab, setTab] = useState<"internal" | "customer">("internal");
+  const [tab, setTab] = useState<"internal" | "proposal">("internal");
   const [status, setStatus] = useState(saved?.status && saved.status !== "draft" ? saved.status : "testing_review");
+  const [proposal, setProposal] = useState<ProposalState>({ html: "", total: null, filename: "", fromSaved: false, error: "", loading: false });
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   const pricedById = useMemo(() => new Map((pricing?.items ?? []).map((p) => [p.itemId, p])), [pricing]);
   const groups = useMemo(() => groupItemsByRoom(doc), [doc]);
-  const fromSaved = Boolean(savedPrint?.customer_print_snapshot);
-  const printSource = fromSaved ? savedPrint!.customer_print_snapshot : pricing?.customerPreview;
-  const pdfFilename = fromSaved ? savedPrint!.pdf_filename : pricing?.pdfFilename;
-  const docProps = useMemo(() => (printSource ? snapshotToDocumentProps(printSource) : null), [printSource]);
-  const customerTotal = docProps?.customerDisplay.finalRounded ?? null;
   const blockers = pricing?.readiness.blockers ?? [];
   const needsReady = status !== "draft";
+  const savedProposalReady = Boolean(saved && savedPrint?.has_proposal);
 
-  const print = () => {
-    const previous = document.title;
-    if (pdfFilename) document.title = pdfFilename.replace(/\.pdf$/i, "");
-    const restore = () => {
-      document.title = previous;
-      window.removeEventListener("afterprint", restore);
+  // Saved + clean → the stored proposal snapshot; otherwise a live preview of the open document.
+  useEffect(() => {
+    if (tab !== "proposal") return;
+    let cancelled = false;
+    setProposal((p) => ({ ...p, loading: true, error: "" }));
+    const load = savedProposalReady
+      ? apiGet<ProposalPreview>(`/api/estimate-builder/quotes/${encodeURIComponent(saved!.quoteId)}/proposal?format=html`, token)
+      : apiPost<ProposalPreview>("/api/estimate-builder/proposal/preview", token, { document: doc, quoteNumber: saved?.quoteNumber ?? "" });
+    load
+      .then((r) => !cancelled && setProposal({ html: r.html, total: r.total, filename: r.filename, fromSaved: savedProposalReady, error: "", loading: false }))
+      .catch((e) => !cancelled && setProposal((p) => ({ ...p, loading: false, error: e instanceof ApiError ? e.message : String(e) })));
+    return () => {
+      cancelled = true;
     };
-    window.addEventListener("afterprint", restore);
-    window.print();
+    // Re-render the preview when Brain re-prices the document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, savedProposalReady, saved?.quoteId, pricing, token]);
+
+  const downloadPdf = async () => {
+    if (!saved || !savedProposalReady) return;
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const blob = await apiGetBlob(`/api/estimate-builder/quotes/${encodeURIComponent(saved.quoteId)}/proposal?format=pdf`, token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = savedPrint?.proposal_filename || "Elite Stone Fabrication Proposal.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(false);
+    }
   };
+
+  const pdfTitle = !saved
+    ? "Save the estimate first — the PDF is generated from the saved quote"
+    : !savedPrint
+      ? "Save your changes first — the PDF matches the saved quote"
+      : !savedPrint.has_proposal
+        ? "Save once more to generate the proposal for this quote"
+        : "Download the proposal PDF to attach to an email";
 
   return (
     <div className="eb-review" role="dialog" aria-modal="true" aria-label="Review estimate">
-      <div className="eb-review-bar eb-no-print">
+      <div className="eb-review-bar">
         <button type="button" className="eb-btn" onClick={onClose}>
           ← Back to builder
         </button>
@@ -70,14 +108,14 @@ export default function ReviewPanel({
           <button type="button" role="tab" aria-selected={tab === "internal"} className={tab === "internal" ? "is-active" : ""} onClick={() => setTab("internal")}>
             Internal review
           </button>
-          <button type="button" role="tab" aria-selected={tab === "customer"} className={tab === "customer" ? "is-active" : ""} onClick={() => setTab("customer")}>
-            Customer estimate
+          <button type="button" role="tab" aria-selected={tab === "proposal"} className={tab === "proposal" ? "is-active" : ""} onClick={() => setTab("proposal")}>
+            Proposal
           </button>
         </div>
         <span className="eb-spacer" />
         {pricingPending ? <span className="eb-muted eb-small">Pricing…</span> : null}
-        <button type="button" className="eb-btn" onClick={print} disabled={!docProps || (!fromSaved && pricingPending)}>
-          Print / save PDF
+        <button type="button" className="eb-btn" onClick={() => void downloadPdf()} disabled={!savedProposalReady || downloading} title={pdfTitle}>
+          {downloading ? "Preparing PDF…" : "Download PDF"}
         </button>
         <select className="eb-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status on save">
           {FINAL_STATUSES.map((s) => (
@@ -97,7 +135,8 @@ export default function ReviewPanel({
         </button>
       </div>
 
-      <div className="eb-review-body eb-no-print">
+      <div className="eb-review-body">
+        {downloadError ? <div className="eb-banner eb-banner-danger">PDF download failed: {downloadError}</div> : null}
         {blockers.length ? (
           <div className="eb-banner eb-banner-warn">
             <strong>Before finalizing:</strong>
@@ -119,7 +158,9 @@ export default function ReviewPanel({
                   <th>Item</th>
                   <th className="num">Qty</th>
                   <th className="num">Rate</th>
-                  <th className="num">Amount</th>
+                  <th className="num">Before tax</th>
+                  <th className="num">Use tax</th>
+                  <th className="num">Line ($5)</th>
                   <th>Notes</th>
                 </tr>
               </thead>
@@ -131,48 +172,42 @@ export default function ReviewPanel({
               {pricing ? (
                 <tfoot>
                   <tr>
-                    <td colSpan={3}>Subtotal</td>
+                    <td colSpan={5}>Items before tax</td>
                     <td className="num">{formatMoney(pricing.totals.subtotal)}</td>
                     <td />
                   </tr>
                   <tr>
-                    <td colSpan={3}>
-                      Use tax ({pricing.totals.useTax.percent}% on countertop &amp; backsplash material)
-                    </td>
+                    <td colSpan={5}>Use tax ({pricing.totals.useTax.percent}% on countertop &amp; backsplash material, included in lines)</td>
                     <td className="num">{formatMoney(pricing.totals.useTax.amount)}</td>
                     <td />
                   </tr>
+                  <tr>
+                    <td colSpan={5}>Rounding (each line up to the next $5)</td>
+                    <td className="num">{formatMoney(pricing.totals.roundingAdjustment)}</td>
+                    <td />
+                  </tr>
                   <tr className="eb-review-grand">
-                    <td colSpan={3}>Total</td>
+                    <td colSpan={5}>Total (matches the proposal)</td>
                     <td className="num">{formatMoney(pricing.totals.total)}</td>
                     <td />
                   </tr>
-                  {customerTotal != null ? (
-                    <tr>
-                      <td colSpan={3}>Customer estimate total (PDF)</td>
-                      <td className="num">{formatMoney(customerTotal)}</td>
-                      <td className="eb-muted eb-small">Each customer line rounds up to the next $5, as on Internal Estimate PDFs.</td>
-                    </tr>
-                  ) : null}
                 </tfoot>
               ) : null}
             </table>
           </div>
-        ) : null}
-      </div>
-
-      <div className={tab === "customer" ? "eb-customer-preview is-visible" : "eb-customer-preview"}>
-        {docProps ? (
-          <p className="eb-muted eb-small eb-no-print eb-print-source">
-            {fromSaved
-              ? `Saved version${saved ? ` · ${saved.quoteNumber}${saved.revisionLabel ? ` ${saved.revisionLabel}` : ""}` : ""} · ${pdfFilename ?? ""}`
-              : "Preview of unsaved changes — save to lock this version."}
-          </p>
-        ) : null}
-        {docProps ? (
-          <CustomerEstimateDocument {...docProps} />
         ) : (
-          <p className="eb-muted eb-no-print">Customer preview appears once the estimate is priced.</p>
+          <div className="eb-proposal">
+            <p className="eb-muted eb-small">
+              {proposal.loading
+                  ? "Rendering proposal…"
+                  : proposal.error
+                    ? `Proposal unavailable: ${proposal.error}`
+                    : proposal.fromSaved
+                      ? `Saved version${saved ? ` · ${saved.quoteNumber}` : ""} · ${proposal.filename}`
+                      : "Preview of unsaved changes — save to lock this version and enable Download PDF."}
+            </p>
+            {proposal.html ? <iframe className="eb-proposal-frame" title="Proposal preview" srcDoc={proposal.html} sandbox="" /> : null}
+          </div>
         )}
       </div>
     </div>
@@ -195,22 +230,32 @@ function ReviewGroup({
   return (
     <>
       <tr className="eb-review-room">
-        <td colSpan={3}>{title}</td>
+        <td colSpan={5}>{title}</td>
         <td className="num">{formatMoney(roomTotal)}</td>
         <td />
       </tr>
       {items.map((it) => {
+        if (it.itemType === "note") {
+          return (
+            <tr key={it.id} className="eb-review-note">
+              <td colSpan={7}>{it.inputs.text}</td>
+            </tr>
+          );
+        }
         const p = pricedById.get(it.id);
+        const priced = p?.status === "priced";
         return (
-          <tr key={it.id} className={p?.status !== "priced" ? "is-incomplete" : undefined}>
+          <tr key={it.id} className={!priced ? "is-incomplete" : undefined}>
             <td>
               <button type="button" className="eb-link" onClick={() => onEditItem(it.id)}>
-                {p?.description || itemFallbackLabel(it)}
+                {it.label || p?.description || itemFallbackLabel(it)}
               </button>
             </td>
             <td className="num">{p?.quantity != null ? formatQty(p.quantity, p.unit) : "—"}</td>
             <td className="num">{p?.rate != null ? formatMoney(p.rate) : "—"}</td>
-            <td className="num">{p?.status === "priced" ? formatMoney(p.amount) : "—"}</td>
+            <td className="num">{priced ? formatMoney(p!.exactAmount) : "—"}</td>
+            <td className="num">{priced && p!.useTaxAmount ? formatMoney(p!.useTaxAmount) : "—"}</td>
+            <td className="num">{priced ? formatMoney(p!.amount) : "—"}</td>
             <td>
               {(p?.warnings ?? []).map((w) => (
                 <span key={w.code} className={`eb-warning eb-warning-${w.severity}`}>

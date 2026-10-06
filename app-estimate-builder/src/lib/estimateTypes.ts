@@ -98,6 +98,9 @@ export type CustomInputs = {
   internalNote: string;
 };
 
+/** QuickBooks-style description-only line (no amount). */
+export type NoteInputs = { text: string };
+
 type ItemBase = {
   id: string;
   roomId: string | null;
@@ -117,7 +120,8 @@ export type EstimateItem =
   | (ItemBase & { itemType: "outlet"; pricingStrategy: "addon_catalog"; inputs: OutletInputs })
   | (ItemBase & { itemType: "edge"; pricingStrategy: "edge_v2"; inputs: EdgeInputs })
   | (ItemBase & { itemType: "service"; pricingStrategy: "service_catalog"; inputs: ServiceInputs })
-  | (ItemBase & { itemType: "custom"; pricingStrategy: "custom_line"; inputs: CustomInputs });
+  | (ItemBase & { itemType: "custom"; pricingStrategy: "custom_line"; inputs: CustomInputs })
+  | (ItemBase & { itemType: "note"; pricingStrategy: "text"; inputs: NoteInputs });
 
 export type ItemType = EstimateItem["itemType"];
 export type PricingStrategy = EstimateItem["pricingStrategy"];
@@ -137,6 +141,10 @@ export type EstimateHeader = {
   branch: string;
   salesRep: string;
   preparedBy: string;
+  billToAddress: string;
+  county: string;
+  poNumber: string;
+  customerMessage: string;
   customerNotes: string;
   internalNotes: string;
 };
@@ -159,13 +167,17 @@ export type PricedItem = {
   itemType: ItemType;
   pricingStrategy: PricingStrategy;
   roomId: string | null;
-  status: "priced" | "incomplete" | "error";
+  status: "priced" | "incomplete" | "error" | "note";
   description: string;
   customerCategory: string;
   quantity: number | null;
   unit: string;
   rate: number | null;
+  /** Final line amount: exact + material use tax, rounded up to the next $5 (credits exact). */
   amount: number;
+  exactAmount: number;
+  useTaxAmount: number;
+  roundingAdjustment: number;
   taxBase: { countertop: number; backsplash: number };
   warnings: ItemWarning[];
   details: Array<{ label: string; value: string }>;
@@ -177,16 +189,20 @@ export type EstimateTotals = {
   useTax: {
     percent: number;
     scope: string;
+    appliedTo?: string;
     countertopBase: number;
     backsplashBase: number;
     countertopAmount: number;
     backsplashAmount: number;
     amount: number;
   };
+  exactTotal: number;
+  roundingAdjustment: number;
   total: number;
   qualifyingKitchenCounterSf: number;
   itemCount: number;
   pricedCount: number;
+  noteCount: number;
 };
 
 export type EstimatePricing = {
@@ -277,6 +293,17 @@ export type SavedPrint = {
   customer_display_total: number | null;
   customer_print_snapshot: unknown;
   pdf_filename: string;
+  has_proposal: boolean;
+  proposal_total: number | null;
+  proposal_filename: string | null;
+};
+
+export type ProposalPreview = {
+  ok: boolean;
+  html: string;
+  total: number;
+  skippedIncomplete: number;
+  filename: string;
 };
 
 export type LoadedQuote = {

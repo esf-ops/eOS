@@ -78,6 +78,13 @@ export const ESTIMATE_ITEM_TYPES = Object.freeze({
     strategies: ["custom_line"],
     defaultStrategy: "custom_line",
     accountingItem: "Custom"
+  },
+  /** Description-only line (QuickBooks-style note): prints on the proposal, never priced. */
+  note: {
+    label: "Note",
+    strategies: ["text"],
+    defaultStrategy: "text",
+    accountingItem: null
   }
 });
 
@@ -229,6 +236,8 @@ function normalizeInputs(itemType, strategy, raw) {
         customerNote: str(i.customerNote, 1000),
         internalNote: str(i.internalNote, 2000)
       };
+    case "note":
+      return { text: str(i.text, 1000) };
     default:
       return {};
   }
@@ -298,6 +307,10 @@ export function normalizeEstimateDocument(raw) {
       branch: str(h.branch, 60),
       salesRep: str(h.salesRep, 120),
       preparedBy: str(h.preparedBy, 120),
+      billToAddress: str(h.billToAddress, 500),
+      county: str(h.county, 80),
+      poNumber: str(h.poNumber, 60),
+      customerMessage: str(h.customerMessage, 500),
       customerNotes: str(h.customerNotes, 4000),
       internalNotes: str(h.internalNotes, 4000)
     },

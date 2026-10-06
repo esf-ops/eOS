@@ -16,7 +16,10 @@ import http from "node:http";
 
 import { fetchEliteProgramMaterialColors } from "../../backend-core/src/quotes/materialColorsCatalog.js";
 import { buildEstimateBuilderCatalog } from "../../backend-core/src/estimateBuilder/estimateBuilderCatalog.mjs";
-import { buildEstimatePriceResponse } from "../../backend-core/src/estimateBuilder/estimateBuilderRoutes.js";
+import {
+  buildEstimatePriceResponse,
+  buildEstimateProposalPreviewResponse
+} from "../../backend-core/src/estimateBuilder/estimateBuilderRoutes.js";
 
 if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
   console.error("devPricingHarness: refusing to run in a production environment.");
@@ -76,6 +79,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/estimate-builder/price") {
       return send(res, 200, await buildEstimatePriceResponse(await readJson(req), colors), origin);
+    }
+    if (req.method === "POST" && url.pathname === "/api/estimate-builder/proposal/preview") {
+      return send(res, 200, await buildEstimateProposalPreviewResponse(await readJson(req), colors), origin);
     }
     if (url.pathname.startsWith("/api/estimate-builder/")) {
       return send(res, 403, { ok: false, error: "Saving and opening estimates are disabled in the dev pricing harness." }, origin);

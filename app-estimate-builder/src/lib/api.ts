@@ -44,5 +44,27 @@ async function request<T>(method: "GET" | "POST", path: string, token: string, b
 }
 
 export const apiGet = <T>(path: string, token: string) => request<T>("GET", path, token);
+
+/** Authenticated binary download (e.g. proposal PDF). */
+export async function apiGetBlob(path: string, token: string): Promise<Blob> {
+  if (!token) throw new ApiError("Missing session access token", 401);
+  let res: Response;
+  try {
+    res = await fetch(`${config.backendBaseUrl}${path}`, { headers: { authorization: `Bearer ${token}` } });
+  } catch {
+    throw new ApiError(`Brain is not reachable at ${config.backendBaseUrl}.`, 0);
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const json = (await res.json()) as { error?: unknown };
+      if (json?.error) msg = String(json.error);
+    } catch {
+      // non-JSON body
+    }
+    throw new ApiError(msg, res.status);
+  }
+  return res.blob();
+}
 export const apiPost = <T>(path: string, token: string, body: unknown, signal?: AbortSignal) =>
   request<T>("POST", path, token, body, signal);
