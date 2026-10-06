@@ -591,8 +591,18 @@ function fakeDb(rows = {}) {
           state.filters.push(["eq", k, v]);
           return builder;
         },
-        neq: () => builder,
-        is: () => builder,
+        neq(k, v) {
+          state.filters.push(["neq", k, v]);
+          return builder;
+        },
+        is(k, v) {
+          state.filters.push(["is", k, v]);
+          return builder;
+        },
+        in(k, v) {
+          state.filters.push(["in", k, v]);
+          return builder;
+        },
         or(f) {
           state.filters.push(["or", f]);
           return builder;
@@ -602,6 +612,7 @@ function fakeDb(rows = {}) {
         then(resolve) {
           calls.push(state);
           if (state.op === "insert" && table === "quote_headers") return resolve({ data: [{ id: "new-quote" }], error: null });
+          if (state.op === "update" && table === "quote_files" && rows.quoteFiles) return resolve(rows.quoteFiles(state));
           if (state.op === "select" && table === "quote_headers" && state.cols === "*") {
             return resolve({ data: rows.quoteHeaders ?? [], error: null });
           }
@@ -682,6 +693,154 @@ test("save_revision freezes the family and inserts R2 linked to the root", async
   assert.equal(ins.quote_family_root_id, "q1");
   assert.equal(ins.revised_from_quote_id, "q1");
   assert.equal(ins.revision_label, "R2");
+});
+
+// --- Plans & files ---
+
+const FILE_A = "11111111-1111-4111-8111-111111111111";
+const FILE_B = "22222222-2222-4222-8222-222222222222";
+const filterOf = (state, op, key) => state.filters.find(([o, k]) => o === op && k === key)?.[2];
+
+test("save links only the caller's unattached uploads in the caller's org, and audits each link", async () => {
+  const db = fakeDb({ quoteFiles: () => ({ data: [{ id: FILE_A }], error: null }) });
+  const res = await processEstimateBuilderSave(db, {
+    body: { document: doc(ACCEPTANCE_ITEMS), quote_status: "draft", file_ids: [FILE_A, FILE_A.toUpperCase(), "not-a-uuid", FILE_B] },
+    userEmail: "e@example.com",
+    userId: "user-1",
+    organizationContext: { organizationId: "org-1" },
+    materialColors: COLORS
+  });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.files, { linked: 1, moved: 0, error: null });
+  const link = db.calls.find((c) => c.table === "quote_files" && c.op === "update");
+  assert.equal(link.payload.quote_id, "new-quote");
+  assert.equal(filterOf(link, "eq", "organization_id"), "org-1");
+  assert.equal(filterOf(link, "eq", "uploaded_by_user_id"), "user-1");
+  assert.equal(filterOf(link, "eq", "status"), "active");
+  assert.equal(filterOf(link, "is", "quote_id"), null);
+  assert.deepEqual(filterOf(link, "in", "id"), [FILE_A, FILE_B], "deduped, lower-cased, invalid ids dropped");
+  const events = db.calls.filter((c) => c.table === "quote_file_events" && c.op === "insert");
+  assert.deepEqual(events.map((e) => [e.payload.action, e.payload.quote_file_id, e.payload.organization_id]), [["linked_to_quote", FILE_A, "org-1"]]);
+});
+
+test("save without a user or organization never links files", async () => {
+  const db = fakeDb({ quoteFiles: () => ({ data: [{ id: FILE_A }], error: null }) });
+  const res = await processEstimateBuilderSave(db, {
+    body: { document: doc(ACCEPTANCE_ITEMS), file_ids: [FILE_A] },
+    userEmail: "e@example.com",
+    organizationContext: { organizationId: "org-1" },
+    materialColors: COLORS
+  });
+  assert.equal(res.files.linked, 0);
+  assert.ok(!db.calls.some((c) => c.table === "quote_files"));
+});
+
+test("save_revision moves the previous revision's files to the new revision, then links new uploads", async () => {
+  const db = fakeDb({
+    quoteHeaders: [{ id: "q1", quote_number: "ESF-DYER-000007", quote_number_base: "ESF-DYER-000007", revision_number: 1, quote_family_root_id: "q1" }],
+    quoteFiles: (state) => ({ data: filterOf(state, "eq", "quote_id") === "q1" ? [{ id: FILE_A }] : [{ id: FILE_B }], error: null })
+  });
+  const res = await processEstimateBuilderSave(db, {
+    body: { document: doc(ACCEPTANCE_ITEMS), quote_id: "q1", save_mode: "save_revision", file_ids: [FILE_B] },
+    userEmail: "e@example.com",
+    userId: "user-1",
+    organizationContext: { organizationId: "org-1" },
+    materialColors: COLORS
+  });
+  assert.deepEqual(res.files, { linked: 1, moved: 1, error: null });
+  const [move, link] = db.calls.filter((c) => c.table === "quote_files" && c.op === "update");
+  assert.equal(move.payload.quote_id, "new-quote");
+  assert.equal(filterOf(move, "eq", "quote_id"), "q1");
+  assert.equal(filterOf(move, "eq", "organization_id"), "org-1");
+  assert.equal(filterOf(move, "neq", "status"), "deleted");
+  assert.equal(link.payload.quote_id, "new-quote");
+});
+
+test("a file-link failure is reported but does not fail the saved quote", async () => {
+  const db = fakeDb({ quoteFiles: () => ({ data: null, error: new Error("storage db down") }) });
+  const res = await processEstimateBuilderSave(db, {
+    body: { document: doc(ACCEPTANCE_ITEMS), file_ids: [FILE_A] },
+    userEmail: "e@example.com",
+    userId: "user-1",
+    organizationContext: { organizationId: "org-1" },
+    materialColors: COLORS
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.files.linked, 0);
+  assert.match(res.files.error, /storage db down/);
+});
+
+// --- Options (priced, shown, not in the total) ---
+
+test("an option is priced like any item but excluded from the total, sf rules and Quote Library lines", async () => {
+  const base = [
+    { id: "ct", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 48, materialColorId: "c-b" } },
+    { id: "bs", roomId: "kitchen", itemType: "backsplash", inputs: { sqft: 12 } }
+  ];
+  // The option comes first in the room: backsplash must still match the included countertop.
+  const comp = { id: "comp", roomId: "kitchen", itemType: "countertop", optional: true, inputs: { sqft: 48, materialColorId: "c-f" } };
+  const without = await price(doc(base));
+  const withOption = await price(doc([comp, ...base]));
+  const opt = withOption.items.find((i) => i.itemId === "comp");
+  const alone = await price(doc([{ ...comp, optional: false }]));
+
+  assert.equal(opt.status, "priced");
+  assert.equal(opt.optional, true);
+  assert.equal(opt.amount, alone.items[0].amount, "an option is priced exactly as the same item included alone");
+  assert.equal(withOption.totals.total, without.totals.total);
+  assert.equal(withOption.totals.subtotal, without.totals.subtotal);
+  assert.deepEqual(withOption.totals.options, { count: 1, total: opt.amount });
+  assert.equal(withOption.totals.qualifyingKitchenCounterSf, 48);
+  assert.match(withOption.items.find((i) => i.itemId === "bs").description, /Calacatta Laza/);
+
+  const art = buildQuoteLibraryArtifacts(doc([comp, ...base]), withOption, { quoteNumber: "ESF-DYER-000099" });
+  assert.equal(art.calc.lineItems.length, 2);
+  assert.ok(!art.calc.lineItems.some((l) => /Statuario/.test(l.item_name)));
+  assert.equal(art.calc.totals.retail, without.totals.total);
+  assert.equal(art.printSnapshot.finalRounded, without.totals.total);
+  assert.equal(art.calc.totals.estimated_sqft, 60);
+});
+
+test("an option in the same material rounds in its own group, not merged with the included piece", async () => {
+  const items = [
+    { id: "a", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 30.4, materialColorId: "c-b" } },
+    { id: "b", roomId: "kitchen", itemType: "countertop", optional: true, inputs: { sqft: 10.4, materialColorId: "c-b" } }
+  ];
+  const r = await price(doc(items));
+  const solo = await price(doc([items[0]]));
+  assert.equal(r.items[0].amount, solo.items[0].amount);
+  assert.equal(r.totals.total, solo.totals.total);
+});
+
+test("proposal lists options under the total; item lines still sum to the total", async () => {
+  const items = [
+    { id: "ct", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 48, materialColorId: "c-b" } },
+    { id: "comp", roomId: "kitchen", itemType: "countertop", optional: true, inputs: { sqft: 48, materialColorId: "c-f" } }
+  ];
+  const d = doc(items);
+  const r = await price(d);
+  const p = buildEstimateProposalSnapshot(d, r, { quoteNumber: "ESF-DYER-000099" });
+  assert.equal(p.total, r.totals.total);
+  assert.equal(p.lines.filter((l) => l.kind === "item").length, 1);
+  assert.equal(p.options.length, 1);
+  assert.equal(p.options[0].amount, r.items[1].amount);
+  assert.equal(p.options[0].room, "Kitchen");
+  const html = renderEstimateProposalHtml(p);
+  assert.match(html, /Options — not included in the total above/);
+  assert.match(html, /Kitchen: Statuario Maximus countertop/);
+});
+
+test("option flag is kept only on material items, and an all-options estimate cannot be finalized", async () => {
+  const d = doc([
+    { id: "o", roomId: "kitchen", itemType: "outlet", optional: true, inputs: { qty: 1 } },
+    { id: "v", roomId: "bath", itemType: "vanity", optional: true, inputs: { sizeCode: "61_D", qty: 1 } }
+  ]);
+  assert.equal(d.items[0].optional, false);
+  assert.equal(d.items[1].optional, true);
+  const onlyOptions = await price(doc([{ id: "v", roomId: "bath", itemType: "vanity", optional: true, inputs: { sizeCode: "61_D", qty: 1 } }]));
+  assert.equal(onlyOptions.totals.total, 0);
+  assert.equal(onlyOptions.readiness.ready, false);
+  assert.match(onlyOptions.readiness.blockers.join(" "), /all items are options/);
 });
 
 // --- ESF catalog products (sinks, faucets, accessories, specialty) ---

@@ -106,6 +106,8 @@ type ItemBase = {
   roomId: string | null;
   sortOrder: number;
   label: string;
+  /** Customer option (countertop / backsplash / vanity only): priced and shown, not included in the total. */
+  optional?: boolean;
   source: ItemSource;
   createdAt: string | null;
   updatedAt: string | null;
@@ -173,6 +175,7 @@ export type PricedItem = {
   itemType: ItemType;
   pricingStrategy: PricingStrategy;
   roomId: string | null;
+  optional?: boolean;
   status: "priced" | "incomplete" | "error" | "note";
   description: string;
   customerCategory: string;
@@ -211,6 +214,8 @@ export type EstimateTotals = {
   itemCount: number;
   pricedCount: number;
   noteCount: number;
+  /** Priced options — shown to the customer, not included in `total`. */
+  options?: { count: number; total: number };
 };
 
 export type EstimatePricing = {
@@ -321,6 +326,18 @@ export type SaveResult = {
   /** Document as stored (header labels resolved from the directory by the Brain). */
   document?: EstimateDocument;
   quickbooks: QuickbooksRefs | null;
+  /** Plans & files linked on this save (`error` when linking failed; the quote itself saved). */
+  files?: { linked: number; moved: number; error: string | null } | null;
+};
+
+/** `quote_files` metadata from `/api/quote-files` (never a storage path). */
+export type QuoteFile = {
+  id: string;
+  originalFilename: string;
+  fileRole: string;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
+  createdAt: string;
 };
 
 export type SavedQuoteSummary = {

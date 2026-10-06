@@ -8,6 +8,8 @@
  *  - save_revision   → prior revisions frozen (is_current_revision=false), new row R{n+1}
  *
  * Pricing is always recomputed server-side from the posted item document; client totals are ignored.
+ * `file_ids` (the caller's unattached `quote_files` uploads) are linked to the saved quote; a new revision
+ * takes over the previous revision's files (`estimateBuilderFiles.mjs`).
  * Monday sync is skipped (no external write enablement for this source).
  */
 
@@ -17,6 +19,7 @@ import { fetchEliteProgramMaterialColors } from "../quotes/materialColorsCatalog
 import * as esf from "../quotes/quoteEsfNumber.js";
 import { generateQuoteNumber, persistQuoteSubmission, replaceQuoteLinesAndRooms } from "../quotes/quotePersist.js";
 import { normalizeEstimateDocument } from "./estimateBuilderContracts.mjs";
+import { linkPendingQuoteFiles, moveQuoteFilesToRevision, normalizeFileIds } from "./estimateBuilderFiles.mjs";
 import { priceEstimateDocument } from "./estimateBuilderPricing.mjs";
 import { ESTIMATE_BUILDER_QUOTE_SOURCE, buildQuoteLibraryArtifacts } from "./estimateBuilderQuoteLibrary.mjs";
 
@@ -53,6 +56,7 @@ function revisionNote(body) {
  * @param {{
  *   body: Record<string, unknown>,
  *   userEmail: string,
+ *   userId?: string|null,
  *   organizationContext: { organizationId?: string|null } | null,
  *   materialColors?: Array<Record<string, unknown>>,
  *   resolveQuickbooks?: (header: Record<string, any>) => Promise<{ header: Record<string, any>, quickbooks: Record<string, unknown> }>
@@ -84,6 +88,20 @@ export async function processEstimateBuilderSave(db, opts) {
   if (!doc.items.length) {
     return { ok: false, httpStatus: 422, error: "Add at least one item before saving.", pricing };
   }
+
+  const pendingFileIds = normalizeFileIds(body.file_ids);
+  const userId = opts.userId ? String(opts.userId) : null;
+  /** Files never block a save that already succeeded; failures come back as a warning. */
+  const attachFiles = async (quoteId, fromQuoteId = null) => {
+    const files = { linked: 0, moved: 0, error: null };
+    try {
+      if (fromQuoteId) files.moved = (await moveQuoteFilesToRevision(db, { orgId, userId, fromQuoteId, toQuoteId: quoteId })).length;
+      files.linked = (await linkPendingQuoteFiles(db, { orgId, userId, quoteId, fileIds: pendingFileIds })).length;
+    } catch (e) {
+      files.error = String(e?.message || e);
+    }
+    return files;
+  };
 
   const build = (quoteNumber) => {
     const artifacts = buildQuoteLibraryArtifacts(doc, pricing, { quoteNumber, quickbooks });
@@ -140,7 +158,8 @@ export async function processEstimateBuilderSave(db, opts) {
     ub = scope(ub, orgId, hasOrg);
     const { error } = await ub;
     if (error) throw error;
-    return { ok: true, quoteId, quoteNumber, revisionNumber: 1, revisionLabel: "R1", saveMode, quoteStatus, pricing, document: doc, quickbooks };
+    const files = await attachFiles(quoteId);
+    return { ok: true, quoteId, quoteNumber, revisionNumber: 1, revisionLabel: "R1", saveMode, quoteStatus, pricing, document: doc, quickbooks, files };
   }
 
   if (!existingId) return { ok: false, httpStatus: 400, error: `quote_id is required for ${saveMode}` };
@@ -202,6 +221,7 @@ export async function processEstimateBuilderSave(db, opts) {
       output_payload: calc,
       created_by: userEmail
     });
+    const files = await attachFiles(existingId);
     return {
       ok: true,
       quoteId: existingId,
@@ -212,7 +232,8 @@ export async function processEstimateBuilderSave(db, opts) {
       quoteStatus,
       pricing,
       document: doc,
-      quickbooks
+      quickbooks,
+      files
     };
   }
 
@@ -248,7 +269,8 @@ export async function processEstimateBuilderSave(db, opts) {
       revised_from_quote_id: row.id,
       revision_note: revisionNote(body)
     });
-    return { ok: true, quoteId, quoteNumber, revisionNumber: nextRev, revisionLabel, saveMode, quoteStatus, pricing, document: doc, quickbooks };
+    const files = await attachFiles(quoteId, row.id);
+    return { ok: true, quoteId, quoteNumber, revisionNumber: nextRev, revisionLabel, saveMode, quoteStatus, pricing, document: doc, quickbooks, files };
   }
 
   return { ok: false, httpStatus: 400, error: `Unknown save_mode: ${saveMode}` };

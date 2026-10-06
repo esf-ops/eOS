@@ -26,6 +26,9 @@ export const ITEM_PROVENANCE = Object.freeze([
 
 export const ITEM_SOURCE_KINDS = Object.freeze(["manual", "template", "ai_takeoff", "digital_estimate", "duplicate"]);
 
+/** Material items that can be marked as a customer option: priced and shown, but not included in the total. */
+export const OPTIONAL_ITEM_TYPES = Object.freeze(["countertop", "backsplash", "vanity"]);
+
 /**
  * Item type registry. Pricing strategies are explicit per type; a single estimate may mix any of them.
  * `accountingItem` is the future QuickBooks item-name mapping (eliteOS stays the pricing brain).
@@ -271,6 +274,7 @@ export function normalizeEstimateItem(raw, idx = 0, roomIds = new Set()) {
     pricingStrategy,
     sortOrder: Number.isFinite(Number(r.sortOrder)) ? Number(r.sortOrder) : idx,
     label: str(r.label, 160),
+    optional: OPTIONAL_ITEM_TYPES.includes(itemType) && r.optional === true,
     inputs: normalizeInputs(itemType, pricingStrategy, r.inputs),
     source: normalizeSource(r.source),
     createdAt: str(r.createdAt, 40) || null,

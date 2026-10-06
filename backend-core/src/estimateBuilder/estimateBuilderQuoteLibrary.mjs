@@ -5,7 +5,7 @@
  * Estimate Builder quotes land in `quote_headers` (quote_source `estimate_builder`) with no migration:
  *  - `saveBody`        → header columns + `quote_rooms` rows (room-level sqft rollups)
  *  - `calc`            → totals + one `quote_line_items` row per priced estimate item (line amounts already
- *                        include material use tax and the $5 round-up; notes are not line items)
+ *                        include material use tax and the $5 round-up; notes and options are not line items)
  *  - `snapshotToStore` → `calculation_snapshot` holding the canonical item document, server pricing,
  *                        Quote Library `internal_ui` aliases, a v1 customer print snapshot (same contract as
  *                        `CustomerEstimateDocument` / `customerEstimatePrintSnapshot.js`), and the
@@ -63,6 +63,11 @@ const SUMMARY_ORDER = [
 
 const MATERIAL_CATEGORIES = new Set(["Countertops", "Backsplash", "Full height backsplash", "Vanity tops"]);
 
+/** Priced items that count toward the total; options live only in the snapshot pricing and the proposal. */
+function includedPricedItems(pricing) {
+  return pricing.items.filter((r) => r.status === "priced" && !r.optional);
+}
+
 function roomNameFor(doc, roomId) {
   if (!roomId) return null;
   return doc.rooms.find((r) => r.id === roomId)?.name ?? null;
@@ -73,7 +78,7 @@ function roomNameFor(doc, roomId) {
  * material row, matching Internal Estimate's customer PDF behavior.
  */
 export function buildCustomerPrintSnapshot(doc, pricing, opts = {}) {
-  const items = pricing.items.filter((r) => r.status === "priced");
+  const items = includedPricedItems(pricing);
   const docItems = new Map(doc.items.map((it) => [it.id, it]));
   const customerAmount = (r) => round2(r.amount);
   const isInternalOnly = (r) => r.itemType === "custom" && docItems.get(r.itemId)?.inputs?.customerFacing === false;
@@ -185,7 +190,7 @@ export function buildCustomerPrintSnapshot(doc, pricing, opts = {}) {
  */
 export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
   const h = doc.header;
-  const priced = pricing.items.filter((r) => r.status === "priced");
+  const priced = includedPricedItems(pricing);
   const total = pricing.totals.total;
 
   const sortIndex = new Map(doc.items.map((it, idx) => [it.id, idx]));

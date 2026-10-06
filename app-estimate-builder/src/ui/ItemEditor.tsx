@@ -58,6 +58,9 @@ const STRATEGY_OPTIONS: Partial<Record<EstimateItem["itemType"], Array<{ value: 
   ]
 };
 
+/** Mirrors Brain `OPTIONAL_ITEM_TYPES`. */
+const OPTIONAL_TYPES = new Set<EstimateItem["itemType"]>(["countertop", "backsplash", "vanity"]);
+
 const TITLES: Record<EstimateItem["itemType"], string> = {
   countertop: "Countertop",
   backsplash: "Backsplash",
@@ -142,6 +145,32 @@ export default function ItemEditor({
             openCalc={readOnly ? null : openCalc}
             priced={priced}
           />
+
+          {OPTIONAL_TYPES.has(item.itemType) ? (
+            <div className="eb-field">
+              <span>On the proposal</span>
+              <div className="eb-segmented eb-segmented-wide" role="radiogroup" aria-label="Include in total">
+                {[
+                  { value: false, label: "Included in total" },
+                  { value: true, label: "Option — price only" }
+                ].map((o) => (
+                  <button
+                    key={String(o.value)}
+                    type="button"
+                    role="radio"
+                    aria-checked={Boolean(item.optional) === o.value}
+                    className={Boolean(item.optional) === o.value ? "is-active" : ""}
+                    onClick={() => dispatch({ type: "update_item", id: item.id, patch: { optional: o.value }, now: new Date().toISOString() })}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {item.optional ? (
+                <small className="eb-muted">Priced and listed under “Options” on the proposal, but not added to the estimate total.</small>
+              ) : null}
+            </div>
+          ) : null}
 
           {item.itemType !== "note" ? (
             <TextField

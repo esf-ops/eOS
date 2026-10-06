@@ -27,6 +27,9 @@ const TYPE_LABELS: Record<string, string> = {
   note: "Note"
 };
 
+/** Mirrors Brain `OPTIONAL_ITEM_TYPES`. */
+const OPTIONAL_TYPES = new Set<EstimateItem["itemType"]>(["countertop", "backsplash", "vanity"]);
+
 const STRATEGY_TAGS: Record<string, string> = {
   elite_100: "Elite 100",
   out_of_collection: "Out-of-Collection",
@@ -264,6 +267,7 @@ const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, st
         <div className="eb-item-title">
           <span className="eb-item-label">{label}</span>
           {tag ? <span className="eb-tag">{tag}</span> : null}
+          {item.optional ? <span className="eb-tag eb-tag-option">Option · not in total</span> : null}
           {item.source.provenance !== "manually_added" ? <span className="eb-tag eb-tag-muted">{provenanceLabel(item.source.provenance)}</span> : null}
         </div>
         <div className="eb-item-sub">
@@ -277,7 +281,7 @@ const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, st
           {warnings.length > 2 ? <span className="eb-muted">+{warnings.length - 2} more</span> : null}
         </div>
       </div>
-      <div className="eb-item-amount">{priced && priced.status === "priced" ? formatMoney(priced.amount) : "—"}</div>
+      <div className={`eb-item-amount${item.optional ? " is-option" : ""}`}>{priced && priced.status === "priced" ? formatMoney(priced.amount) : "—"}</div>
       {!readOnly ? (
         <div className="eb-menu-wrap" onClick={(e) => e.stopPropagation()}>
           <button
@@ -310,6 +314,18 @@ const ItemRow = memo(function ItemRow({ item, priced, rooms, isFirst, isLast, st
                 >
                   Duplicate
                 </button>
+                {OPTIONAL_TYPES.has(item.itemType) ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      dispatch({ type: "update_item", id: item.id, patch: { optional: !item.optional }, now: new Date().toISOString() });
+                    }}
+                  >
+                    {item.optional ? "Include in total" : "Make an option (price only)"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"

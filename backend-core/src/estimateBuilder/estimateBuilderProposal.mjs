@@ -80,6 +80,8 @@ export function buildEstimateProposalSnapshot(doc, pricing, opts = {}) {
 
   /** @type {Array<{ kind: "room"|"item"|"note", item?: string, description: string, amount?: number, itemId?: string, roomId?: string|null }>} */
   const lines = [];
+  /** @type {Array<{ item: string, description: string, amount: number, itemId: string, room: string }>} */
+  const options = [];
   let folded = 0;
   let skippedIncomplete = 0;
   for (const { room, items } of sections) {
@@ -97,6 +99,10 @@ export function buildEstimateProposalSnapshot(doc, pricing, opts = {}) {
       }
       if (r.status !== "priced") {
         skippedIncomplete += 1;
+        continue;
+      }
+      if (r.optional) {
+        options.push({ item: shortItemName(r), description: itemDescription(it, r), amount: round2(r.amount), itemId: it.id, room: room?.name ?? "" });
         continue;
       }
       if (isInternalOnly(it)) {
@@ -151,6 +157,7 @@ export function buildEstimateProposalSnapshot(doc, pricing, opts = {}) {
     },
     lines,
     total,
+    options,
     pricingTotal: round2(pricing.totals.total),
     skippedIncomplete,
     customerMessage: h.customerMessage || "",
@@ -210,6 +217,9 @@ table.items td.amt { width: 1.15in; text-align: right; white-space: nowrap; }
 table.items tr.room td.desc { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; color: #a3132f; padding-top: 10px; }
 table.items tr.note td.desc { color: #1e2b48; }
 table.items tr { page-break-inside: avoid; }
+.options-hd { margin-top: 16px; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #a3132f; }
+table.items.options { margin-top: 6px; }
+table.items.options tbody tr:last-child td { border-bottom: 1px solid #94a0b8; }
 .notes { margin-top: 10px; color: #1e2b48; }
 .notes div { margin-top: 2px; }
 .bottom { display: flex; justify-content: space-between; align-items: stretch; border: 1px solid #94a0b8; border-top: none; }
@@ -238,6 +248,15 @@ export function renderEstimateProposalHtml(p) {
       return `<tr class="line"><td class="item">${esc(l.item)}</td><td class="desc">${esc(l.description)}</td><td class="amt">${num(l.amount)}</td></tr>`;
     })
     .join("");
+  const optionRows = (p.options ?? [])
+    .map(
+      (o) =>
+        `<tr class="line"><td class="item">${esc(o.item)}</td><td class="desc">${esc(o.room ? `${o.room}: ${o.description}` : o.description)}</td><td class="amt">${num(o.amount)}</td></tr>`
+    )
+    .join("");
+  const optionsBlock = optionRows
+    ? `<div class="options-hd">Options — not included in the total above</div><table class="items options"><thead><tr><th>Item</th><th>Description</th><th>Price</th></tr></thead><tbody>${optionRows}</tbody></table>`
+    : "";
   const notes = (p.customerNoteLines ?? []).length
     ? `<div class="notes">${p.customerNoteLines.map((n) => `<div>${esc(n)}</div>`).join("")}</div>`
     : "";
@@ -257,6 +276,7 @@ export function renderEstimateProposalHtml(p) {
 <div>
 <table class="items"><thead><tr><th>Item</th><th>Description</th><th>Total</th></tr></thead><tbody>${rows}<tr class="filler"><td class="item" style="height:${Math.max(20, 340 - (p.lines ?? []).length * 23)}px"></td><td></td><td class="amt"></td></tr></tbody></table>
 <div class="bottom"><div class="msg">${esc(p.customerMessage)}</div><div class="tot"><span>Total</span><span>$${num(p.total)}</span></div></div>
+${optionsBlock}
 ${notes}
 </div>
 <div class="legal">${CUSTOMER_PROPOSAL_FOOTER_LINES.map((l) => `<div>${esc(l)}</div>`).join("")}</div>

@@ -191,6 +191,13 @@ export default function ReviewPanel({
                     <td className="num">{formatMoney(pricing.totals.total)}</td>
                     <td />
                   </tr>
+                  {pricing.totals.options?.count ? (
+                    <tr>
+                      <td colSpan={5}>Options listed on the proposal, not included in the total ({pricing.totals.options.count})</td>
+                      <td className="num">{formatMoney(pricing.totals.options.total)}</td>
+                      <td />
+                    </tr>
+                  ) : null}
                 </tfoot>
               ) : null}
             </table>
@@ -226,7 +233,7 @@ function ReviewGroup({
   onEditItem: (id: string) => void;
 }) {
   if (!items.length) return null;
-  const roomTotal = items.reduce((s, it) => s + (pricedById.get(it.id)?.amount ?? 0), 0);
+  const roomTotal = items.reduce((s, it) => s + (it.optional ? 0 : pricedById.get(it.id)?.amount ?? 0), 0);
   return (
     <>
       <tr className="eb-review-room">
@@ -250,6 +257,7 @@ function ReviewGroup({
               <button type="button" className="eb-link" onClick={() => onEditItem(it.id)}>
                 {it.label || p?.description || itemFallbackLabel(it)}
               </button>
+              {it.optional ? <span className="eb-tag eb-tag-option">Option · not in total</span> : null}
             </td>
             <td className="num">{p?.quantity != null ? formatQty(p.quantity, p.unit) : "—"}</td>
             <td className="num">{p?.rate != null ? formatMoney(p.rate) : "—"}</td>

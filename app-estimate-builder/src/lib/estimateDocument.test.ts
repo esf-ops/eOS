@@ -111,6 +111,15 @@ test("switching countertop strategy resets inputs but keeps sqft", () => {
   assert.ok(!("materialColorId" in item.inputs));
 });
 
+test("option toggle survives other edits and cloning", () => {
+  let doc = estimateReducer(acceptanceDoc(), { type: "update_item", id: "ct", patch: { optional: true } });
+  doc = estimateReducer(doc, { type: "update_item", id: "ct", patch: { inputs: { sqft: 50 } } });
+  assert.equal(doc.items.find((i) => i.id === "ct")!.optional, true, "editing inputs keeps the option flag");
+  assert.equal(cloneDocument(doc, counter()).items.find((i) => i.itemType === "countertop")!.optional, true);
+  doc = estimateReducer(doc, { type: "update_item", id: "ct", patch: { optional: false } });
+  assert.equal(doc.items.find((i) => i.id === "ct")!.optional, false);
+});
+
 test("editing an imported item flips provenance to imported_edited", () => {
   let doc = run(emptyDocument(), {
     type: "add_item",

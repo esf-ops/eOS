@@ -11,6 +11,7 @@ import type {
   SavedPrint,
   PricedItem,
   QbCustomer,
+  QuoteFile,
   SaveMode,
   SaveResult,
   SavedQuoteSummary
@@ -19,6 +20,7 @@ import AddItemMenu, { type QuickAddChoice } from "./AddItemMenu";
 import CatalogPicker, { type PickerTab } from "./CatalogPicker";
 import EstimateHeader from "./EstimateHeader";
 import ItemEditor from "./ItemEditor";
+import PlansFilesPanel from "./PlansFilesPanel";
 import RoomSection from "./RoomSection";
 import SqftCalculator, { type CalculatorTarget } from "./SqftCalculator";
 import TotalsSummary from "./TotalsSummary";
@@ -72,6 +74,8 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
   const [reviewOpen, setReviewOpen] = useState(false);
   const [openList, setOpenList] = useState<SavedQuoteSummary[] | null>(null);
   const [recentMaterials, setRecentMaterials] = useState<string[]>(loadRecentMaterials);
+  /** Uploaded before the first save; Brain links them to the quote on save. */
+  const [pendingFiles, setPendingFiles] = useState<QuoteFile[]>([]);
   const priceSeq = useRef(0);
 
   const dispatch = useCallback((action: DocAction) => {
@@ -120,7 +124,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
   const groups = useMemo(() => groupItemsByRoom(doc), [doc]);
   const roomTotals = useMemo(() => {
     const m = new Map<string | null, number>();
-    for (const p of pricing.data?.items ?? []) m.set(p.roomId, (m.get(p.roomId) ?? 0) + (p.amount || 0));
+    for (const p of pricing.data?.items ?? []) if (!p.optional) m.set(p.roomId, (m.get(p.roomId) ?? 0) + (p.amount || 0));
     return m;
   }, [pricing.data]);
 
@@ -268,8 +272,10 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           document: doc,
           quote_status: status,
           save_mode: mode,
-          quote_id: mode === "create" ? null : saved?.quoteId ?? null
+          quote_id: mode === "create" ? null : saved?.quoteId ?? null,
+          file_ids: pendingFiles.map((f) => f.id)
         });
+        setPendingFiles([]);
         setSaved({
           quoteId: res.quote_id,
           quoteNumber: res.quote_number,
@@ -302,11 +308,14 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           setSavedPrint(null);
         }
         const qbIssues = res.quickbooks?.issues ?? [];
+        const fileError = res.files?.error ?? null;
         setNotice({
-          tone: qbIssues.length ? "warn" : "ok",
+          tone: qbIssues.length || fileError ? "warn" : "ok",
           text: `${mode === "save_revision" ? "Revision saved" : "Saved"} to Quote Library as ${res.quote_number}${
             res.revision_label ? ` (${res.revision_label})` : ""
-          }.${qbIssues.length ? ` Before pushing to QuickBooks: ${qbIssues.map((i) => i.message).join(" ")}` : ""}`
+          }.${qbIssues.length ? ` Before pushing to QuickBooks: ${qbIssues.map((i) => i.message).join(" ")}` : ""}${
+            fileError ? ` Some files could not be attached: ${fileError}` : ""
+          }`
         });
         return res;
       } catch (e) {
@@ -318,7 +327,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
         setSaving(false);
       }
     },
-    [doc, saved, token]
+    [doc, saved, token, pendingFiles]
   );
 
   const searchCustomers = useCallback(
@@ -352,10 +361,11 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
 
   const openSaved = useCallback(
     async (id: string) => {
-      if (dirty && !window.confirm("Discard unsaved changes and open another estimate?")) return;
+      if ((dirty || pendingFiles.length) && !window.confirm("Discard unsaved changes and open another estimate?")) return;
       try {
         const res = await apiGet<LoadedQuote>(`/api/estimate-builder/quotes/${encodeURIComponent(id)}`, token);
         dispatchRaw({ type: "replace", doc: res.document });
+        setPendingFiles([]);
         setSaved({
           quoteId: res.quote.id,
           quoteNumber: res.quote.quote_number,
@@ -383,24 +393,43 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
         setNotice({ tone: "danger", text: e instanceof Error ? e.message : String(e) });
       }
     },
-    [dirty, token]
+    [dirty, token, pendingFiles.length]
   );
 
+  // `?quote=<id>` opens a saved estimate directly (Quote Library and future QuickBooks memo links).
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current || config.preview) return;
+    deepLinkHandled.current = true;
+    const id = new URLSearchParams(window.location.search).get("quote");
+    if (id && /^[0-9a-f-]{36}$/i.test(id)) void openSaved(id);
+  }, [openSaved]);
+
+  useEffect(() => {
+    if (config.preview) return;
+    const url = new URL(window.location.href);
+    if (saved?.quoteId) url.searchParams.set("quote", saved.quoteId);
+    else url.searchParams.delete("quote");
+    if (url.href !== window.location.href) window.history.replaceState(null, "", url);
+  }, [saved?.quoteId]);
+
   const newEstimate = useCallback(() => {
-    if (dirty && !window.confirm("Discard unsaved changes and start a new estimate?")) return;
+    if ((dirty || pendingFiles.length) && !window.confirm("Discard unsaved changes and start a new estimate?")) return;
     const d = emptyDocument(doc.pricingChannel);
     d.header.preparedBy = preparedByDefault;
     dispatchRaw({ type: "replace", doc: d });
+    setPendingFiles([]);
     setSaved(null);
     setSavedTotals(null);
     setSavedPrint(null);
     setDirty(false);
     setEditingId(null);
     setNotice(null);
-  }, [dirty, doc.pricingChannel, preparedByDefault]);
+  }, [dirty, pendingFiles.length, doc.pricingChannel, preparedByDefault]);
 
   const duplicateEstimate = useCallback(() => {
     dispatchRaw({ type: "replace", doc: cloneDocument(doc, newId) });
+    setPendingFiles([]);
     setSaved(null);
     setSavedTotals(null);
     setSavedPrint(null);
@@ -579,6 +608,14 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
                 </p>
               ) : null}
             </div>
+            <PlansFilesPanel
+              token={token}
+              quoteId={saved?.quoteId ?? null}
+              pending={pendingFiles}
+              onPendingChange={setPendingFiles}
+              readOnly={readOnly}
+              preview={config.preview}
+            />
           </aside>
         </div>
       </div>

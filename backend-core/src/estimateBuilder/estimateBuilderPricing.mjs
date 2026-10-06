@@ -14,6 +14,10 @@
  * rounded UP to the next $5 (credits stay exact). The estimate total is the sum of those line amounts.
  * Vanity side splash already carries its use tax inside the vanity line, as `calculateVanities` does.
  * Exact engine amounts stay on each line (`exactAmount`) for audit.
+ *
+ * Options (`item.optional`, material items only) are priced exactly like included items but excluded from
+ * the totals, from Vanity Program qualifying sf and from backsplash "match room countertop"; they round up
+ * in their own room/material group. `totals.options` reports their count and sum.
  */
 
 import { calculateQuote } from "../quotes/quoteCalculator.js";
@@ -131,6 +135,7 @@ function baseResult(item) {
     itemType: item.itemType,
     pricingStrategy: item.pricingStrategy,
     roomId: item.roomId,
+    optional: item.optional === true,
     status: "priced",
     description: "",
     customerCategory: "",
@@ -187,7 +192,7 @@ async function priceEliteAreaGroups(items, ctx) {
     if (!color || !(sqft > 0)) continue;
     const kind = isTop ? "countertop" : "backsplash";
     const roomKey = item.roomId ?? "__project__";
-    const key = `${kind}|${roomKey}|${color.id || color.colorName}`;
+    const key = `${kind}|${roomKey}|${color.id || color.colorName}|${item.optional ? "option" : "base"}`;
     if (!groups.has(key)) groups.set(key, { kind, color, roomKey, items: [] });
     groups.get(key).items.push(item);
   }
@@ -711,7 +716,7 @@ export async function priceEstimateDocument(doc, deps) {
   const roomsWithVanityProgram = new Set();
   for (const it of doc.items) {
     const roomKey = it.roomId ?? "__project__";
-    if (it.itemType === "countertop" && it.pricingStrategy === "elite_100" && !roomCountertopColor.has(roomKey)) {
+    if (it.itemType === "countertop" && it.pricingStrategy === "elite_100" && !it.optional && !roomCountertopColor.has(roomKey)) {
       const c = resolveColor(catalog, it.inputs.materialColorId, it.inputs.materialColorName);
       if (c) roomCountertopColor.set(roomKey, c);
     }
@@ -720,7 +725,7 @@ export async function priceEstimateDocument(doc, deps) {
   // Production (`qualifyingKitchenCounterSfFromInput`): exact countertop sf of every room except Vanity Program rooms.
   let qualifyingKitchenCounterSf = 0;
   for (const it of doc.items) {
-    if (it.itemType !== "countertop") continue;
+    if (it.itemType !== "countertop" || it.optional) continue;
     if (it.roomId && roomsWithVanityProgram.has(it.roomId)) continue;
     qualifyingKitchenCounterSf += Number(it.inputs.sqft) || 0;
   }
@@ -734,7 +739,8 @@ export async function priceEstimateDocument(doc, deps) {
   const policy = resolveInternalEstimateMaterialTaxPolicy();
   applyLineAmounts(items, ctx.areaShares, policy.materialUseTaxPercent);
 
-  const priced = items.filter((r) => r.status === "priced");
+  const pricedOptions = items.filter((r) => r.status === "priced" && r.optional);
+  const priced = items.filter((r) => r.status === "priced" && !r.optional);
   const subtotal = round2(priced.reduce((s, r) => s + r.exactAmount, 0));
   const sumOf = (pick) => round2(priced.reduce((s, r) => s + pick(r), 0));
   const ctBase = sumOf((r) => r.taxBase.countertop);
@@ -748,6 +754,7 @@ export async function priceEstimateDocument(doc, deps) {
   const pricedItems = items.filter((r) => r.status !== "note");
   const blockers = [];
   if (!pricedItems.length) blockers.push("Add at least one priced item.");
+  else if (pricedItems.every((r) => r.optional)) blockers.push("At least one item must be included in the total (all items are options).");
   const blocked = pricedItems.filter((r) => r.status !== "priced");
   if (blocked.length) blockers.push(`${blocked.length} item${blocked.length === 1 ? "" : "s"} still need${blocked.length === 1 ? "s" : ""} information.`);
   if (!doc.header.customerName && !doc.header.accountName) blockers.push("Add a customer.");
@@ -785,8 +792,9 @@ export async function priceEstimateDocument(doc, deps) {
       total,
       qualifyingKitchenCounterSf,
       itemCount: pricedItems.length,
-      pricedCount: priced.length,
-      noteCount: items.length - pricedItems.length
+      pricedCount: priced.length + pricedOptions.length,
+      noteCount: items.length - pricedItems.length,
+      options: { count: pricedOptions.length, total: round2(pricedOptions.reduce((s, r) => s + r.amount, 0)) }
     },
     readiness: { ready: blockers.length === 0, blockers },
     catalogSize: catalog.size

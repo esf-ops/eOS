@@ -175,7 +175,7 @@ export type DocAction =
   | {
       type: "update_item";
       id: string;
-      patch: { inputs?: Record<string, unknown>; label?: string; pricingStrategy?: PricingStrategy };
+      patch: { inputs?: Record<string, unknown>; label?: string; pricingStrategy?: PricingStrategy; optional?: boolean };
       now?: string;
     }
   | { type: "remove_item"; id: string }
@@ -291,6 +291,7 @@ export function estimateReducer(doc: EstimateDocument, action: DocAction): Estim
           ...it,
           pricingStrategy: patch.pricingStrategy ?? it.pricingStrategy,
           label: patch.label ?? it.label,
+          optional: patch.optional ?? it.optional,
           inputs,
           source: { ...it.source, provenance: editedProvenance(it.source.provenance) },
           updatedAt: action.now ?? it.updatedAt

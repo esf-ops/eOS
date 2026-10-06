@@ -171,6 +171,7 @@ export function attachEstimateBuilderRoutes(app, deps) {
       const result = await processEstimateBuilderSave(db, {
         body,
         userEmail,
+        userId: req.user?.id ?? null,
         organizationContext: orgCtx,
         materialColors: colors,
         resolveQuickbooks
@@ -192,6 +193,9 @@ export function attachEstimateBuilderRoutes(app, deps) {
           item_count: result.pricing.totals.itemCount,
           grand_total: result.pricing.totals.total,
           quickbooks_ready: result.quickbooks?.ready ?? null,
+          options_count: result.pricing.totals.options?.count ?? 0,
+          files_linked: result.files?.linked ?? 0,
+          files_moved: result.files?.moved ?? 0,
           organization_id: orgCtx.organizationId ?? null
         },
         req
@@ -206,7 +210,8 @@ export function attachEstimateBuilderRoutes(app, deps) {
         save_mode: result.saveMode,
         pricing: result.pricing,
         document: result.document,
-        quickbooks: result.quickbooks ?? null
+        quickbooks: result.quickbooks ?? null,
+        files: result.files ?? null
       });
     } catch (e) {
       fail(res, e);
