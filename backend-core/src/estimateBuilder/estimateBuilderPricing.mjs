@@ -5,8 +5,9 @@
  *
  * Every Elite-program item is priced by sending a minimal single-item `internal_quote` probe through
  * the production `calculateQuote` engine (the same engine `POST /api/internal-quotes/calculate|save`
- * uses). Out-of-Collection countertops run through the production Custom Quote calculator.
- * This module never defines a $/sf, add-on, vanity, or tax constant.
+ * uses). Out-of-Collection countertops run through the production Custom Quote calculator. Sinks, faucets
+ * and accessories are priced at the ESF plumbing catalog sell price (`estimateBuilderProducts.mjs`).
+ * This module never defines a $/sf, add-on, product, vanity, or tax constant.
  *
  * Line amounts (owner rule, 2026-10-06): material use tax (Internal Estimate policy percent) is added to
  * each Elite countertop / backsplash line — e.g. (60 sf × $45) × 1.02 — and every engine-priced line is
@@ -27,6 +28,7 @@ import {
 } from "../quotes/vanityProgram2026.js";
 import { STANDARD_VANITY_DEPTH_IN, vanitySideSplashSfPerPiece } from "../quotes/vanitySideSplash.js";
 import { ESTIMATE_ITEM_TYPES, VANITY_BOWL_CODES } from "./estimateBuilderContracts.mjs";
+import { resolveCatalogProduct } from "./estimateBuilderProducts.mjs";
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -519,6 +521,65 @@ async function priceService(item, ctx, res) {
   return res;
 }
 
+/** ESF catalog product: catalog sell price × qty (no material use tax; the $5 line rule still applies). */
+function priceProduct(item, res) {
+  res.customerCategory = "Sinks & fixtures";
+  res.unit = "ea";
+  res.description = "Catalog product";
+  const resolved = resolveCatalogProduct(item.inputs);
+  if (resolved.product) res.description = resolved.product.displayName;
+  if (!resolved.ok) return incomplete(res, resolved.code, resolved.message);
+  const { product, variant, unitPrice } = resolved;
+  res.description = resolved.description;
+  res.productTab = resolved.tab;
+  res.cutoutCode = resolved.cutoutCode;
+  res.itemCode = `product:${variant?.sku || product.sku || product.productId}`;
+  res.pricingSource = { engine: "esfPlumbingCatalog", reference: `ESF plumbing catalog ${product.sourceVersion ?? ""} · ${product.productId}`.trim() };
+  res.quantity = item.inputs.qty;
+  res.rate = unitPrice;
+  res.amount = round2(unitPrice * item.inputs.qty);
+  res.details.push(
+    { label: "Manufacturer", value: product.manufacturer },
+    { label: "SKU", value: String(variant?.sku || product.sku || "—") },
+    ...(variant ? [{ label: "Finish", value: String(variant.finish || variant.color || variant.sku) }] : []),
+    { label: "Catalog price", value: `${money(unitPrice)} each` },
+    { label: "Availability", value: (variant?.availability ?? product.availability) === "stock" ? "Stock" : "Special order" },
+    { label: "Material use tax", value: "Not applied (catalog product)" }
+  );
+  if (product.estimatorReviewRequired) {
+    res.warnings.push({ code: "estimator_review", severity: "review", message: "Catalog marks this product for estimator review." });
+  }
+  return res;
+}
+
+/** Warn when a room has more cutout-requiring catalog sinks than matching cutouts (cutouts are charged separately). */
+function flagMissingCutouts(items, docItems) {
+  const qtyById = new Map(docItems.map((it) => [it.id, Number(it.inputs?.qty) || 0]));
+  const codeById = new Map(docItems.filter((it) => it.itemType === "cutout").map((it) => [it.id, it.inputs.cutoutCode]));
+  const need = new Map();
+  const have = new Map();
+  for (const r of items) {
+    const key = (code) => `${r.roomId ?? "__project__"}|${code}`;
+    if (r.itemType === "product" && r.status === "priced" && r.cutoutCode) {
+      need.set(key(r.cutoutCode), (need.get(key(r.cutoutCode)) ?? 0) + (qtyById.get(r.itemId) ?? 0));
+    } else if (r.itemType === "cutout" && codeById.has(r.itemId)) {
+      const k = key(codeById.get(r.itemId));
+      have.set(k, (have.get(k) ?? 0) + (qtyById.get(r.itemId) ?? 0));
+    }
+  }
+  for (const r of items) {
+    if (r.itemType !== "product" || r.status !== "priced" || !r.cutoutCode) continue;
+    const k = `${r.roomId ?? "__project__"}|${r.cutoutCode}`;
+    if ((have.get(k) ?? 0) < (need.get(k) ?? 0)) {
+      r.warnings.push({
+        code: "missing_cutout",
+        severity: "warn",
+        message: `No matching ${ADDON_ENGINE_LABELS[r.cutoutCode]?.toLowerCase() ?? "cutout"} in this room — add one so the cutout is charged.`
+      });
+    }
+  }
+}
+
 async function priceCustom(item, ctx, res) {
   const i = item.inputs;
   const isCredit = i.category === "credit";
@@ -578,6 +639,8 @@ export async function priceEstimateItem(item, ctx) {
         return await priceEdge(item, ctx, res);
       case "service":
         return await priceService(item, ctx, res);
+      case "product":
+        return priceProduct(item, res);
       case "custom":
         return await priceCustom(item, ctx, res);
       case "note":
@@ -671,6 +734,7 @@ export async function priceEstimateDocument(doc, deps) {
   const ctx = { catalog, channel, roomCountertopColor, roomsWithVanityProgram, qualifyingKitchenCounterSf, areaShares: new Map() };
   ctx.areaShares = await priceEliteAreaGroups(doc.items, ctx);
   const items = await Promise.all(doc.items.map((it) => priceEstimateItem(it, ctx)));
+  flagMissingCutouts(items, doc.items);
 
   const policy = resolveInternalEstimateMaterialTaxPolicy();
   applyLineAmounts(items, ctx.areaShares, policy.materialUseTaxPercent);

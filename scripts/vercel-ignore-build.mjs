@@ -54,6 +54,8 @@ export const PROJECT_DEPENDENCIES = Object.freeze({
   "app-estimate-builder": [
     "backend-core/src/estimateBuilder",
     "app-quote/src/lib/customerEstimate",
+    "app-quote/src/lib/measurementEngine.ts",
+    "app-quote/src/lib/quoteTypes.ts",
     "shared/eliteos-ui",
     "shared/eliteos-supabase"
   ]

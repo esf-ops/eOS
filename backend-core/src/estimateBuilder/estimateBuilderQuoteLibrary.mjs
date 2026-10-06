@@ -195,7 +195,7 @@ export function buildQuoteLibraryArtifacts(doc, pricing, opts = {}) {
     .map((r, idx) => ({
       line_type: "estimate_item",
       category: r.itemType,
-      item_code: `${r.itemType}:${r.pricingStrategy}`,
+      item_code: r.itemCode ?? `${r.itemType}:${r.pricingStrategy}`,
       item_name: r.description,
       room_name: roomNameFor(doc, r.roomId),
       quantity: r.quantity,

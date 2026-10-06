@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --test src/lib/estimateDocument.test.ts",
+    "test": "node --test src/lib/estimateDocument.test.ts src/lib/measure.test.ts",
     "dev:harness": "node scripts/devPricingHarness.mjs"
   },
   "dependencies": {

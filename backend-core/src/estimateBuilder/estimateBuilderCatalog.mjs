@@ -1,6 +1,6 @@
 /**
- * Estimate Builder catalog payload — option labels only. No prices leave the Brain through this payload;
- * the head asks `/price` for every amount.
+ * Estimate Builder catalog payload — option labels, plus catalog sell prices for sinks / faucets / accessories so
+ * staff can choose (no costs or margins). Every line amount still comes from `/price`.
  */
 
 import { CUSTOM_QUOTE_MATERIAL_TYPES } from "../quotes/customQuotePricingResolver.js";
@@ -14,6 +14,7 @@ import {
   ESTIMATE_ITEM_TYPES,
   VANITY_SINK_TYPES
 } from "./estimateBuilderContracts.mjs";
+import { buildEstimateBuilderProductCatalog } from "./estimateBuilderProducts.mjs";
 import { ESTIMATE_TEMPLATES } from "./estimateBuilderTemplates.mjs";
 
 const CUTOUT_LABELS = {
@@ -71,6 +72,7 @@ export function buildEstimateBuilderCatalog(colors, warnings = []) {
       sinkTypes: VANITY_SINK_TYPES.map((code) => ({ code, label: VANITY_SINK_LABELS[code] ?? code }))
     },
     outOfCollection: { materialTypes: CUSTOM_QUOTE_MATERIAL_TYPES },
+    products: buildEstimateBuilderProductCatalog(),
     customCategories: CUSTOM_ITEM_CATEGORIES,
     roomSuggestions: DEFAULT_ROOM_SUGGESTIONS,
     templates: ESTIMATE_TEMPLATES

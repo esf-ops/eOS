@@ -73,6 +73,13 @@ export const ESTIMATE_ITEM_TYPES = Object.freeze({
     defaultStrategy: "service_catalog",
     accountingItem: "Services"
   },
+  /** ESF plumbing / specialty catalog product (sink, faucet, accessory, installed specialty item). */
+  product: {
+    label: "Sink / Faucet / Accessory",
+    strategies: ["esf_catalog"],
+    defaultStrategy: "esf_catalog",
+    accountingItem: "Sinks & Fixtures"
+  },
   custom: {
     label: "Custom Item",
     strategies: ["custom_line"],
@@ -225,6 +232,8 @@ function normalizeInputs(itemType, strategy, raw) {
       };
     case "service":
       return { serviceCode: oneOf(i.serviceCode, SERVICE_CODES, "additional_trip"), qty: intQty(i.qty, 1) };
+    case "product":
+      return { productId: str(i.productId, 200) || null, variantId: str(i.variantId, 200) || null, qty: Math.max(1, intQty(i.qty, 1)) };
     case "custom":
       return {
         description: str(i.description, 300),

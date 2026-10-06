@@ -8,7 +8,9 @@ import { formatMoney, formatQty } from "./format";
 const ROOM_QUICK_ADDS: QuickAddChoice[] = [
   { label: "Countertop", itemType: "countertop", pricingStrategy: "elite_100" },
   { label: "Backsplash", itemType: "backsplash", pricingStrategy: "standard" },
-  { label: "Sink", itemType: "cutout", pricingStrategy: "addon_catalog", inputs: { cutoutCode: "qty-sink", qty: 1 } },
+  { label: "Sink", itemType: "product", pricingStrategy: "esf_catalog", catalogTab: "sinks" },
+  { label: "Faucet", itemType: "product", pricingStrategy: "esf_catalog", catalogTab: "faucets" },
+  { label: "Add-ons", itemType: "cutout", pricingStrategy: "addon_catalog", catalogTab: "addons" },
   { label: "Note", itemType: "note", pricingStrategy: "text" }
 ];
 
@@ -17,6 +19,7 @@ const TYPE_LABELS: Record<string, string> = {
   backsplash: "Backsplash",
   vanity: "Vanity",
   cutout: "Sink / cutout",
+  product: "Sink / fixture",
   outlet: "Outlet cutout",
   edge: "Edge upgrade",
   service: "Service",

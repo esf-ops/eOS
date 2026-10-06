@@ -13,11 +13,13 @@ import type {
   OutOfCollectionInputs,
   PricedItem,
   PricingStrategy,
+  ProductInputs,
   ServiceInputs,
   VanityInputs
 } from "../lib/estimateTypes";
 import MaterialPicker from "./MaterialPicker";
 import { itemFallbackLabel } from "./RoomSection";
+import type { CalculatorTarget } from "./SqftCalculator";
 import { formatMoney, formatQty, numValue, parseNum } from "./format";
 
 type Props = {
@@ -31,8 +33,19 @@ type Props = {
   dispatch: (a: DocAction) => void;
   onClose: () => void;
   onAddAnother: () => void;
+  onOpenCalculator: (target: CalculatorTarget) => void;
   readOnly: boolean;
 };
+
+type OpenCalc = (kind: CalculatorTarget["kind"], onUse: (sqft: number) => void) => void;
+
+function CalcLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="eb-link eb-calc-link" onClick={onClick}>
+      Calculate square feet…
+    </button>
+  );
+}
 
 const STRATEGY_OPTIONS: Partial<Record<EstimateItem["itemType"], Array<{ value: PricingStrategy; label: string }>>> = {
   countertop: [
@@ -50,6 +63,7 @@ const TITLES: Record<EstimateItem["itemType"], string> = {
   backsplash: "Backsplash",
   vanity: "Vanity",
   cutout: "Sink / cutout",
+  product: "Sink / faucet / accessory",
   outlet: "Electrical outlet cutout",
   edge: "Edge / fabrication upgrade",
   service: "Trip / service",
@@ -68,8 +82,10 @@ export default function ItemEditor({
   dispatch,
   onClose,
   onAddAnother,
+  onOpenCalculator,
   readOnly
 }: Props) {
+  const openCalc: OpenCalc = (kind, onUse) => onOpenCalculator({ kind, onUse });
   const panelRef = useRef<HTMLElement>(null);
   const setInputs = (inputs: Record<string, unknown>) => dispatch({ type: "update_item", id: item.id, patch: { inputs }, now: new Date().toISOString() });
   const setStrategy = (pricingStrategy: PricingStrategy) =>
@@ -116,7 +132,15 @@ export default function ItemEditor({
             </div>
           ) : null}
 
-          <ItemFields item={item} catalog={catalog} doc={doc} recentMaterials={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} />
+          <ItemFields
+            item={item}
+            catalog={catalog}
+            doc={doc}
+            recentMaterials={recentMaterials}
+            setInputs={setInputs}
+            pickMaterial={pickMaterial}
+            openCalc={readOnly ? null : openCalc}
+          />
 
           {item.itemType !== "note" ? (
             <TextField
@@ -192,7 +216,8 @@ function ItemFields({
   doc,
   recentMaterials,
   setInputs,
-  pickMaterial
+  pickMaterial,
+  openCalc
 }: {
   item: EstimateItem;
   catalog: EstimateCatalog;
@@ -200,18 +225,31 @@ function ItemFields({
   recentMaterials: string[];
   setInputs: (i: Record<string, unknown>) => void;
   pickMaterial: (c: MaterialColor) => void;
+  openCalc: OpenCalc | null;
 }) {
+  const calcFor = (kind: CalculatorTarget["kind"]) => (openCalc ? <CalcLink onClick={() => openCalc(kind, (sqft) => setInputs({ sqft }))} /> : null);
   switch (item.itemType) {
     case "countertop":
       return item.pricingStrategy === "elite_100" ? (
-        <EliteFields inputs={item.inputs} catalog={catalog} recent={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} />
+        <EliteFields inputs={item.inputs} catalog={catalog} recent={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} calcLink={calcFor("counter")} />
       ) : (
-        <OutOfCollectionFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} />
+        <OutOfCollectionFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} calcLink={calcFor("counter")} />
       );
     case "backsplash":
       return (
-        <BacksplashFields item={item} inputs={item.inputs} doc={doc} catalog={catalog} recent={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} />
+        <BacksplashFields
+          item={item}
+          inputs={item.inputs}
+          doc={doc}
+          catalog={catalog}
+          recent={recentMaterials}
+          setInputs={setInputs}
+          pickMaterial={pickMaterial}
+          calcLink={calcFor("splash")}
+        />
       );
+    case "product":
+      return <ProductFields inputs={item.inputs} catalog={catalog} setInputs={setInputs} />;
     case "vanity":
       return <VanityFields inputs={item.inputs} catalog={catalog} recent={recentMaterials} setInputs={setInputs} pickMaterial={pickMaterial} />;
     case "cutout":
@@ -243,17 +281,20 @@ function EliteFields({
   catalog,
   recent,
   setInputs,
-  pickMaterial
+  pickMaterial,
+  calcLink
 }: {
   inputs: EliteCountertopInputs;
   catalog: EstimateCatalog;
   recent: string[];
   setInputs: SetInputs;
   pickMaterial: (c: MaterialColor) => void;
+  calcLink: ReactNode;
 }) {
   return (
     <>
       <NumField label="Countertop square feet" value={inputs.sqft} suffix="sf" min={0} autoFocus onChange={(v) => setInputs({ sqft: v })} />
+      {calcLink}
       <div className="eb-field">
         <span>Elite 100 color</span>
         <MaterialPicker colors={catalog.materialColors} valueId={inputs.materialColorId} valueName={inputs.materialColorName} recentIds={recent} onPick={pickMaterial} />
@@ -269,7 +310,8 @@ function BacksplashFields({
   catalog,
   recent,
   setInputs,
-  pickMaterial
+  pickMaterial,
+  calcLink
 }: {
   item: EstimateItem;
   inputs: BacksplashInputs;
@@ -278,6 +320,7 @@ function BacksplashFields({
   recent: string[];
   setInputs: SetInputs;
   pickMaterial: (c: MaterialColor) => void;
+  calcLink: ReactNode;
 }) {
   const roomTop = doc.items.find(
     (it) => it.roomId === item.roomId && it.itemType === "countertop" && it.pricingStrategy === "elite_100"
@@ -285,6 +328,7 @@ function BacksplashFields({
   return (
     <>
       <NumField label="Backsplash square feet" value={inputs.sqft} suffix="sf" min={0} autoFocus onChange={(v) => setInputs({ sqft: v })} />
+      {calcLink}
       <div className="eb-field">
         <span>Material</span>
         <div className="eb-radio-row">
@@ -315,7 +359,59 @@ function BacksplashFields({
   );
 }
 
-function OutOfCollectionFields({ inputs, catalog, setInputs }: { inputs: OutOfCollectionInputs; catalog: EstimateCatalog; setInputs: SetInputs }) {
+function ProductFields({ inputs, catalog, setInputs }: { inputs: ProductInputs; catalog: EstimateCatalog; setInputs: SetInputs }) {
+  const product = catalog.products.products.find((p) => p.productId === inputs.productId) ?? null;
+  if (!product) {
+    return <p className="eb-warn-text">This catalog product is no longer available. Delete this line and add a current product.</p>;
+  }
+  const variant = product.variants.find((v) => v.variantId === inputs.variantId) ?? null;
+  const price = variant?.price ?? product.price;
+  return (
+    <>
+      <div className="eb-product-card">
+        <strong>{product.displayName}</strong>
+        <span className="eb-muted eb-small">
+          {[product.manufacturer, variant?.sku ?? product.sku, (variant?.stock ?? product.stock) ? "Stock" : "Special order", price != null ? formatMoney(price) : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </div>
+      <div className="eb-grid-2">
+        {product.variants.length ? (
+          <label className="eb-field">
+            <span>Finish</span>
+            <select data-autofocus value={inputs.variantId ?? ""} onChange={(e) => setInputs({ variantId: e.target.value || null })}>
+              <option value="">Choose finish…</option>
+              {product.variants.map((v) => (
+                <option key={v.variantId} value={v.variantId}>
+                  {[v.style, v.finish].filter(Boolean).join(" · ")} — {formatMoney(v.price)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <NumField label="Quantity" value={inputs.qty} integer min={1} autoFocus={!product.variants.length} onChange={(v) => setInputs({ qty: v ?? 1 })} />
+      </div>
+      {product.cutoutCode ? (
+        <p className="eb-hint">
+          Needs a {product.cutoutCode === "qty-bar" ? "vanity/bar" : "sink"} cutout in the same room — one is added automatically from the catalog picker.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function OutOfCollectionFields({
+  inputs,
+  catalog,
+  setInputs,
+  calcLink
+}: {
+  inputs: OutOfCollectionInputs;
+  catalog: EstimateCatalog;
+  setInputs: SetInputs;
+  calcLink: ReactNode;
+}) {
   return (
     <>
       <div className="eb-grid-2">
@@ -335,6 +431,7 @@ function OutOfCollectionFields({ inputs, catalog, setInputs }: { inputs: OutOfCo
         </label>
         <NumField label="Countertop square feet" value={inputs.sqft} suffix="sf" min={0} onChange={(v) => setInputs({ sqft: v })} />
       </div>
+      {calcLink}
       <div className="eb-grid-3">
         <NumField label="Slab width" value={inputs.slabWidthIn} suffix="in" min={0} onChange={(v) => setInputs({ slabWidthIn: v })} />
         <NumField label="Slab height" value={inputs.slabHeightIn} suffix="in" min={0} onChange={(v) => setInputs({ slabHeightIn: v })} />

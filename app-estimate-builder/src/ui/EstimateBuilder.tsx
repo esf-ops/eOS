@@ -3,6 +3,7 @@ import { ApiError, apiGet, apiPost } from "../lib/api";
 import { config } from "../lib/config";
 import { emptyDocument, estimateReducer, groupItemsByRoom, newId, cloneDocument, type DocAction } from "../lib/estimateDocument";
 import type {
+  CatalogProduct,
   EstimateCatalog,
   EstimatePricing,
   EstimateTotals,
@@ -14,9 +15,11 @@ import type {
   SavedQuoteSummary
 } from "../lib/estimateTypes";
 import AddItemMenu, { type QuickAddChoice } from "./AddItemMenu";
+import CatalogPicker, { type PickerTab } from "./CatalogPicker";
 import EstimateHeader from "./EstimateHeader";
 import ItemEditor from "./ItemEditor";
 import RoomSection from "./RoomSection";
+import SqftCalculator, { type CalculatorTarget } from "./SqftCalculator";
 import TotalsSummary from "./TotalsSummary";
 import { formatMoney } from "./format";
 
@@ -62,6 +65,8 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
   const [notice, setNotice] = useState<{ tone: "ok" | "warn" | "danger"; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addMenu, setAddMenu] = useState<{ roomId: string | null } | null>(null);
+  const [picker, setPicker] = useState<{ roomId: string | null; tab: PickerTab } | null>(null);
+  const [calc, setCalc] = useState<{ roomId: string | null; target: CalculatorTarget | null } | null>(null);
   const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [openList, setOpenList] = useState<SavedQuoteSummary[] | null>(null);
@@ -133,6 +138,15 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
 
   const addItem = useCallback(
     (choice: QuickAddChoice, roomId: string | null) => {
+      setAddMenu(null);
+      if (choice.catalogTab) {
+        setPicker({ roomId, tab: choice.catalogTab });
+        return;
+      }
+      if (choice.tool === "sqft") {
+        setCalc({ roomId, target: null });
+        return;
+      }
       const id = newId();
       dispatch({
         type: "add_item",
@@ -145,12 +159,73 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           now: new Date().toISOString()
         }
       });
-      setAddMenu(null);
       if (choice.itemType === "note") setFocusNoteId(id);
       else setEditingId(id);
     },
     [dispatch]
   );
+
+  const productCutouts = useMemo(
+    () => Object.fromEntries((catalog?.products.products ?? []).map((p) => [p.productId, p.cutoutCode])),
+    [catalog]
+  );
+
+  /** One click: the catalog product plus its required cutout when the room doesn't already have one. */
+  const addCatalogProduct = useCallback(
+    (product: CatalogProduct, variantId: string | null, roomId: string | null) => {
+      dispatch({
+        type: "add_catalog_product",
+        spec: {
+          id: newId(),
+          itemType: "product",
+          pricingStrategy: "esf_catalog",
+          roomId,
+          inputs: { productId: product.productId, variantId, qty: 1 },
+          now: new Date().toISOString()
+        },
+        cutout: product.cutoutCode ? { code: product.cutoutCode, id: newId() } : null,
+        productCutouts
+      });
+    },
+    [dispatch, productCutouts]
+  );
+
+  const addAddon = useCallback(
+    (choice: QuickAddChoice, roomId: string | null) => {
+      dispatch({
+        type: "add_or_bump",
+        spec: { id: newId(), itemType: choice.itemType, pricingStrategy: choice.pricingStrategy, roomId, inputs: choice.inputs, now: new Date().toISOString() }
+      });
+    },
+    [dispatch]
+  );
+
+  /**
+   * Calculator results fill the room's empty countertop/backsplash line (e.g. from a template) or add one;
+   * the countertop editor opens so a color gets picked.
+   */
+  const addMeasured = useCallback(
+    ({ counterSf, splashSf }: { counterSf: number; splashSf: number }, roomId: string | null) => {
+      const now = new Date().toISOString();
+      const place = (itemType: "countertop" | "backsplash", sqft: number): string => {
+        const empty = doc.items.find((it) => it.roomId === roomId && it.itemType === itemType && (it.inputs as { sqft?: number | null }).sqft == null);
+        if (empty) {
+          dispatch({ type: "update_item", id: empty.id, patch: { inputs: { sqft } }, now });
+          return empty.id;
+        }
+        const id = newId();
+        const pricingStrategy = itemType === "countertop" ? "elite_100" : "standard";
+        dispatch({ type: "add_item", spec: { id, itemType, pricingStrategy, roomId, inputs: { sqft }, now } });
+        return id;
+      };
+      const counterId = counterSf > 0 ? place("countertop", counterSf) : null;
+      if (splashSf > 0) place("backsplash", splashSf);
+      if (counterId) setEditingId(counterId);
+    },
+    [dispatch, doc.items]
+  );
+
+  const lastRoomId = doc.rooms.length ? doc.rooms[doc.rooms.length - 1].id : null;
 
   const addNoteBelow = useCallback(
     (roomId: string | null, afterId: string) => {
@@ -321,6 +396,8 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
         saveDraft();
       } else if (e.key === "Escape") {
         if (addMenu) setAddMenu(null);
+        else if (calc) setCalc(null);
+        else if (picker) setPicker(null);
         else if (editingId) setEditingId(null);
         else if (openList) setOpenList(null);
         else if (reviewOpen) setReviewOpen(false);
@@ -328,7 +405,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addMenu, doc.rooms, editingId, openList, reviewOpen, saveDraft]);
+  }, [addMenu, calc, picker, doc.rooms, editingId, openList, reviewOpen, saveDraft]);
 
   const editingItem = editingId ? doc.items.find((it) => it.id === editingId) ?? null : null;
   const blockerCount = pricing.data?.readiness.blockers.length ?? 0;
@@ -392,6 +469,7 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
                 onOpenMenu={() => setAddMenu({ roomId: null })}
                 onTemplate={applyTemplate}
                 onAddRoom={addRoom}
+                onCalculator={() => setCalc({ roomId: null, target: null })}
               />
             ) : (
               <>
@@ -399,13 +477,17 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
                   <button
                     type="button"
                     className="eb-btn eb-btn-primary"
-                    onClick={() => setAddMenu({ roomId: doc.rooms.length ? doc.rooms[doc.rooms.length - 1].id : null })}
+                    onClick={() => setAddMenu({ roomId: lastRoomId })}
                     disabled={readOnly}
                   >
                     + Add item <kbd>⌘K</kbd>
                   </button>
+                  <button type="button" className="eb-btn" onClick={() => setPicker({ roomId: lastRoomId, tab: "sinks" })} disabled={readOnly}>
+                    Sinks &amp; add-ons
+                  </button>
                   <AddRoomControl suggestions={catalog.roomSuggestions} existing={doc.rooms.map((r) => r.name)} onAdd={addRoom} />
                   <TemplateSelect catalog={catalog} onTemplate={applyTemplate} />
+                  <ToolsMenu onCalculator={() => setCalc({ roomId: lastRoomId, target: null })} disabled={readOnly} />
                   <span className="eb-spacer" />
                   {pricing.pending ? <span className="eb-muted eb-small">Pricing…</span> : null}
                   {pricing.error ? <span className="eb-danger-text eb-small">Pricing unavailable: {pricing.error}</span> : null}
@@ -481,10 +563,30 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
           rooms={doc.rooms}
           initialRoomId={addMenu.roomId}
           onPick={addItem}
+          onPickProduct={(product, roomId) => {
+            setAddMenu(null);
+            if (product.variants.length) setPicker({ roomId, tab: product.tab });
+            else addCatalogProduct(product, null, roomId);
+          }}
           onClose={() => setAddMenu(null)}
         />
       ) : null}
 
+      {picker ? (
+        <CatalogPicker
+          catalog={catalog}
+          rooms={doc.rooms}
+          initialRoomId={picker.roomId}
+          initialTab={picker.tab}
+          onAddProduct={addCatalogProduct}
+          onAddAddon={addAddon}
+          onOpenEditorFor={(choice, roomId) => {
+            setPicker(null);
+            addItem(choice, roomId);
+          }}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
       {editingItem ? (
         <ItemEditor
           key={editingItem.id}
@@ -501,8 +603,13 @@ export default function EstimateBuilder({ token, preparedByDefault }: { token: s
             setEditingId(null);
             setAddMenu({ roomId: editingItem.roomId });
           }}
+          onOpenCalculator={(target) => setCalc({ roomId: editingItem.roomId, target })}
           readOnly={readOnly}
         />
+      ) : null}
+
+      {calc ? (
+        <SqftCalculator rooms={doc.rooms} initialRoomId={calc.roomId} target={calc.target} onAdd={addMeasured} onClose={() => setCalc(null)} />
       ) : null}
 
       {openList ? <OpenEstimateDialog quotes={openList} onOpen={(id) => void openSaved(id)} onClose={() => setOpenList(null)} /> : null}
@@ -538,22 +645,52 @@ const QUICK_ADDS: Array<QuickAddChoice & { key: string }> = [
   { key: "ooc", label: "Out-of-Collection countertop", itemType: "countertop", pricingStrategy: "out_of_collection" },
   { key: "vanity", label: "Vanity", itemType: "vanity", pricingStrategy: "vanity_program_2026" },
   { key: "bs", label: "Backsplash", itemType: "backsplash", pricingStrategy: "standard" },
-  { key: "sink", label: "Sink / cutout", itemType: "cutout", pricingStrategy: "addon_catalog" },
+  { key: "sink", label: "Sink", itemType: "product", pricingStrategy: "esf_catalog", catalogTab: "sinks" },
+  { key: "faucet", label: "Faucet", itemType: "product", pricingStrategy: "esf_catalog", catalogTab: "faucets" },
+  { key: "addons", label: "Cutouts, tear-out & trips", itemType: "cutout", pricingStrategy: "addon_catalog", catalogTab: "addons" },
   { key: "custom", label: "Custom item", itemType: "custom", pricingStrategy: "custom_line" }
 ];
+
+function ToolsMenu({ onCalculator, disabled }: { onCalculator: () => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="eb-menu-wrap" onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setOpen(false)}>
+      <button type="button" className="eb-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} disabled={disabled}>
+        Tools ▾
+      </button>
+      {open ? (
+        <div className="eb-menu eb-tools-menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onCalculator();
+            }}
+          >
+            Square footage calculator
+            <span className="eb-palette-hint">Lengths × depth → sf for countertop &amp; backsplash</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function EmptyState({
   catalog,
   onQuickAdd,
   onOpenMenu,
   onTemplate,
-  onAddRoom
+  onAddRoom,
+  onCalculator
 }: {
   catalog: EstimateCatalog;
   onQuickAdd: (c: QuickAddChoice) => void;
   onOpenMenu: () => void;
   onTemplate: (id: string) => void;
   onAddRoom: (name: string) => string;
+  onCalculator: () => void;
 }) {
   return (
     <div className="eb-empty">
@@ -578,6 +715,7 @@ function EmptyState({
         </button>
         <AddRoomControl suggestions={catalog.roomSuggestions} existing={[]} onAdd={onAddRoom} />
         <TemplateSelect catalog={catalog} onTemplate={onTemplate} />
+        <ToolsMenu onCalculator={onCalculator} />
       </div>
     </div>
   );

@@ -24,6 +24,7 @@ export const DEFAULT_STRATEGY: Record<ItemType, PricingStrategy> = {
   outlet: "addon_catalog",
   edge: "edge_v2",
   service: "service_catalog",
+  product: "esf_catalog",
   custom: "custom_line",
   note: "text"
 };
@@ -111,6 +112,8 @@ export function defaultInputs(itemType: ItemType, strategy: PricingStrategy): Re
       };
     case "service":
       return { serviceCode: "additional_trip", qty: 1 };
+    case "product":
+      return { productId: null, variantId: null, qty: 1 };
     case "custom":
       return {
         description: "",
@@ -160,6 +163,18 @@ export type DocAction =
   | { type: "set_channel"; channel: PricingChannel }
   | { type: "set_header"; patch: Partial<EstimateHeader> }
   | { type: "add_item"; spec: NewItemSpec; afterId?: string | null }
+  /** One-click add-on: bumps the qty of the same add-on already in the room, otherwise adds it. */
+  | { type: "add_or_bump"; spec: NewItemSpec }
+  /**
+   * Catalog product add. When the product needs a cutout, the room is topped up so its cutout qty covers every
+   * catalog product needing that cutout (`productCutouts` maps productId → cutout code).
+   */
+  | {
+      type: "add_catalog_product";
+      spec: NewItemSpec;
+      cutout: { code: string; id: string } | null;
+      productCutouts: Record<string, string | null>;
+    }
   | {
       type: "update_item";
       id: string;
@@ -189,6 +204,18 @@ function editedProvenance(p: ItemProvenance): ItemProvenance {
   return p === "imported_unmodified" ? "imported_edited" : p;
 }
 
+function qtyOf(it: EstimateItem): number {
+  return Number((it.inputs as { qty?: number }).qty) || 0;
+}
+
+/** Identity of a quantity-only add-on for `add_or_bump`; null for items that are not bumped. */
+function addonKey(it: EstimateItem): string | null {
+  if (it.itemType === "cutout") return `cutout:${it.inputs.cutoutCode}`;
+  if (it.itemType === "outlet") return "outlet";
+  if (it.itemType === "service") return `service:${it.inputs.serviceCode}`;
+  return null;
+}
+
 /** Fields that survive a pricing-strategy switch (e.g. Elite 100 → Out-of-Collection keeps the sqft). */
 const CARRY_OVER_KEYS = ["sqft", "qty"];
 
@@ -206,6 +233,48 @@ export function estimateReducer(doc: EstimateDocument, action: DocAction): Estim
       const anchor = action.afterId ? items.findIndex((it) => it.id === action.afterId) : -1;
       if (anchor >= 0) items.splice(anchor + 1, 0, item);
       else items.push(item);
+      return { ...doc, items: renumberItems(items) };
+    }
+    case "add_or_bump": {
+      const probe = createItem(action.spec);
+      const key = addonKey(probe);
+      const existing = key ? doc.items.find((it) => it.roomId === probe.roomId && addonKey(it) === key) : undefined;
+      if (!existing) return { ...doc, items: renumberItems([...doc.items, probe]) };
+      return {
+        ...doc,
+        items: doc.items.map((it) =>
+          it.id === existing.id ? ({ ...it, inputs: { ...it.inputs, qty: qtyOf(it) + 1 }, updatedAt: action.spec.now ?? it.updatedAt } as EstimateItem) : it
+        )
+      };
+    }
+    case "add_catalog_product": {
+      const product = createItem(action.spec);
+      let items = [...doc.items, product];
+      const { cutout } = action;
+      if (cutout) {
+        const inRoom = (it: EstimateItem) => it.roomId === product.roomId;
+        const need = items
+          .filter((it) => inRoom(it) && it.itemType === "product" && action.productCutouts[it.inputs.productId ?? ""] === cutout.code)
+          .reduce((s, it) => s + qtyOf(it), 0);
+        const cutouts = items.filter((it) => inRoom(it) && it.itemType === "cutout" && it.inputs.cutoutCode === cutout.code);
+        const have = cutouts.reduce((s, it) => s + qtyOf(it), 0);
+        if (have < need) {
+          if (cutouts.length) {
+            const target = cutouts[0].id;
+            items = items.map((it) => (it.id === target ? ({ ...it, inputs: { ...it.inputs, qty: qtyOf(it) + need - have } } as EstimateItem) : it));
+          } else {
+            items.push(
+              createItem({
+                id: cutout.id,
+                itemType: "cutout",
+                roomId: product.roomId,
+                inputs: { cutoutCode: cutout.code, qty: need - have },
+                now: action.spec.now
+              })
+            );
+          }
+        }
+      }
       return { ...doc, items: renumberItems(items) };
     }
     case "update_item": {

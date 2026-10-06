@@ -12,6 +12,7 @@ import {
   CUSTOMER_PROPOSAL_COMPANY,
   CUSTOMER_PROPOSAL_FOOTER_LINES
 } from "../quoteDelivery/customerEstimateBrandingConstants.js";
+import { PRODUCT_ITEM_NAMES } from "./estimateBuilderProducts.mjs";
 
 export const ESTIMATE_PROPOSAL_VERSION = 1;
 
@@ -35,8 +36,10 @@ function shortItemName(r) {
       return "Outlet";
     case "edge":
       return "Edge";
-    case "trip":
-      return "Trip";
+    case "service":
+      return r.pricingSource?.reference?.includes("tearout") ? "Tear-out" : "Trip";
+    case "product":
+      return PRODUCT_ITEM_NAMES[r.productTab] ?? "Sink";
     case "custom":
       return r.amount < 0 ? "Credit" : "Other";
     default:

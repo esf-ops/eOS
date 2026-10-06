@@ -1,6 +1,6 @@
 /**
  * Estimate Builder document contracts — mirrors `backend-core/src/estimateBuilder/estimateBuilderContracts.mjs`.
- * Nothing here carries a price; every amount comes back from `POST /api/estimate-builder/price`.
+ * Documents never carry a price; every line amount comes back from `POST /api/estimate-builder/price`.
  */
 
 export type PricingChannel = "direct" | "wholesale";
@@ -101,6 +101,9 @@ export type CustomInputs = {
 /** QuickBooks-style description-only line (no amount). */
 export type NoteInputs = { text: string };
 
+/** ESF plumbing catalog product (sink, faucet, accessory, specialty). `variantId` is the Blanco finish/SKU. */
+export type ProductInputs = { productId: string | null; variantId: string | null; qty: number };
+
 type ItemBase = {
   id: string;
   roomId: string | null;
@@ -120,6 +123,7 @@ export type EstimateItem =
   | (ItemBase & { itemType: "outlet"; pricingStrategy: "addon_catalog"; inputs: OutletInputs })
   | (ItemBase & { itemType: "edge"; pricingStrategy: "edge_v2"; inputs: EdgeInputs })
   | (ItemBase & { itemType: "service"; pricingStrategy: "service_catalog"; inputs: ServiceInputs })
+  | (ItemBase & { itemType: "product"; pricingStrategy: "esf_catalog"; inputs: ProductInputs })
   | (ItemBase & { itemType: "custom"; pricingStrategy: "custom_line"; inputs: CustomInputs })
   | (ItemBase & { itemType: "note"; pricingStrategy: "text"; inputs: NoteInputs });
 
@@ -215,7 +219,7 @@ export type EstimatePricing = {
   pdfFilename?: string;
 };
 
-// --- Catalog (labels only) ---
+// --- Catalog (labels, plus catalog product sell prices) ---
 
 export type EstimateTemplate = {
   id: string;
@@ -232,6 +236,28 @@ export type MaterialColor = {
   materialType: string | null;
 };
 
+export type ProductTab = "sinks" | "faucets" | "accessories" | "specialty";
+export type RoomEligibility = "kitchen" | "bar_prep" | "vanity" | "laundry_utility";
+
+/** Staff catalog product: sell (customer) price only — never cost or margin. */
+export type CatalogProduct = {
+  productId: string;
+  tab: ProductTab;
+  categoryLabel: string;
+  manufacturer: string;
+  collection: string | null;
+  displayName: string;
+  sku: string | null;
+  /** Null for families priced per finish (see `variants`). */
+  price: number | null;
+  stock: boolean;
+  roomEligibility: RoomEligibility[];
+  /** Cutout add-on code this product needs (`qty-sink` / `qty-bar`), or null. */
+  cutoutCode: string | null;
+  /** `style` is the configuration that tells same-finish variants apart (e.g. "Low Divide"); may be empty. */
+  variants: Array<{ variantId: string; finish: string; style: string; sku: string; price: number; stock: boolean }>;
+};
+
 export type EstimateCatalog = {
   ok: boolean;
   itemTypes: Array<{ type: ItemType; label: string; strategies: PricingStrategy[]; defaultStrategy: PricingStrategy }>;
@@ -246,6 +272,7 @@ export type EstimateCatalog = {
     sinkTypes: Array<{ code: VanitySinkType; label: string }>;
   };
   outOfCollection: { materialTypes: string[] };
+  products: { sourceVersion: string | null; tabs: Array<{ key: ProductTab; label: string }>; products: CatalogProduct[] };
   customCategories: CustomCategory[];
   roomSuggestions: string[];
   templates: EstimateTemplate[];

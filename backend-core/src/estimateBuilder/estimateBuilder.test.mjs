@@ -515,12 +515,13 @@ test("serializer emits tax-inclusive $5 line items, room rollups, proposal, and 
   }
 });
 
-test("catalog payload exposes option labels only — no rates or amounts reach the browser", () => {
+test("catalog payload exposes no material or add-on rates (only catalog product sell prices)", () => {
   const cat = buildEstimateBuilderCatalog(
     COLORS.map((c) => ({ ...c, ratePerSqft: 99, priceGroupCode: "x" })),
     []
   );
-  const json = JSON.stringify(cat);
+  const { products: _staffProductPrices, ...rest } = cat;
+  const json = JSON.stringify(rest);
   assert.doesNotMatch(json, /"(rate|ratePerSqft|price|unitPrice|amount|total|exactTotal|priceCents)"\s*:/i);
   assert.ok(cat.vanity.sizes.length >= 10);
   assert.ok(cat.cutouts.every((c) => c.label && c.code));
@@ -668,4 +669,101 @@ test("save_revision freezes the family and inserts R2 linked to the root", async
   assert.equal(ins.quote_family_root_id, "q1");
   assert.equal(ins.revised_from_quote_id, "q1");
   assert.equal(ins.revision_label, "R2");
+});
+
+// --- ESF catalog products (sinks, faucets, accessories, specialty) ---
+
+test("catalog products: staff DTO carries sell prices only, Blanco families list finishes", () => {
+  const cat = buildEstimateBuilderCatalog(COLORS);
+  const { products, tabs } = cat.products;
+  assert.deepEqual(tabs.map((t) => t.key), ["sinks", "faucets", "accessories", "specialty"]);
+  assert.ok(products.length > 90, "priced catalog products are offered");
+  for (const p of products) {
+    for (const key of ["itemCost", "margin", "wholesale", "vendorCost", "internalNotes", "rawPricing", "raw"]) {
+      assert.equal(key in p, false, `${p.productId} leaks ${key}`);
+    }
+    assert.ok(p.price > 0 || p.variants.length > 0, `${p.productId} is priced`);
+  }
+  const kansas = products.find((p) => p.productId === "kansas:3218UM18SS");
+  assert.equal(kansas.price, 160);
+  assert.equal(kansas.cutoutCode, "qty-sink");
+  const blanco = products.find((p) => p.productId === "blanco:diamond-50-50");
+  assert.equal(blanco.price, null);
+  assert.ok(blanco.variants.length > 1 && blanco.variants.every((v) => v.price > 0 && v.variantId));
+  assert.deepEqual([...new Set(blanco.variants.map((v) => v.style))].sort(), ["DI", "Low Divide", "Regular Divide"]);
+  for (const p of products.filter((x) => x.variants.length)) {
+    const keys = p.variants.map((v) => `${v.style}|${v.finish}`);
+    assert.equal(new Set(keys).size, keys.length, `${p.productId} has indistinguishable variants`);
+  }
+  assert.equal(products.some((p) => p.productId.startsWith("specialty:") && p.tab === "specialty"), true);
+  assert.equal(JSON.stringify(cat).includes("itemCost"), false);
+});
+
+test("catalog sink prices at the catalog sell price, rounds to $5, and asks for a cutout", async () => {
+  const r = await price(
+    doc([
+      { id: "ct", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 40, materialColorId: "c-promo" } },
+      { id: "sink", roomId: "kitchen", itemType: "product", inputs: { productId: "kansas:R15SUPERSINGLEUM18", qty: 1 } },
+      { id: "faucet", roomId: "kitchen", itemType: "product", inputs: { productId: "faucet:delta-9176-cz-pr-dst", qty: 2 } }
+    ])
+  );
+  const sink = r.items.find((i) => i.itemId === "sink");
+  assert.equal(sink.status, "priced");
+  assert.equal(sink.exactAmount, 299);
+  assert.equal(sink.useTaxAmount, 0);
+  assert.equal(sink.amount, 300);
+  assert.match(sink.description, /^Kansas R15 Super Single/);
+  assert.ok(sink.warnings.some((w) => w.code === "missing_cutout"), "kitchen sink without a cutout is flagged");
+  const faucet = r.items.find((i) => i.itemId === "faucet");
+  assert.equal(faucet.amount, 1700);
+  assert.equal(faucet.quantity, 2);
+  assert.ok(!faucet.warnings.some((w) => w.code === "missing_cutout"), "faucets need no cutout");
+  assertLineRule(r);
+
+  const withCutout = await price(
+    doc([
+      { id: "sink", roomId: "kitchen", itemType: "product", inputs: { productId: "kansas:3218UM18SS", qty: 1 } },
+      { id: "cut", roomId: "kitchen", itemType: "cutout", inputs: { cutoutCode: "qty-sink", qty: 1 } }
+    ])
+  );
+  assert.ok(!withCutout.items.find((i) => i.itemId === "sink").warnings.some((w) => w.code === "missing_cutout"));
+  assert.equal(withCutout.totals.total, 160 + 200);
+});
+
+test("Blanco family needs a finish; unknown products are incomplete, never priced", async () => {
+  const r = await price(
+    doc([
+      { id: "b0", roomId: "kitchen", itemType: "product", inputs: { productId: "blanco:diamond-50-50" } },
+      { id: "b1", roomId: "kitchen", itemType: "product", inputs: { productId: "blanco:diamond-50-50", variantId: "blanco:diamond-50-50:sku:440182" } },
+      { id: "x", roomId: "kitchen", itemType: "product", inputs: { productId: "kansas:NOPE" } },
+      { id: "none", roomId: "kitchen", itemType: "product", inputs: {} }
+    ])
+  );
+  const by = Object.fromEntries(r.items.map((i) => [i.itemId, i]));
+  assert.equal(by.b0.status, "incomplete");
+  assert.equal(by.b0.warnings[0].code, "missing_variant");
+  assert.equal(by.b1.status, "priced");
+  assert.equal(by.b1.amount, 500);
+  assert.match(by.b1.description, /^Blanco 440182 Diamond/);
+  assert.equal(by.x.status, "incomplete");
+  assert.equal(by.none.warnings[0].code, "missing_product");
+  assert.equal(r.readiness.ready, false);
+});
+
+test("proposal and Quote Library name catalog products and services", async () => {
+  const d = doc([
+    { id: "ct", roomId: "kitchen", itemType: "countertop", inputs: { sqft: 30, materialColorId: "c-promo" } },
+    { id: "sink", roomId: "kitchen", itemType: "product", inputs: { productId: "kansas:3218UM18SS" } },
+    { id: "cut", roomId: "kitchen", itemType: "cutout", inputs: { cutoutCode: "qty-sink", qty: 1 } },
+    { id: "trip", roomId: "kitchen", itemType: "service", inputs: { serviceCode: "additional_trip", qty: 1 } },
+    { id: "tear", roomId: "kitchen", itemType: "service", inputs: { serviceCode: "tear_out", qty: 1 } }
+  ]);
+  const pricing = await price(d);
+  const p = buildEstimateProposalSnapshot(d, pricing, { quoteNumber: "ESF-1" });
+  const names = p.lines.filter((l) => l.kind === "item").map((l) => l.item);
+  assert.deepEqual(names, ["Promo", "Sink", "Cutout", "Trip", "Tear-out"]);
+  const art = buildQuoteLibraryArtifacts(d, pricing, { quoteNumber: "ESF-1" });
+  const sinkLine = art.calc.lineItems.find((l) => l.category === "product");
+  assert.equal(sinkLine.item_code, "product:3218UM18SS");
+  assert.equal(sinkLine.line_subtotal, 160);
 });

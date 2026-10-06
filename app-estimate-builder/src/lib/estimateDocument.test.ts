@@ -170,3 +170,66 @@ test("notes are text-only items placed after an anchor and moved like any line",
   assert.equal(emptyDocument().header.customerMessage, "");
   assert.equal(emptyDocument().header.billToAddress, "");
 });
+
+const CUTOUTS = { "kansas:3218UM18SS": "qty-sink", "kansas:1512UM18": "qty-bar", "faucet:delta": null };
+const addProduct = (id: string, productId: string, roomId: string, cutoutId: string, qty = 1): DocAction => ({
+  type: "add_catalog_product",
+  spec: { id, itemType: "product", roomId, inputs: { productId, qty } },
+  cutout: CUTOUTS[productId as keyof typeof CUTOUTS] ? { code: CUTOUTS[productId as keyof typeof CUTOUTS]!, id: cutoutId } : null,
+  productCutouts: CUTOUTS
+});
+
+test("catalog sink adds its cutout once; the room's existing cutout counts", () => {
+  const base = run(emptyDocument(), { type: "add_room", id: "kitchen", name: "Kitchen" }, { type: "add_room", id: "bar", name: "Bar" });
+  const one = run(base, addProduct("s1", "kansas:3218UM18SS", "kitchen", "c1"));
+  assert.deepEqual(
+    one.items.map((it) => [it.id, it.itemType]),
+    [
+      ["s1", "product"],
+      ["c1", "cutout"]
+    ]
+  );
+  assert.deepEqual(one.items[1].inputs, { cutoutCode: "qty-sink", qty: 1 });
+  assert.equal(one.items[0].pricingStrategy, "esf_catalog");
+
+  const two = run(one, addProduct("s2", "kansas:3218UM18SS", "kitchen", "c2"));
+  assert.equal(two.items.filter((it) => it.itemType === "cutout").length, 1, "tops up the existing cutout");
+  assert.equal((two.items.find((it) => it.id === "c1")!.inputs as { qty: number }).qty, 2);
+
+  const templated = run(
+    base,
+    { type: "add_item", spec: { id: "tpl", itemType: "cutout", roomId: "kitchen", inputs: { cutoutCode: "qty-sink", qty: 1 } } },
+    addProduct("s3", "kansas:3218UM18SS", "kitchen", "c3")
+  );
+  assert.equal(templated.items.length, 2, "a template cutout already covers the first sink");
+
+  const mixed = run(one, addProduct("b1", "kansas:1512UM18", "bar", "c4"), addProduct("f1", "faucet:delta", "kitchen", "c5"));
+  assert.deepEqual(
+    mixed.items.filter((it) => it.itemType === "cutout").map((it) => [it.roomId, (it.inputs as { cutoutCode: string }).cutoutCode]),
+    [
+      ["kitchen", "qty-sink"],
+      ["bar", "qty-bar"]
+    ]
+  );
+  assert.equal(mixed.items.some((it) => it.id === "c5"), false, "faucets add no cutout");
+});
+
+test("one-click add-ons bump the same add-on in the room instead of duplicating it", () => {
+  const base = run(emptyDocument(), { type: "add_room", id: "kitchen", name: "Kitchen" });
+  const bump = (id: string, roomId: string | null = "kitchen"): DocAction => ({
+    type: "add_or_bump",
+    spec: { id, itemType: "cutout", roomId, inputs: { cutoutCode: "qty-cook", qty: 1 } }
+  });
+  const doc = run(base, bump("a"), bump("b"), bump("c", null), {
+    type: "add_or_bump",
+    spec: { id: "t", itemType: "service", roomId: "kitchen", inputs: { serviceCode: "tear_out", qty: 1 } }
+  });
+  assert.deepEqual(
+    doc.items.map((it) => [it.id, it.roomId, (it.inputs as { qty: number }).qty]),
+    [
+      ["a", "kitchen", 2],
+      ["c", null, 1],
+      ["t", "kitchen", 1]
+    ]
+  );
+});
