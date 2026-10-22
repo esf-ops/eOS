@@ -5051,6 +5051,58 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
+### 377. QuickBooks item identity ≠ eliteOS pricing authority (Quote ↔ QB Phase 0)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-23 |
+| **Decision** | **Phase 0 only:** (1) Reuse live `brain_quickbooks_items` as the canonical **read-only** QuickBooks item mirror (ListID identity; FullName/price/accounts live in `raw_payload` from SDK ItemQuery). (2) Add org-scoped `quote_qb_item_mappings` (`eliteos_concept_key` → `qb_list_id` + independent `pricing_source`). Mapping to a QB item does **not** imply QuickBooks owns the quote rate — Phase 0 strong-match seeds use `eliteos_pricing_admin`. (3) Enrich Quote Library `quickbooks_entry` handoff to doc_version **2** with quote identity, Account Directory id, concept keys, mapped ListID/FullName, pricing_source, and line qty/rate/amount — still **manual checklist only** (`qb_write_enabled: false`). (4) Add transport-independent `quote_qb_write_queue` schema + pure safety validators (`environment=test`, `QBTEST-` prefix, company allowlist, no re-execute of `succeeded`). **No** EstimateAdd, Web Connector, ODBC write, calculator pricing change, or SQL auto-apply. |
+| **Why** | Future Estimate writeback (SDK or Web Connector) needs ListID-backed catalog maps and a durable queue without choosing a write transport yet or making QB sales prices authoritative. |
+| **Impacted files/docs** | `backend-core/supabase/eliteos_quote_qb_item_mapping_and_write_queue_v1.sql` (prepared, not applied), `backend-core/src/quotes/quoteQbCatalog/*`, `quoteLibraryHandoffPayloads.js`, `quoteLibraryApi.js`, `quoteQbCatalogFoundation.test.mjs`, `docs/quickbooks/ELITEOS_QUOTE_QB_CATALOG_PHASE0.md`, this entry. |
+| **What is NOT built** | EstimateAdd; Web Connector; queue worker; Pricing Admin → calculator cutover; material/Blanco/tax/class/sales-rep maps; deploy; production SQL apply. |
+| **Revisit trigger** | Apply SQL after review; load mappings from DB instead of Phase 0 seeds; choose Desktop SDK vs Web Connector for TEST-only EstimateAdd Phase 1. |
+
+---
+
+### 378. QuickBooks EstimateAdd Phase 1 — dry-run only (Desktop SDK path)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-23 |
+| **Decision** | Phase 1 builds the **TEST-only EstimateAdd dry-run path** on the existing Desktop SDK / QBXMLRP2 stack: load live `quote_qb_item_mappings`, require `QB_WRITE_ENABLED=true` + `QB_WRITE_ENV=test` + `QB_WRITE_DRY_RUN=true`, exact TEST company allowlist (fail closed), resolve **ELITEOS TEST CUSTOMER** via CustomerQuery only (no CustomerAdd), build **QBTEST-0001** EstimateAdd qbXML from verified mapped ListIDs, upsert a **pending** preview queue row (no claim), then **STOP**. `processQbXmlSafely` allows Query ProcessRequest only; `transmitEstimateAdd` always throws in Phase 1. No Web Connector. No ODBC write. No production deploy. Pricing authority unchanged (`pricing_source` remains independent of ListID). |
+| **Why** | Prove the end-to-end TEST Estimate path safely before any AddRq is transmitted. |
+| **Impacted files/docs** | `backend-core/src/quotes/quoteQbCatalog/*` (mapping store, EstimateAdd builder, write config/transport/queue/dry-run), `quoteLibraryApi.js` (DB mapping load for handoff), `scripts/qbEstimateDryRun.mjs`, `quickbooks-sdk-connector/estimate-write/*`, `quoteQbEstimatePhase1DryRun.test.mjs`, this entry. |
+| **What is NOT built** | Real EstimateAdd transmit; Invoice/SO/Customer/Item Add; always-on worker; Web Connector; production company writes. |
+| **Revisit trigger** | Explicit human approval + TEST company visual verification before setting a future transmit gate for exactly one QBTEST-0001 write. |
+
+---
+
+### 379. QuickBooks EstimateAdd Phase 1.1 — dry-run harden (Qty/Rate, no claim, TEST item validation)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-23 |
+| **Decision** | Phase 1.1 hardens the dry-run before any transmit work: (1) **EstimateLineAdd** emits `ItemRef/ListID` + `Desc` + `Quantity` + `Rate` only — **never `Amount`** when Quantity+Rate are supplied; eliteOS still validates `expected_amount == quantity * rate` to currency precision internally. (2) Dry-run **never claims** `quote_qb_write_queue` rows; upsert stays `pending`; leftover `claimed` from earlier Phase 1 is restored to `pending` before proceeding. Claim belongs only to a future transmitting worker. (3) Before preview, validate the four QBTEST mapped ListIDs via **ItemQuery** against the connected TEST company (exist, active, expected FullName). (4) Customer resolution requires **exactly one active** `ELITEOS TEST CUSTOMER` via CustomerQuery. (5) Reuse established Desktop SDK qbXML **13.0** (`ConnectorSettings` / `run-extract.ps1` / `live-sdk-linked-smoke.ps1`), not a preference bump. |
+| **Why** | Align with QB Desktop Quantity×Rate contract; prevent stuck claimed queue rows; fail closed on wrong/inactive TEST items before any future Add. |
+| **Impacted files/docs** | `quoteQbEstimateAddBuilder.js`, `quoteQbEstimateDryRun.js`, `quoteQbTestItemValidation.js`, `quoteQbWriteQueueStore.js`, `quoteQbWriteTransport.js`, `estimate-write/dry-run-estimate-write.ps1`, Phase 1 dry-run tests, this entry. |
+| **What is NOT built** | EstimateAdd transmission; ODBC writes; production deploy; pricing authority changes. |
+| **Revisit trigger** | Explicit approval to enable a TEST-only transmit worker for QBTEST-0001. |
+
+---
+
+### 380. QuickBooks EstimateAdd Phase 1.2 — live TEST-company read-only dry-run (operator VM)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-09-23 |
+| **Decision** | Phase 1.2 executes the existing dry-run against the **separate QuickBooks Desktop TEST company** on the Windows QB VM using **SDK Query operations only** (`CompanyQuery`, `CustomerQuery`, `ItemQuery`). Operator flow: (1) `discover-test-company.ps1` prints the exact `CompanyName` for `QB_WRITE_TEST_COMPANY_ALLOWLIST` (no guess, no production env auto-write); (2) `dry-run-estimate-write.ps1` validates company/customer/items then runs Node build/queue-preview. **No** EstimateAdd/Mod/Delete ProcessRequest. Queue row stays `pending`. Transmission gates unchanged. |
+| **Why** | Prove live TEST identity + mapped ListIDs before any future AddRq. |
+| **Impacted files/docs** | `quickbooks-sdk-connector/estimate-write/discover-test-company.ps1`, hardened `dry-run-estimate-write.ps1`, env example, `qbEstimateDryRun.mjs` report output, this entry. |
+| **What is NOT built** | Transmit enablement; Phase 2; ODBC changes; deploy. |
+| **Revisit trigger** | Chris completes discover + dry-run on the Windows VM with TEST company open; paste report JSON / console for verification. |
+
+---
+
 ### 381. Estimator unification Phase 1 — server-side acceptance lock and Quote Flow Vanity Program
 
 | Field | Value |
@@ -5205,6 +5257,20 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
+### 392. QuickBooks sales order plan v2 — reviewed order shape in shared code; accepted totals never raised by tax
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-10-01 |
+| **Decision** | `studioSalesOrderPlan.mjs` (plan v2) is the only builder of Studio sales orders; one-off test payloads are generated through it. Per room it emits: a material item resolved from the room's accepted (else published) Elite 100 color → catalog material line → configured concept (Promo by price group), never from the price group alone; a separate backsplash line when priced; a description-only note (edge / backsplash / cutout); each accepted add-on (included $0 lines stay $0 item lines; negative lines use the configured credit item). Plumbing products use their own class. Header template, class, terms, sales tax item and customer tax code go by ListID from the `quickbooks_sales_order` config. Unresolved business choices (branch class, plumbing class, terms, template, material line, sink model vs parent item, tax policy) are named blockers. Config values labeled `test_only_selection` (including `testOnlyItems`) are allowed only when the queue targets a TEST company. An uncategorized $0 project line that repeats a priced room line is excluded and reported, not sent. **Accepted-total rule:** if the tax policy would compute tax > 0, an accepted-quote plan is blocked (`tax_would_increase_accepted_total`). A `synthetic_tax_scenario` plan has its own idempotency key and labeled memo, is never sync-eligible, and the queue refuses to send it. Read-back reconciliation checks every header ref, date, memo, open status, every line (description, item, quantity, amount, class, tax code, note lines) and subtotal / tax / total. |
+| **Why** | The TEST-company write must exercise the production builder, not a parallel one. Silently charging tax on top of an accepted price would change what the customer agreed to. |
+| **Finding** | `quickbooks/live/quickBooksLiveQbxml.js` `parseQbXmlResponse` parses tag values as numbers. ListIDs like `8000021E-1635950935` become `0`, and names like `12E4` become `120000`. The sales order module now uses its own string-preserving parser. The live read client still uses the shared parser and is unchanged here; follow-up needed. |
+| **Status** | Production unchanged: no config row, no env, writes disabled. Not committed or deployed. Tax policy pending bookkeeper. Milestone 1 (SDK write / read-back / retry in a TEST copy) not run against real QuickBooks. Milestone 2 (acceptance → Mark Sold → queue → agent → TEST order) not passed; only a local rehearsal against the simulator passed. |
+| **Verification** | `studioSalesOrderQueue.test.mjs` (18 cases), `studioSalesOrderSupabase.integration.test.mjs` (10, local Postgres), and `quoteFlowPublicAcceptance.test.mjs` pass. The Windows `sales-order-test-write.ps1` v2 sends the shared qbXML byte for byte (SHA-checked), verified against a fake QuickBooks. |
+| **Impacted files/docs** | `elite100EstimateStudio/qbSalesOrder/studioSalesOrderPlan.mjs`, `studioSalesOrderQbxml.mjs`, `studioSalesOrderSources.mjs`, `studioSalesOrderQueue.mjs`, `qbSalesOrderSimulator.mjs`, tests above; `quickbooks-sdk-connector/sales-order-agent/sales-order-test-write.ps1`, `qb-connector-targeting-inventory.ps1`. |
+
+---
+
 ### 393. Quote Flow request overhead — reuse the auth-loaded profile, cache CORS preflights, opt-in request timing
 
 | Field | Value |
@@ -5216,7 +5282,19 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Not changed** | Authorization rules, organization scoping, pricing and acceptance safeguards. Moving Brain to sfo1 (next to Supabase) is recommended separately and needs approval. |
 | **Status** | Released with this commit (Brain, then Quote Flow). Decision #392 is reserved for the pending QuickBooks sales order plan v2. |
 | **Verification** | `lib/requestTimingMiddleware.test.mjs` (4: route template only, no header or `?perf=1` in production). `auth/authLoadedProfile.test.mjs` (6: call counts, partner refusal without a query, no-org fallback, non-`requireAuth` request still queries, swapped `req.user` invalidates, invalid token 401). Local and origin/main Brains return identical status codes for an org A admin, an org B admin (404 on org A estimates), a dealer partner (403) and missing / invalid tokens (401). Release tree backend suite, 355 files: 339 pass; 15 fail identically on origin/main (12 source-contract / UI assertions, 2 need Moraware env, 1 needs an untracked local workbook); 1 (`studioIdentityOptionalPublish`) passes its assertions but never exits, also on origin/main. |
-| **Impacted files/docs** | `lib/requestStageTimer.mjs`, `auth/authMiddleware.js`, `quotes/partnerContext.js`, `organizations/organizationContext.js`, `server.js`, `elite100QuoteFlow/elite100QuoteFlowRoutes.js`, `scripts/nonprod/benchQuoteFlowEndpoints.mjs`. |
+| **Impacted files/docs** | `lib/requestStageTimer.mjs`, `auth/authMiddleware.js`, `quotes/partnerContext.js`, `organizations/organizationContext.js`, `server.js`, `elite100QuoteFlow/elite100QuoteFlowRoutes.js`, `scripts/nonprod/benchQuoteFlowEndpoints.mjs`, `docs/eliteos/audits/QUOTE_FLOW_ACCEPTANCE_CHECKLIST.md`. |
+
+---
+
+### 394. AI Takeoff — a cooktop cutout needs cooktop evidence; ranges split the run
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-10-05 |
+| **Problem** | Slide-in / free-standing ranges came back as one continuous run with a cooktop cutout. Production (since 2026-09-04): 12 AI runs carried a cooktop cutout; in 7 the run's own label/notes said range, stove or slide-in, mostly saved as a confident cooktop with no review flag (two were ~15' single runs). Causes: (1) the extraction prompt's only appliance example was a "Stove wall … Range at right end" run **with a cooktop cutout**; (2) the evidence pass could only label a burner symbol as a `cooktop` cutout and called any "symbol indicating an opening" a cutout, and the extraction pass treats that table as authoritative; (3) `normalizeTakeoffCutoutScope` promotes a bare cooktop cutout to `cooktop` with `reviewRequired: false`; (4) the "move to cutouts" fix mapped "range"/"stove" exclusion labels to a cooktop cutout. |
+| **Decision** | Extraction prompt **v6.4**: example shows a range wall as two runs with `slide_in_range` and no cutout; explicit cooktop-vs-range cues (labels, base-cabinet code under the appliance vs a skipped cabinet width, appliance breaking the counter front line, separate wall oven; conflicting or insufficient cues → `unknown_cooking_appliance`; drawing type such as "builder floor plan", a burner symbol or a hood label is not evidence; standard 30"/36" widths are never assumed). Evidence prompt **v3** adds `cookingAppliances[]` (type, labeled width/side lengths, cues, confidence) passed into extraction. New `reconcileCookingApplianceEvidence` runs **only on fresh AI output** (never on estimator-reviewed drafts): range-typed runs lose any cooktop cutout; a cooktop-cutout run whose text describes a range (hood mentions ignored) becomes `unknown_cooking_appliance`, cutout withheld, estimator review; conflicting text, an unclassified cooktop, or an evidence-pass range flags the cooktop for review. Corrections are listed in the job summary (`cookingApplianceCorrections`). "Range"/"stove" exclusions are real material gaps and are no longer offered as cutout fixes. The guard also removes an AI range `widthIn` the evidence pass did not read from the plan, and flags range pieces whose side lengths are unlabeled; negated wording ("not a slide-in range") is ignored. **Approval blocker** (server-side, `collectConsolidatedHardBlockers`, code `COOKING_APPLIANCE_UNRESOLVED`): an included piece with an unknown or review-flagged appliance, or a range that staff have not resolved, cannot be approved — a range resolves only when staff confirm it **and** either split the piece at the opening (`insertApplianceGap`) or confirm the stone already stops at the range (`applianceSidesConfirmed`). A continuous piece across an unresolved range is therefore never approved billable area. The AI Takeoff review shows "Approval blocked: …" with a confirm action; the split prompt asks for the left length and gap width with no default ("Standard … 30 in — enter 30 only if you have confirmed it"). |
+| **Verification** | `takeoffCookingAppliance.test.mjs` (+9: Cambridge-style range run, stove/slide-in/free-standing wording, Woodharbor-style labeled cooktop with "range hood" note untouched, conflict, unclassified cooktop, evidence-pass range, range keeps other cutouts, no-op, prompt content), `takeoffValidationFixes.test.mjs` (+2), version assertions in `takeoffExtractionService.test.mjs` / `takeoffDimensionEvidenceService.test.mjs`. 63 of 69 takeoff suites pass; the 6 failures are source-text UI assertions that fail identically on the released tree (81629234). AI Takeoff head builds. **Live A/B, production Gemini 2.5 Pro, 2026-10-05**: two temporary, SSO-protected, nonce-gated Vercel *preview* deployments of backend-core (old = origin/main prompts v6.3/v2, new = v6.4/v3) ran the three AI passes server-side with the existing Preview-scoped key (no DB access, nothing persisted, production untouched); 3 runs per plan per version; guard, measurements, approval gate and pricing re-applied deterministically to the saved outputs. *Cambridge (range, unlabeled width/sides)*: old — 3/3 range, no cooktop cutout, but 2/3 left one ~116–120" run across the range and **approvable** (≈20.5–21.2 SF billed through the opening), 1/3 invented a 30" range and a symmetric 47.5/47.5 split; new — 3/3 range, 0 cooktop cutouts, 3/3 approval blocked until staff resolve the opening, invented width removed (1/3). *Woodharbor (labeled 30" gas cooktop)*: old — cooktop cutout on the correct left-wall run 2/3 (1/3 moved it to the 132" sink wall); new — 3/3 correct run, no false review flag after the negation fix. Pass time old 92–138 s, new 105–121 s. **Not fixed (both versions)**: Cambridge kitchen layout (phantom perimeter sink wall 6/6, island read as 116" or a 48" peninsula vs 8'-3" island with sink, 6'-1½" lower counter missed 6/6); Woodharbor crossed-out laundry billed 6/6, cooktop wall length taken from the 78" horizontal dimension, desk depth 31.5" vs 21" cabinets, island omitted or 0×0 in 4/6. Countertop SF across runs still swings widely (Cambridge new 45–72, Woodharbor new 83–109). |
+| **Impacted files/docs** | `takeoff/takeoffCookingAppliance.mjs`, `takeoff/takeoffConsolidatedApproval.mjs`, `takeoff/takeoffPieceSegmentation.mjs`, `takeoff/takeoffExtractionService.mjs`, `takeoff/takeoffExtractionPrompt.mjs`, `takeoff/takeoffDimensionEvidencePrompt.mjs`, `takeoff/takeoffDimensionEvidenceService.mjs`, `takeoff/takeoffValidationFixes.mjs`, `app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx`, `app-ai-takeoff/src/lib/consolidatedWorksheetRows.mjs`, tests above. |
 
 ---
 

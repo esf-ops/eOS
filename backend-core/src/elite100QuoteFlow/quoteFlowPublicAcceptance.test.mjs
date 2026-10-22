@@ -821,21 +821,17 @@ function edgeChangeSelections(state) {
   );
   const plan = buildStudioSalesOrderPlan({
     organizationId: ORG,
-    soldSnapshot: { id: "sold-f", organization_id: ORG, studio_estimate_id: CASE_F, acceptance_id: stored.id, publication_id: published.publication?.publicationId },
+    soldSnapshot: { id: "sold-f", organization_id: ORG, studio_estimate_id: CASE_F, acceptance_id: stored.id, publication_id: published.publication?.publicationId, sold_snapshot_json: { scope: priced.scope } },
     acceptance: { ...stored, organization_id: ORG, customer_safe_snapshot_json: safe, customer_display_total: calcTotal },
     mapping: {
       companyIdentity: "Elite Stone TEST",
-      items: {
-        room_material: { itemFullName: "Countertops:Installed", salesTaxCodeFullName: "Non" },
-        "addon:*": { itemFullName: "Fabrication:Other", salesTaxCodeFullName: "Non" },
-        credit: { itemFullName: "Adjustments:Credit", salesTaxCodeFullName: "Non" },
-        "project:*": { itemFullName: "Services:Project", salesTaxCodeFullName: "Non" }
-      }
+      items: {}
     },
     customerJob: { fullName: "Synthetic Customer:Slab Kitchen" }
   });
-  assert.equal(plan.ok, true, JSON.stringify(plan.blockers));
   assert.equal(plan.totalCents, Math.round(calcTotal * 100), "sales order plan equals the accepted total to the cent");
+  assert.equal(plan.blockers.some((b) => b.code === "accepted_total_mismatch" || b.code === "room_breakdown_mismatch"), false, JSON.stringify(plan.blockers));
+  assert.ok(plan.blockers.some((b) => b.code === "custom_slab_material_unmapped"), "custom slab rooms need an explicit QuickBooks material item");
   const planJson = JSON.stringify(plan).toLowerCase();
   for (const secret of ["costperslab", "1850.5", "arizona tile", "costmultiplier"]) {
     assert.equal(planJson.includes(secret), false, `sales order plan must not carry ${secret}`);
@@ -1262,6 +1258,230 @@ async function publishManuallyAdjusted(h, caseId, name) {
   const sinkOpts = (exchanged.state.configuration?.options || []).filter((o) => String(o.optionKey).startsWith("sink:bath:"));
   assert.equal(sinkOpts.length, 0, "no catalog sink swaps on the included program sink");
   console.log("ok: 12 Vanity Program sink stays included: no cutout charge, program sink type kept, no swaps");
+}
+
+{
+  // Staff switch a room from a custom slab package back to Elite 100 before approval.
+  const scopeFor = (caseId) => ({
+    organizationId: ORG,
+    intakeCaseId: caseId,
+    createdByUserId: ACTOR,
+    status: "ready_to_price",
+    revision: 1,
+    scope: {
+      ...emptyStudioEstimateScope(),
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          included: true,
+          pieces: [{ id: "k1", name: "Island", lengthIn: 96, depthIn: 25.5, quantity: 1, included: true, openEdgeLf: 0, finishedEdgeLf: 0 }]
+        },
+        {
+          id: "bath",
+          name: "Hall Bath",
+          roomType: "Bathroom",
+          included: true,
+          pieces: [{ id: "b1", name: "Vanity", lengthIn: 49, depthIn: 22, quantity: 1, included: true, openEdgeLf: 0, finishedEdgeLf: 0 }]
+        }
+      ],
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo",
+      projectName: "QF Slab Switch",
+      customerName: "Acme",
+      estimateOrigin: "manual",
+      physicalScopeSource: "manual",
+      addOns: {}
+    },
+    calculationSnapshot: null,
+    approval: null,
+    staleReason: null
+  });
+  const slab = { id: "taj", colorName: "Taj Mahal", supplier: "Arizona Tile", slabLengthIn: 126, slabWidthIn: 63, costPerSlab: 1850.5, confirmedSlabQuantity: 1 };
+  const base = { pricingBasis: "wholesale", materialGroup: "Group Promo", customLineItems: [] };
+
+  const control = harness();
+  const controlRow = await control.studioRepo.create(scopeFor("12121212-1212-4121-8121-121212121212"));
+  await control.pricing.calculatePricing({ organizationId: ORG, estimateId: controlRow.id, actorUserId: ACTOR, body: { pricing: base } });
+  const elite100Total = (await control.studioRepo.getById(ORG, controlRow.id)).calculationSnapshot.totals.customerDisplayTotal;
+
+  for (const [variant, switchPricing] of [
+    ["package removed", { ...base, slabPackages: [], roomSelections: [{ roomId: "kitchen", slabPackageId: "" }] }],
+    ["package kept but unassigned", { ...base, slabPackages: [slab], roomSelections: [{ roomId: "kitchen", slabPackageId: "" }] }]
+  ]) {
+    const h = harness();
+    const row = await h.studioRepo.create(scopeFor(variant === "package removed" ? "13131313-1313-4131-8131-131313131313" : "14141414-1414-4141-8141-141414141414"));
+    await h.pricing.calculatePricing({
+      organizationId: ORG,
+      estimateId: row.id,
+      actorUserId: ACTOR,
+      body: { pricing: { ...base, slabPackages: [slab], roomSelections: [{ roomId: "kitchen", slabPackageId: "taj" }] } }
+    });
+    const slabCalc = (await h.studioRepo.getById(ORG, row.id)).calculationSnapshot;
+    assert.notEqual(slabCalc.totals.customerDisplayTotal, elite100Total, "slab package changes the kitchen price");
+    assert.ok(
+      (slabCalc.elite100.slabPackages || []).some((p) => (p.roomIds || []).includes("kitchen")),
+      "before the switch the package is charged to the kitchen"
+    );
+
+    await h.pricing.calculatePricing({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { pricing: switchPricing } });
+    const switched = await h.studioRepo.getById(ORG, row.id);
+    const calc = switched.calculationSnapshot;
+    assert.equal(calc.totals.customerDisplayTotal, elite100Total, `${variant}: total equals the never-custom Elite 100 estimate`);
+    assert.equal(
+      (calc.elite100.slabPackages || []).some((p) => (p.roomIds || []).length > 0),
+      false,
+      `${variant}: no package is still charged to a room`
+    );
+    assert.equal(
+      (switched.scope.rooms || []).some((r) => String(r.slabPackageId || "")),
+      false,
+      `${variant}: kitchen no longer points at the package`
+    );
+
+    await h.review.approveReview({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { confirm: true } });
+    const published = await h.qfDigital.publishDigitalEstimate({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { confirm: true } });
+    const exchanged = await h.pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+    const optionKeys = (exchanged.state.configuration?.options || []).map((o) => String(o.optionKey));
+    assert.ok(optionKeys.some((k) => k.startsWith("material:kitchen:")), `${variant}: switched room offers Elite 100 color choices again`);
+    assert.equal(exchanged.state.estimate.totals.estimatedProjectTotal, elite100Total);
+    const kitchen = exchanged.state.estimate.roomPricing.rooms.find((r) => r.roomName === "Kitchen");
+    assert.equal(kitchen.selectedMaterial, "Group Promo", `${variant}: customer sees the collection group, not the package`);
+
+    const accept = await h.acceptSvc.acceptFinalEstimate({
+      rawSecret: exchanged.rawSecret,
+      body: { confirm: true, expectedSessionId: exchanged.state.session.id, expectedRowVersion: exchanged.state.session.rowVersion }
+    });
+    assert.equal(accept.ok, true);
+    const stored = await h.lifecycle.getAcceptanceByPublication(ORG, published.publication?.publicationId);
+    assert.equal(Number(stored.customerDisplayTotal ?? stored.customer_display_total), elite100Total);
+    const json = JSON.stringify([exchanged.state, accept, stored]).toLowerCase();
+    for (const secret of ["taj mahal", "costperslab", "1850.5", "arizona tile"]) {
+      assert.equal(json.includes(secret), false, `${variant}: customer payloads must not mention the removed package (${secret})`);
+    }
+
+    const plan = buildStudioSalesOrderPlan({
+      organizationId: ORG,
+      soldSnapshot: { id: `sold-${variant}`, organization_id: ORG, studio_estimate_id: row.id, acceptance_id: stored.id, publication_id: published.publication?.publicationId, sold_snapshot_json: { scope: switched.scope } },
+      acceptance: { ...stored, organization_id: ORG, customer_display_total: elite100Total },
+      mapping: { companyIdentity: "Elite Stone TEST", items: {} },
+      customerJob: { fullName: "Synthetic Customer:Slab Switch" }
+    });
+    assert.equal(plan.totalCents, Math.round(elite100Total * 100), `${variant}: sales order plan equals the accepted total`);
+    assert.equal(plan.blockers.some((b) => b.code === "custom_slab_material_unmapped"), false, `${variant}: no custom slab item is required`);
+  }
+  console.log("ok: 13 custom slab → Elite 100 switch (package removed or left unassigned) prices, publishes, accepts and plans as plain Elite 100");
+}
+
+{
+  // One slab package shared by two rooms, plus a customer credit: charged once, and the
+  // saved, published, accepted and sales-order totals agree to the cent.
+  const h = harness();
+  const row = await h.studioRepo.create({
+    organizationId: ORG,
+    intakeCaseId: "15151515-1515-4151-8151-151515151515",
+    createdByUserId: ACTOR,
+    status: "ready_to_price",
+    revision: 1,
+    scope: {
+      ...emptyStudioEstimateScope(),
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          included: true,
+          pieces: [{ id: "k1", name: "Island", lengthIn: 96, depthIn: 25.5, quantity: 1, included: true, openEdgeLf: 0, finishedEdgeLf: 0 }]
+        },
+        {
+          id: "bath",
+          name: "Hall Bath",
+          roomType: "Bathroom",
+          included: true,
+          pieces: [{ id: "b1", name: "Vanity", lengthIn: 49, depthIn: 22, quantity: 1, included: true, openEdgeLf: 0, finishedEdgeLf: 0 }]
+        }
+      ],
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo",
+      projectName: "QF Shared Slab",
+      customerName: "Acme",
+      estimateOrigin: "manual",
+      physicalScopeSource: "manual",
+      addOns: {}
+    },
+    calculationSnapshot: null,
+    approval: null,
+    staleReason: null
+  });
+  const slab = { id: "taj", colorName: "Taj Mahal", supplier: "Arizona Tile", slabLengthIn: 126, slabWidthIn: 63, costPerSlab: 1850.5, confirmedSlabQuantity: 1 };
+  const shared = {
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    slabPackages: [slab],
+    roomSelections: [
+      { roomId: "kitchen", slabPackageId: "taj" },
+      { roomId: "bath", slabPackageId: "taj" }
+    ]
+  };
+  const credit = { id: "cli-credit", label: "Returning-customer credit", type: "credit", visibility: "customer", quantity: 1, unitAmount: 40, category: "adjustment" };
+
+  await h.pricing.calculatePricing({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { pricing: { ...shared, customLineItems: [] } } });
+  const noCreditTotal = (await h.studioRepo.getById(ORG, row.id)).calculationSnapshot.totals.customerDisplayTotal;
+
+  const calculated = await h.pricing.calculatePricing({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { pricing: { ...shared, customLineItems: [credit] } } });
+  const pkg = calculated.slabPackages.packages[0];
+  assert.deepEqual(pkg.issues, []);
+  assert.equal(calculated.slabPackages.packages.length, 1, "one package for both rooms");
+  assert.equal(pkg.calculated.total, 4163.63, "one slab × $1,850.50 × 2.25, charged once for both rooms");
+
+  const priced = await h.studioRepo.getById(ORG, row.id);
+  const savedTotal = priced.calculationSnapshot.totals.customerDisplayTotal;
+  assert.equal(Math.round((noCreditTotal - savedTotal) * 100), 4000, "customer credit lowers the saved total by exactly $40");
+  const calcPkg = priced.calculationSnapshot.elite100.slabPackages.find((p) => p.packageId === "taj");
+  assert.deepEqual([...calcPkg.roomIds].sort(), ["bath", "kitchen"], "package allocated across both rooms");
+  assert.equal(calcPkg.shared, true);
+
+  await h.review.approveReview({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { confirm: true } });
+  const published = await h.qfDigital.publishDigitalEstimate({ organizationId: ORG, estimateId: row.id, actorUserId: ACTOR, body: { confirm: true } });
+  const exchanged = await h.pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+  const optionKeys = (exchanged.state.configuration?.options || []).map((o) => String(o.optionKey));
+  assert.equal(optionKeys.some((k) => /^(material|backsplash|sidesplash):(kitchen|bath):/.test(k)), false, "shared slab rooms offer no collection swaps");
+  const est = exchanged.state.estimate;
+  assert.equal(est.totals.estimatedProjectTotal, savedTotal, "published total equals the saved total");
+  for (const room of est.roomPricing.rooms) assert.equal(room.selectedMaterial, "Taj Mahal");
+
+  const accept = await h.acceptSvc.acceptFinalEstimate({
+    rawSecret: exchanged.rawSecret,
+    body: { confirm: true, expectedSessionId: exchanged.state.session.id, expectedRowVersion: exchanged.state.session.rowVersion }
+  });
+  assert.equal(accept.ok, true);
+  const stored = await h.lifecycle.getAcceptanceByPublication(ORG, published.publication?.publicationId);
+  const acceptedTotal = Number(stored.customerDisplayTotal ?? stored.customer_display_total);
+  assert.equal(acceptedTotal, savedTotal, "accepted total equals the saved total");
+  const safe = stored.customerSafeSnapshotJson ?? stored.customer_safe_snapshot_json;
+  assert.deepEqual(
+    safe.acceptedRoomPricing.rooms.map((r) => [r.roomName, r.roomTotalDetail.amountCents]),
+    est.roomPricing.rooms.map((r) => [r.roomName, r.roomTotalDetail.amountCents]),
+    "frozen breakdown equals what the customer saw"
+  );
+  const json = JSON.stringify([exchanged.state, accept, stored]).toLowerCase();
+  for (const secret of ["costperslab", "1850.5", "arizona tile", "costmultiplier", "suggestedquantity"]) {
+    assert.equal(json.includes(secret), false, `customer payloads must not expose ${secret}`);
+  }
+
+  const plan = buildStudioSalesOrderPlan({
+    organizationId: ORG,
+    soldSnapshot: { id: "sold-shared", organization_id: ORG, studio_estimate_id: row.id, acceptance_id: stored.id, publication_id: published.publication?.publicationId, sold_snapshot_json: { scope: priced.scope } },
+    acceptance: { ...stored, organization_id: ORG, customer_safe_snapshot_json: safe, customer_display_total: acceptedTotal },
+    mapping: { companyIdentity: "Elite Stone TEST", items: {} },
+    customerJob: { fullName: "Synthetic Customer:Shared Slab" }
+  });
+  assert.equal(plan.totalCents, Math.round(acceptedTotal * 100), "sales order plan equals the accepted total to the cent");
+  assert.equal(plan.blockers.some((b) => b.code === "accepted_total_mismatch" || b.code === "room_breakdown_mismatch"), false, JSON.stringify(plan.blockers));
+  assert.ok(plan.blockers.some((b) => b.code === "custom_slab_material_unmapped"), "shared slab rooms still need an explicit QuickBooks material item");
+  assert.equal(JSON.stringify(plan).toLowerCase().includes("1850.5"), false, "sales order plan carries no slab cost");
+  console.log("ok: 14 shared slab across two rooms + customer credit: charged once; saved = published = accepted = sales order plan");
 }
 
 console.log("\nquoteFlowPublicAcceptance.test.mjs: ok\n");

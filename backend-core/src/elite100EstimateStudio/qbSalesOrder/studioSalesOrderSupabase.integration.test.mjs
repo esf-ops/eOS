@@ -43,15 +43,25 @@ const WRITE_ENV = {
   QB_SALES_ORDER_COMPANY_ALLOWLIST: TEST_COMPANY
 };
 const ITEMS = [
-  ["installed_countertop_package", "SIM-ITEM-CT", "Countertops:Installed"],
+  ["material:q_quartz", "SIM-ITEM-CT", "Countertops:Quartz"],
   ["kitchen_sink_cutout", "SIM-ITEM-SC", "Fabrication:Sink Cutout"],
-  ["sink_product", "SIM-ITEM-SINK", "Products:Sink"],
+  ["sink_product:3018UM16", "SIM-ITEM-SINK", "Products:Sink"],
   ["faucet_hole", "SIM-ITEM-FH", "Fabrication:Faucet Hole"],
   ["customer_credit", "SIM-ITEM-CR", "Adjustments:Credit"],
-  ["tear_out", "SIM-ITEM-TO", "Services:Tear-out"],
-  ["addon:*", "SIM-ITEM-ADD", "Fabrication:Other"],
-  ["project:*", "SIM-ITEM-PRJ", "Services:Project"]
+  ["tear_out", "SIM-ITEM-TO", "Services:Tear-out"]
 ];
+const SIM_NON = { listId: "SIM-TC-NON", fullName: "Non", taxable: false };
+const BASE_CONFIG = {
+  companyIdentity: TEST_COMPANY,
+  timeZone: "America/Chicago",
+  template: { listId: "SIM-TPL", fullName: "Custom Sales Order" },
+  headerClass: { listId: "SIM-CL", fullName: "Synthetic Branch" },
+  terms: { listId: "SIM-TM", fullName: "Due on receipt" },
+  lineClassByRole: { plumbing: "header" },
+  material: { conceptByMaterialLine: { "Q Quartz": "material:q_quartz" } },
+  sink: { conceptByModel: { "3018UM16": "sink_product:3018UM16" } },
+  credit: { concept: "customer_credit" }
+};
 
 async function must(p, what) {
   const { data, error } = await p;
@@ -62,15 +72,15 @@ async function must(p, what) {
 function acceptedRoomPricing() {
   const kitchenAddOns = [
     { categoryKey: "sink_cutout", label: "Kitchen sink cutout", amountCents: 20000 },
-    { categoryKey: "sink", label: "ESF undermount sink", amountCents: 32500 },
+    { categoryKey: "sink", label: "Sink — 3018UM16 Super Single Bowl 16 Gauge Undermount Stainless Steel Sink 16GA", amountCents: 32500 },
     { categoryKey: "faucet_hole", label: "Faucet hole (included)", amountCents: 0 }
   ];
   const rooms = [
     {
       roomName: "Kitchen",
-      selectedMaterial: "Synthetic Quartz A",
+      selectedMaterial: "Group C",
       countertop: { amountCents: 416363 },
-      backsplash: { amountCents: 0, label: "No backsplash" },
+      backsplash: { mode: "none", amountCents: 0, label: "No backsplash" },
       addOns: { amountCents: 52500, lines: kitchenAddOns },
       roomTotalDetail: { amountCents: 468863 }
     }
@@ -87,7 +97,7 @@ async function seedOrg(org, { configured }) {
       organization_id: org,
       integration_key: "quickbooks_sales_order",
       is_enabled: true,
-      config: { companyIdentity: TEST_COMPANY, termsFullName: "Due on receipt" }
+      config: BASE_CONFIG
     }),
     "integration config"
   );
@@ -147,6 +157,7 @@ async function seedSold(org, { accountId }) {
         customer_display_total: pricing.totalCents / 100,
         customer_safe_snapshot_json: {
           acceptedAsPublished: true,
+          configuration: { selectedMaterial: { roomId: "room-kitchen", colorId: "e100-calacatta-fioressa", colorName: "Calacatta Fioressa" } },
           acceptedRoomPricing: { kind: "original", rooms: pricing.rooms, projectAddOns: pricing.projectAddOns, reconciliationStatus: "reconciled" }
         }
       })
@@ -165,7 +176,7 @@ async function seedSold(org, { accountId }) {
         publication_id: pub.id,
         estimate_revision: 1,
         customer_display_total: pricing.totalCents / 100,
-        sold_snapshot_json: { accountDirectoryAccountId: accountId }
+        sold_snapshot_json: { accountDirectoryAccountId: accountId, scope: { materialGroup: "Group C", rooms: [{ id: "room-kitchen", name: "Kitchen", included: true }] } }
       })
       .select("id")
       .single(),
@@ -248,18 +259,23 @@ await test("concurrent enqueue from two processes creates exactly one durable jo
   assert.equal(rows[0].plan_json.totalCents, first.totalCents);
 });
 
-await test("no configured sales-tax codes: job is blocked, nothing inferred from item defaults", async () => {
+await test("no tax policy: job is blocked, nothing inferred from item defaults", async () => {
   const [row] = await jobRows(ORG);
   assert.equal(row.status, "blocked");
-  assert.ok(row.blockers_json.some((b) => b.code === "sales_tax_code_unmapped"), JSON.stringify(row.blockers_json));
+  assert.ok(row.blockers_json.some((b) => b.code === "tax_policy_pending"), JSON.stringify(row.blockers_json));
 });
 
-await test("explicit synthetic tax config + retry replans to queued", async () => {
-  const salesTaxCodeByConcept = Object.fromEntries(ITEMS.map(([c]) => [c, "SIM-NON"]));
+await test("explicit synthetic tax policy + retry replans to queued", async () => {
+  const taxPolicy = {
+    status: "approved",
+    itemSalesTax: { listId: "SIM-TI-NON", fullName: "Non-taxable", ratePercent: 0 },
+    customerSalesTaxCode: SIM_NON,
+    lineSalesTaxCodeByRole: Object.fromEntries(["material", "backsplash", "fabrication", "plumbing_product", "credit", "project_service"].map((r) => [r, SIM_NON]))
+  };
   await must(
     db
       .from("organization_integration_configs")
-      .update({ config: { companyIdentity: TEST_COMPANY, termsFullName: "Due on receipt", salesTaxCodeByConcept } })
+      .update({ config: { ...BASE_CONFIG, taxPolicy } })
       .eq("organization_id", ORG)
       .eq("integration_key", "quickbooks_sales_order"),
     "tax config"

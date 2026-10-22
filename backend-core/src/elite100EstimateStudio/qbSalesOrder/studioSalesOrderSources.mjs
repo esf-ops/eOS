@@ -5,15 +5,16 @@
  *   - Item identity: `quote_qb_item_mappings` (organization-scoped concept → QuickBooks
  *     ListID). One mapping table for estimates and sales orders.
  *   - Company-level settings: `organization_integration_configs` row with
- *     integration_key `quickbooks_sales_order` (companyIdentity, termsFullName,
- *     classFullName, per-concept salesTaxCodeByConcept / classByConcept). Non-secret.
+ *     integration_key `quickbooks_sales_order` (companyIdentity, template, headerClass,
+ *     terms, lineClassByRole, material / backsplash / sink / credit concept rules,
+ *     taxPolicy — references by ListID). Non-secret.
  *     No row, or is_enabled = false → sales orders are not configured for the org.
  *   - Customer:job: staff selection on the job, else Account Directory's single active
  *     `quickbooks_desktop` link resolved against the QuickBooks customer mirror
  *     (`ad_qb_customer_facts`). Names never select a customer.
  *
- * Sales tax: only explicitly configured per-concept tax codes are used. Nothing is
- * inferred from QuickBooks item defaults.
+ * Sales tax: only an explicit taxPolicy (header tax item, customer tax code, per-role line
+ * codes) is used. Nothing is inferred from QuickBooks item or customer defaults.
  */
 
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "../../accountDirectory/accountDirectoryQuickbooksLinkage.mjs";
@@ -63,24 +64,43 @@ export async function loadStudioSalesOrderMapping(db, organizationId) {
     .eq("is_active", true)
     .limit(500);
   if (error) throw persistenceError("QuickBooks item mappings", error);
-  const taxByConcept = config.salesTaxCodeByConcept && typeof config.salesTaxCodeByConcept === "object" ? config.salesTaxCodeByConcept : {};
-  const classByConcept = config.classByConcept && typeof config.classByConcept === "object" ? config.classByConcept : {};
+  return salesOrderMappingFromConfig(config, data || []);
+}
+
+const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : null);
+
+/**
+ * Normalize the `quickbooks_sales_order` config + `quote_qb_item_mappings` rows into the
+ * plan's mapping. Item identity comes from the mapping table; `config.testOnlyItems` may add
+ * concepts for a TEST company only, and every such entry is labeled `test_only_selection`.
+ * @param {Record<string, any>} config
+ * @param {Array<{ eliteos_concept_key: string, qb_list_id?: string|null, qb_full_name?: string|null }>} itemRows
+ */
+export function salesOrderMappingFromConfig(config, itemRows) {
   /** @type {Record<string, any>} */
   const items = {};
-  for (const row of data || []) {
+  for (const [key, v] of Object.entries(obj(config.testOnlyItems) || {})) {
+    if (!obj(v)) continue;
+    items[key] = { listId: str(v.listId) || null, itemFullName: str(v.itemFullName ?? v.fullName) || null, source: "test_only_selection" };
+  }
+  for (const row of itemRows) {
     const key = str(row.eliteos_concept_key);
     if (!key) continue;
-    items[key] = {
-      listId: str(row.qb_list_id) || null,
-      itemFullName: str(row.qb_full_name) || null,
-      salesTaxCodeFullName: str(taxByConcept[key]) || null,
-      classFullName: str(classByConcept[key]) || null
-    };
+    items[key] = { listId: str(row.qb_list_id) || null, itemFullName: str(row.qb_full_name) || null, source: "approved" };
   }
   return {
     companyIdentity: str(config.companyIdentity) || null,
-    termsFullName: str(config.termsFullName) || null,
-    classFullName: str(config.classFullName) || null,
+    timeZone: str(config.timeZone) || null,
+    memoStyle: config.memoStyle === "estimate_prefix" ? "estimate_prefix" : "eliteos",
+    template: obj(config.template),
+    headerClass: obj(config.headerClass),
+    terms: obj(config.terms),
+    lineClassByRole: obj(config.lineClassByRole) || {},
+    material: obj(config.material) || {},
+    backsplash: obj(config.backsplash) || {},
+    sink: obj(config.sink) || {},
+    credit: obj(config.credit) || {},
+    taxPolicy: obj(config.taxPolicy),
     items
   };
 }
@@ -178,7 +198,7 @@ export async function loadStudioSalesOrderSource(db, organizationId, soldSnapsho
   if (!soldSnapshot) return null;
   const { data: acceptance, error: accError } = await db
     .from("studio_estimate_acceptances")
-    .select("id, organization_id, publication_id, customer_display_total, customer_safe_snapshot_json")
+    .select("id, organization_id, publication_id, accepted_at, customer_display_total, customer_safe_snapshot_json")
     .eq("organization_id", organizationId)
     .eq("id", soldSnapshot.acceptance_id)
     .maybeSingle();

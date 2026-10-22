@@ -16,7 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { buildStudioSalesOrderPlan } from "./studioSalesOrderPlan.mjs";
+import { buildStudioSalesOrderPlan, SALES_ORDER_PLAN_KIND } from "./studioSalesOrderPlan.mjs";
 import {
   buildCompanyQueryRq,
   buildSalesOrderAddRq,
@@ -106,6 +106,9 @@ export function presentSalesOrderJob(job, opts = {}) {
     attempts: job.attempts,
     nextAttemptAt: job.nextAttemptAt || null,
     blockers: job.plan?.blockers || [],
+    warnings: job.plan?.warnings || [],
+    excludedLines: job.plan?.excludedLines || [],
+    testOnlySelections: job.plan?.testOnlySelections || [],
     customer: job.plan?.customer || null,
     customerJobSelectedByStaff: Boolean(job.customerJob),
     companyIdentity: job.companyIdentity || job.plan?.companyIdentity || null,
@@ -191,7 +194,15 @@ export function createStudioSalesOrderQueue(deps) {
       loadMapping(organizationId),
       resolveCustomerJob(organizationId, soldSnapshot, customerJobOverride)
     ]);
-    const plan = buildStudioSalesOrderPlan({ organizationId, soldSnapshot, acceptance, mapping, customerJob, quoteNumber });
+    const plan = buildStudioSalesOrderPlan({
+      organizationId,
+      soldSnapshot,
+      acceptance,
+      mapping,
+      customerJob,
+      quoteNumber,
+      allowTestOnlySelections: typedCustomerJobAllowed
+    });
     if (customerJob?.unresolvedReason) {
       const b = plan.blockers.find((x) => x.code === "qb_customer_job_unresolved");
       if (b) {
@@ -324,7 +335,10 @@ export function createStudioSalesOrderQueue(deps) {
       } catch (e) {
         return failAttempt(job, { code: "qb_response_unreadable", message: `Unreadable QuickBooks response: ${e?.message || e}`, retryable: true });
       }
-      const gate = checkStudioSalesOrderWriteGate({ env, companyName, mappingCompanyIdentity: job.plan.companyIdentity });
+      const gate =
+        job.plan.kind !== SALES_ORDER_PLAN_KIND.ACCEPTED_SYNC
+          ? { ok: false, code: "sales_order_plan_not_syncable", message: "Only an accepted-quote plan can be sent to QuickBooks; synthetic scenarios are test artifacts." }
+          : checkStudioSalesOrderWriteGate({ env, companyName, mappingCompanyIdentity: job.plan.companyIdentity });
       if (!gate.ok) {
         return save(job, { status: S.BLOCKED, leaseUntil: null, attempt: null, lastError: { code: gate.code, message: gate.message, retryable: false } }, "write_gate_blocked", { code: gate.code });
       }
