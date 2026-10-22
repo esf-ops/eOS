@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:DeJong;Bill;;;
+FN:Bill DeJong
+ORG:Elite Stone Fabrications
+TITLE:Finance Manager
+TEL;TYPE=WORK,VOICE:(319) 455-4200
+EMAIL;TYPE=INTERNET,WORK:bill@kbyd.com
+END:VCARD

@@ -4,6 +4,10 @@
     {
       "source": "/team-directory-drbbgub3(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/team-directory-drbbgub3/vcards/(.*)",
+      "headers": [{ "key": "Content-Type", "value": "text/vcard; charset=utf-8" }]
     }
   ],
   "git": {

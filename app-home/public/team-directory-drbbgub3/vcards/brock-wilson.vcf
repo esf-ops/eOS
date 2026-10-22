@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Wilson;Brock;;;
+FN:Brock Wilson
+ORG:Elite Stone Fabrications
+TITLE:Warehouse Manager
+TEL;TYPE=WORK,VOICE:(563) 400-7729
+EMAIL;TYPE=INTERNET,WORK:warehouse@elitestonefabrication.com
+END:VCARD

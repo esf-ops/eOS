@@ -84,6 +84,10 @@ a.em{font-size:14px}
 .rg{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr));gap:12px;margin-bottom:18px}
 .res{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:3px;align-content:start;min-width:0}
 .res .mc{margin-top:8px}
+a.add{display:inline-block;justify-self:start;align-self:start;margin-top:10px;font-weight:600;font-size:14px;color:var(--ink);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--chip)}
+a.add.sm{margin-top:4px;padding:3px 8px;font-size:12px;font-weight:500}
+a.add:hover{border-color:var(--red)}
+a.saveall{text-decoration:none;margin-left:auto;background:var(--chip);border-color:transparent}
 @media (max-width:720px){
   .row{grid-template-columns:1fr;padding:12px 16px}
   .head{display:none}
@@ -105,6 +109,7 @@ a.em{font-size:14px}
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" id="tab-who" aria-selected="true">Who to call</button>
       <button class="tab" role="tab" id="tab-all" aria-selected="false">Everyone</button>
+      <a class="tab saveall" id="saveall" href="vcards/elite-stone-contacts.vcf" hidden>Save everyone to my phone</a>
     </div>
   </div>
   <div id="who"><div class="grid" id="grid"></div></div>
@@ -145,7 +150,7 @@ function openTopic(tp){
     const ct=el("div","mc");
     if(p.phone){ const a=el("a","call","Call "+p.phone); a.href="tel:"+p.phone.replace(/\D/g,""); ct.appendChild(a); }
     const m=mailLink(p.email); if(m){ m.className="em"; ct.appendChild(m); }
-    d.appendChild(ct); box.appendChild(d);
+    d.appendChild(ct); const ad=addLink(p); if(ad) d.appendChild(ad); box.appendChild(d);
   }
   lastFocus=document.activeElement; $("ov").hidden=false; $("dlg").scrollTop=0; $("dx").focus();
 }
@@ -172,6 +177,9 @@ function stem(w){
 }
 const SYN={};
 for(const g of GROUPS_SYN){ const s=g.map(stem); for(const w of s) SYN[w]=s.filter(x=>x!==w); }
+const VCARDS = true;
+function slugOf(n){ return n.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); }
+function addLink(p,cls){ if(!VCARDS) return null; const a=el("a",cls||"add","Add to contacts"); a.href="vcards/"+slugOf(p.name)+".vcf"; return a; }
 function wordsOf(s){ return (s||"").split(/[^A-Za-z0-9]+/).map(stem).filter(Boolean); }
 function indexPerson(p){
   if(p._ix) return p._ix;
@@ -208,7 +216,7 @@ function resultCard(p){
   const ct=el("div","mc");
   if(p.phone){ const a=el("a","call","Call "+p.phone); a.href="tel:"+p.phone.replace(/\\D/g,""); ct.appendChild(a); }
   const m=mailLink(p.email); if(m){ m.className="em"; ct.appendChild(m); }
-  c.appendChild(ct); return c;
+  c.appendChild(ct); const ad=addLink(p); if(ad) c.appendChild(ad); return c;
 }
 function renderResults(box,res){
   const wrap=el("div","results");
@@ -261,7 +269,7 @@ function renderAll(){
     if(group!=="All" && p.group!==group) continue;
     if(keep && !keep.has(p.name)) continue;
     if(p.group!==last){ l.appendChild(el("div","gl",p.group)); last=p.group; }
-    const r=el("div","row"); r.appendChild(el("div","pn",p.name)); r.appendChild(el("div","t",p.title));
+    const r=el("div","row"); const nm=el("div"); nm.appendChild(el("div","pn",p.name)); const ad=addLink(p,"add sm"); if(ad) nm.appendChild(ad); r.appendChild(nm); r.appendChild(el("div","t",p.title));
     const ph=el("div"); const a=phoneLink(p.phone); if(a) ph.appendChild(a); r.appendChild(ph);
     const em=el("div"); const m=mailLink(p.email); if(m) em.appendChild(m); r.appendChild(em);
     l.appendChild(r); n++;
@@ -278,6 +286,7 @@ $("ov").addEventListener("click",e=>{ if(e.target===$("ov")) closeTopic(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!$("ov").hidden) closeTopic(); });
 $("tab-who").onclick=()=>setView("who"); $("tab-all").onclick=()=>setView("all");
 $("q").addEventListener("input",e=>{term=e.target.value.trim(); view==="who"?renderWho():renderAll();});
+if(VCARDS) $("saveall").hidden=false;
 renderBranches();
 setView("who");
 </script>

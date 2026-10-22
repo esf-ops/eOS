@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Robinson;Kyle;;;
+FN:Kyle Robinson
+ORG:Elite Stone Fabrications
+TITLE:Field Operations Manager
+TEL;TYPE=WORK,VOICE:(860) 248-9877
+EMAIL;TYPE=INTERNET,WORK:kyle@elitestonefabrication.com
+END:VCARD

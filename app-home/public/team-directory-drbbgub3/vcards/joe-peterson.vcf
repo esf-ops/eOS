@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Peterson;Joe;;;
+FN:Joe Peterson
+ORG:Elite Stone Fabrications
+TITLE:Programmer
+TEL;TYPE=WORK,VOICE:(319) 329-3960
+EMAIL;TYPE=INTERNET,WORK:joe@elitestonefabrication.com
+END:VCARD
