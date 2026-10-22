@@ -21,6 +21,7 @@ import {
 } from "../integrations/mondayQuoteSync.js";
 import { restoreInternalQuoteAsNewRevision } from "./internalQuoteRestore.js";
 import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./quoteLibraryHandoffPayloads.js";
+import { loadActiveQbItemMappings } from "./quoteQbCatalog/quoteQbItemMappingStore.js";
 import {
   applyQuoteLibrarySearch,
   quoteAccountFilterOrClause,
@@ -1507,7 +1508,32 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
       const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
       if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
-      const payload = buildQuickBooksEntryDocPayload(detail.header, detail.calculation_snapshot, detail.line_items);
+      let organizationKey = null;
+      const resolvedOrgId = orgId || detail.header?.organization_id || null;
+      /** @type {Array<object>|null} */
+      let qbItemMappings = null;
+      let mappingSource = null;
+      if (resolvedOrgId) {
+        const orgRow = await db
+          .from("organizations")
+          .select("organization_key")
+          .eq("id", resolvedOrgId)
+          .maybeSingle();
+        organizationKey = orgRow?.data?.organization_key ? String(orgRow.data.organization_key) : null;
+        try {
+          qbItemMappings = await loadActiveQbItemMappings(db, resolvedOrgId);
+          if (qbItemMappings.length > 0) mappingSource = "quote_qb_item_mappings";
+        } catch {
+          // Table missing or unreadable — fall back to Phase 0 org-scoped seeds.
+          qbItemMappings = null;
+        }
+      }
+      const payload = buildQuickBooksEntryDocPayload(detail.header, detail.calculation_snapshot, detail.line_items, {
+        organizationId: resolvedOrgId,
+        organizationKey,
+        qbItemMappings,
+        mappingSource
+      });
       const docId = await insertHandoffDoc(db, orgId, req, id, "quickbooks_entry", payload);
       res.json({ ok: true, doc_id: docId, payload });
     } catch (e) {
