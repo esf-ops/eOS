@@ -47,6 +47,7 @@ import {
 } from "./takeoffAuthoritativeResult.mjs";
 import { normalizeTakeoffBacksplashEligibility } from "./takeoffBacksplashEligibility.mjs";
 import { normalizeTakeoffCutoutScope } from "./takeoffCutoutScope.mjs";
+import { reconcileCookingApplianceEvidence } from "./takeoffCookingAppliance.mjs";
 import { syncIntakeTakeoffLinkFromJob } from "./intakeTakeoffLinkStatus.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
@@ -386,9 +387,11 @@ export async function runAiTakeoffExtraction({
       fileName: file.original_filename,
     },
   }).takeoff;
-  const normalized = normalizeTakeoffCutoutScope(
-    normalizeTakeoffBacksplashEligibility(uniqueIds).takeoff
-  ).takeoff;
+  const applianceReconciled = reconcileCookingApplianceEvidence(
+    normalizeTakeoffCutoutScope(normalizeTakeoffBacksplashEligibility(uniqueIds).takeoff).takeoff,
+    { evidenceCookingAppliances: dimensionEvidence?.cookingAppliances }
+  );
+  const normalized = applianceReconciled.takeoff;
 
   // 10. Server-side recompute — AI totals are NEVER used for pricing.
   let computed, validation, importPlan, qaGate;
@@ -433,6 +436,7 @@ export async function runAiTakeoffExtraction({
     errorCount:             validation.errorCount,
     warningCount:           validation.warningCount,
     canImport:              importPlan.canImport,
+    cookingApplianceCorrections: applianceReconciled.corrections.map((c) => c.op),
   };
 
   // 11. Insert quote_takeoff_results row.

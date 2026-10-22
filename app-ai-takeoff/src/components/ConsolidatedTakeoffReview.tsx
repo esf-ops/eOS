@@ -78,7 +78,8 @@ import {
 } from "@takeoff-core/takeoffCutoutScope.mjs";
 import {
   COOKING_APPLIANCE_TYPES,
-  cookingApplianceNeedsReview,
+  cookingApplianceApprovalIssue,
+  cookingApplianceTypeLabel,
   collectCookingApplianceReviewIssues
 } from "@takeoff-core/takeoffCookingAppliance.mjs";
 import {
@@ -2432,6 +2433,59 @@ export default function ConsolidatedTakeoffReview() {
                         const rowLocked =
                           isReadonly ||
                           (!quoteFlowSetScope && approveStatus === "approved");
+                        const applianceIssue = cookingApplianceApprovalIssue({
+                          cookingAppliance: row.cookingAppliance,
+                          adjacentApplianceGap: row.adjacentApplianceGap,
+                          applianceSidesConfirmed: row.applianceSidesConfirmed
+                        });
+                        const confirmApplianceType = (nextType: string) => {
+                          let converted = convertCookingApplianceType(
+                            draft,
+                            row.roomId,
+                            row.runId,
+                            nextType,
+                            { source: "estimator_confirmed", confidence: "high" }
+                          );
+                          if (
+                            converted.needsSegmentation &&
+                            window.confirm(
+                              "Does the stone already stop at the range on this piece?\n\nOK = this piece is already split at the range opening.\nCancel = split this piece now."
+                            )
+                          ) {
+                            converted = convertCookingApplianceType(
+                              draft,
+                              row.roomId,
+                              row.runId,
+                              nextType,
+                              { source: "estimator_confirmed", confidence: "high", sidesConfirmed: true }
+                            );
+                          }
+                          pushCorrectionEvent(converted.event);
+                          updateDraft(
+                            markRunEstimatorOwned(converted.takeoff, row.roomId, row.runId)
+                          );
+                          if (!converted.needsSegmentation) return;
+                          const left = window.prompt(
+                            "Range interrupts the run. Enter the left piece length (in) from the plan:",
+                            ""
+                          );
+                          const gap = window.prompt(
+                            "Enter the range opening width (in) from the plan or appliance spec.\nStandard slide-in / free-standing ranges are 30 in — enter 30 only if you have confirmed it.",
+                            row.cookingAppliance?.widthIn ? String(row.cookingAppliance.widthIn) : ""
+                          );
+                          if (!(left && gap && Number(left) > 0 && Number(gap) > 0)) return;
+                          try {
+                            const inserted = insertApplianceGap(converted.takeoff, row.roomId, row.runId, {
+                              leftLengthIn: Number(left),
+                              gapWidthIn: Number(gap),
+                              applianceType: nextType
+                            });
+                            pushCorrectionEvent(inserted.event);
+                            updateDraft(inserted.takeoff);
+                          } catch (err) {
+                            setLoadError(err instanceof Error ? err.message : "Unable to insert appliance gap");
+                          }
+                        };
                         return (
                     <tr
                       key={row.key}
@@ -2663,6 +2717,11 @@ export default function ConsolidatedTakeoffReview() {
                             aria-label={`Cutouts for ${row.pieceName}`}
                           >
                             {row.cutoutsSummary}
+                            {applianceIssue ? (
+                              <span className="ctr-appliance-review" data-testid="ctr-appliance-review-summary">
+                                {" "}· Appliance needs review
+                              </span>
+                            ) : null}
                           </summary>
                           <div className="ctr-cutouts-menu" data-testid="ctr-cutouts-menu">
                             <div className="ctr-appliance-block" data-testid="ctr-cooking-appliance">
@@ -2672,58 +2731,7 @@ export default function ConsolidatedTakeoffReview() {
                                   disabled={rowLocked}
                                   data-testid="ctr-cooking-appliance-type"
                                   value={row.cookingAppliance?.type || ""}
-                                  onChange={(e) => {
-                                    const nextType = e.target.value || "not_applicable";
-                                    const converted = convertCookingApplianceType(
-                                      draft,
-                                      row.roomId,
-                                      row.runId,
-                                      nextType,
-                                      { source: "estimator_confirmed", confidence: "high" }
-                                    );
-                                    pushCorrectionEvent(converted.event);
-                                    updateDraft(
-                                      markRunEstimatorOwned(
-                                        converted.takeoff,
-                                        row.roomId,
-                                        row.runId
-                                      )
-                                    );
-                                    if (converted.needsSegmentation) {
-                                      const left = window.prompt(
-                                        "Range interrupts the run. Enter left piece length (in):",
-                                        String(Math.floor((Number(row.lengthIn) || 0) / 2))
-                                      );
-                                      const gap = window.prompt(
-                                        "Enter range/appliance gap width (in) — required, do not invent:",
-                                        row.cookingAppliance?.widthIn
-                                          ? String(row.cookingAppliance.widthIn)
-                                          : "30"
-                                      );
-                                      if (left && gap && Number(left) > 0 && Number(gap) > 0) {
-                                        try {
-                                          const inserted = insertApplianceGap(
-                                            converted.takeoff,
-                                            row.roomId,
-                                            row.runId,
-                                            {
-                                              leftLengthIn: Number(left),
-                                              gapWidthIn: Number(gap),
-                                              applianceType: nextType
-                                            }
-                                          );
-                                          pushCorrectionEvent(inserted.event);
-                                          updateDraft(inserted.takeoff);
-                                        } catch (err) {
-                                          setLoadError(
-                                            err instanceof Error
-                                              ? err.message
-                                              : "Unable to insert appliance gap"
-                                          );
-                                        }
-                                      }
-                                    }
-                                  }}
+                                  onChange={(e) => confirmApplianceType(e.target.value || "not_applicable")}
                                 >
                                   <option value="">—</option>
                                   {COOKING_APPLIANCE_TYPES.map((t) => (
@@ -2733,13 +2741,27 @@ export default function ConsolidatedTakeoffReview() {
                                   ))}
                                 </select>
                               </label>
-                              {cookingApplianceNeedsReview(row.cookingAppliance) ||
+                              {applianceIssue ||
                               collectCookingApplianceReviewIssues({
                                 cookingAppliance: row.cookingAppliance,
                                 cutouts: row.cutouts
                               }).length > 0 ? (
                                 <p className="ctr-appliance-review" data-testid="ctr-appliance-review">
-                                  Cooking appliance detected · Type needs confirmation
+                                  {applianceIssue
+                                    ? `Approval blocked: ${applianceIssue.message}.`
+                                    : "Cooking appliance detected · Type needs confirmation"}
+                                  {applianceIssue && row.cookingAppliance?.type &&
+                                  row.cookingAppliance.type !== "unknown_cooking_appliance" ? (
+                                    <button
+                                      type="button"
+                                      className="ctr-appliance-confirm"
+                                      data-testid="ctr-appliance-confirm"
+                                      disabled={rowLocked}
+                                      onClick={() => confirmApplianceType(row.cookingAppliance.type)}
+                                    >
+                                      Confirm {cookingApplianceTypeLabel(row.cookingAppliance.type)}
+                                    </button>
+                                  ) : null}
                                 </p>
                               ) : null}
                             </div>

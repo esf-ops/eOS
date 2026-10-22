@@ -295,6 +295,183 @@ export function buildTakeoffCorrectionEvent(op, detail = {}) {
   };
 }
 
+const RANGE_HOOD_RE = /\b(range|vent|exhaust)\s*-?\s*hoods?\b/gi;
+const NEGATED_RANGE_RE =
+  /\b(not|no|isn'?t|rather than|instead of)\s+(an?\s+)?((slide[\s-]?in|free[\s-]?standing)\s+)?(ranges?|stoves?)\b/gi;
+const RANGE_TEXT_RE = /\b(slide[\s-]?in|free[\s-]?standing|stove|ranges?)\b/i;
+const COOKTOP_TEXT_RE = /\b(cook[\s-]?tops?|cktp)\b/i;
+const EVIDENCE_RANGE_TYPES = new Set(["freestanding_range", "slide_in_range"]);
+
+function runEvidenceText(run) {
+  const notes = Array.isArray(run?.notes) ? run.notes.join(" ") : String(run?.notes ?? "");
+  return [run?.label, notes, run?.assemblyNotes]
+    .filter((v) => typeof v === "string" && v)
+    .join(" ")
+    .replace(RANGE_HOOD_RE, " ")
+    .replace(NEGATED_RANGE_RE, " ");
+}
+
+function appendRunNote(run, note) {
+  const notes = Array.isArray(run.notes) ? [...run.notes] : run.notes ? [String(run.notes)] : [];
+  if (!notes.includes(note)) notes.push(note);
+  run.notes = notes;
+}
+
+/**
+ * Deterministic guard on fresh AI output: a cooktop cutout must be backed by
+ * cooktop evidence. Runs whose own text describes a range lose the cutout and
+ * become unknown_cooking_appliance (estimator confirms); a range-typed run never
+ * keeps a cooktop cutout; unclassified or conflicting cooktops require review.
+ * Only for new extractions — never re-run on estimator-reviewed drafts.
+ *
+ * @param {object|null|undefined} takeoff
+ * @param {{ evidenceCookingAppliances?: Array<{type?: string, confidence?: string}> }} [opts]
+ * @returns {{ takeoff: object|null|undefined, changed: boolean, corrections: object[] }}
+ */
+export function reconcileCookingApplianceEvidence(takeoff, opts = {}) {
+  if (!takeoff || typeof takeoff !== "object" || !Array.isArray(takeoff.rooms)) {
+    return { takeoff, changed: false, corrections: [] };
+  }
+  const evidenceAppliances = Array.isArray(opts.evidenceCookingAppliances) ? opts.evidenceCookingAppliances : [];
+  const evidenceSawRange = evidenceAppliances.some(
+    (a) => EVIDENCE_RANGE_TYPES.has(String(a?.type || "")) && a?.confidence !== "low"
+  );
+  const labeled = (v) => Number(v) > 0;
+  const evidenceRangeWidth = evidenceAppliances.some(
+    (a) => EVIDENCE_RANGE_TYPES.has(String(a?.type || "")) && labeled(a?.widthIn)
+  );
+  const evidenceRangeSides = evidenceAppliances.some(
+    (a) =>
+      EVIDENCE_RANGE_TYPES.has(String(a?.type || "")) &&
+      (labeled(a?.leftCounterLengthIn) || labeled(a?.rightCounterLengthIn))
+  );
+  const base = structuredClone(takeoff);
+  const corrections = [];
+
+  const reconcileRun = (run, roomName) => {
+    if (!run || typeof run !== "object") return run;
+    const cutouts = Array.isArray(run.cutouts) ? run.cutouts : [];
+    const hasCooktopCutout = cutouts.some((c) => c?.type === "cooktop");
+    const appliance = run.cookingAppliance;
+    const type = String(appliance?.type || "");
+    const record = (op, next) => {
+      corrections.push(
+        buildTakeoffCorrectionEvent(op, { room: roomName ?? null, runId: run.id ?? null, label: run.label ?? null })
+      );
+      return next;
+    };
+
+    if (cookingApplianceInterruptsCountertop(type)) {
+      let next = run;
+      if (hasCooktopCutout) {
+        next = applyCookingApplianceToRun(run, type, {
+          confidence: appliance.confidence,
+          source: appliance.source,
+          widthIn: appliance.widthIn,
+          note: appliance.note
+        });
+        next.cookingAppliance.reviewRequired = appliance.reviewRequired === true || next.cookingAppliance.reviewRequired;
+        appendRunNote(next, "Cooktop cutout removed — a range interrupts the countertop and gets no cutout.");
+        record("range_cooktop_cutout_removed", next);
+      }
+      if (appliance.source === "estimator_confirmed") return next;
+      if (labeled(next.cookingAppliance?.widthIn) && !evidenceRangeWidth) {
+        next = { ...next, cookingAppliance: { ...next.cookingAppliance, reviewRequired: true } };
+        delete next.cookingAppliance.widthIn;
+        next.requiresEstimatorReview = true;
+        appendRunNote(next, "Range width is not labeled on the plan — no standard width assumed. Staff must confirm the opening.");
+        record("range_width_unlabeled_removed", next);
+      }
+      if (!evidenceRangeSides) {
+        next = { ...next, requiresEstimatorReview: true };
+        appendRunNote(next, "Piece lengths beside the range are not labeled on the plan — confirm before approval.");
+        record("range_sides_unlabeled", next);
+      }
+      return next;
+    }
+
+    if (!hasCooktopCutout && type !== "cooktop") return run;
+
+    const text = runEvidenceText(run);
+    const saysRange = RANGE_TEXT_RE.test(text);
+    const saysCooktop = COOKTOP_TEXT_RE.test(text);
+
+    if (saysRange && !saysCooktop) {
+      const next = applyCookingApplianceToRun(run, "unknown_cooking_appliance", {
+        confidence: "low",
+        source: "ai_suggested",
+        note: "Plan text describes a range, not a cooktop — confirm type before pricing."
+      });
+      next.requiresEstimatorReview = true;
+      appendRunNote(
+        next,
+        "Cooktop cutout withheld — plan text describes a range. If it is a slide-in/free-standing range, split this run at the range opening."
+      );
+      return record("cooktop_reclassified_unknown_range_text", next);
+    }
+
+    const unclassified = !appliance || appliance.source === "legacy";
+    if (saysRange || unclassified || evidenceSawRange) {
+      const next = { ...run, cookingAppliance: { ...(appliance || { type: "cooktop", source: "ai_suggested" }) } };
+      next.cookingAppliance.reviewRequired = true;
+      next.cookingAppliance.confidence = "low";
+      next.requiresEstimatorReview = true;
+      const reason = saysRange
+        ? "plan text mentions both a cooktop and a range"
+        : evidenceSawRange
+          ? "the plan evidence identified a range"
+          : "the AI did not classify the cooking appliance";
+      appendRunNote(next, `Confirm cooktop vs range — ${reason}.`);
+      return record("cooktop_review_required", next);
+    }
+    return run;
+  };
+
+  for (const room of base.rooms) {
+    if (!room || typeof room !== "object") continue;
+    if (Array.isArray(room.runs)) room.runs = room.runs.map((r) => reconcileRun(r, room.name));
+    if (Array.isArray(room.pieces)) room.pieces = room.pieces.map((r) => reconcileRun(r, room.name));
+    if (Array.isArray(room.areas)) {
+      for (const area of room.areas) {
+        if (area && Array.isArray(area.runs)) area.runs = area.runs.map((r) => reconcileRun(r, room.name));
+      }
+    }
+  }
+  const changed = corrections.length > 0;
+  return { takeoff: changed ? base : takeoff, changed, corrections };
+}
+
+/**
+ * Approval blocker for an included piece, or null. A clearly classified cooktop
+ * passes; an unknown or review-flagged appliance needs staff confirmation; a range
+ * needs staff to split the piece at the opening or confirm the stone already stops
+ * there — a continuous piece across an unresolved range must never be billed.
+ * @param {object} run
+ * @returns {{ code: string, message: string } | null}
+ */
+export function cookingApplianceApprovalIssue(run) {
+  const appliance = run?.cookingAppliance;
+  const type = String(appliance?.type || "");
+  if (!type || type === "not_applicable") return null;
+  if (cookingApplianceInterruptsCountertop(type)) {
+    const confirmed =
+      appliance.source === "estimator_confirmed" &&
+      (Boolean(run.adjacentApplianceGap) || run.applianceSidesConfirmed === true);
+    if (confirmed) return null;
+    return {
+      code: "COOKING_APPLIANCE_UNRESOLVED",
+      message: "range opening not resolved — split the piece at the range or confirm the stone already stops there"
+    };
+  }
+  if (type === "unknown_cooking_appliance" || appliance.reviewRequired === true) {
+    return {
+      code: "COOKING_APPLIANCE_UNRESOLVED",
+      message: "confirm the cooking appliance (cooktop with cutout, or range that splits the piece)"
+    };
+  }
+  return null;
+}
+
 export function collectCookingApplianceReviewIssues(run) {
   const issues = [];
   const appliance = run?.cookingAppliance;

@@ -268,7 +268,7 @@ function mockProvider(rawText) {
   });
 
   assert.equal(result.evidencePromptVersion, EVIDENCE_PROMPT_VERSION, "T9: evidencePromptVersion in result");
-  assert.equal(result.evidencePromptVersion, "v2", "T9: evidencePromptVersion is v2");
+  assert.equal(result.evidencePromptVersion, "v3", "T9: evidencePromptVersion is v3");
   console.log("ok: evidencePromptVersion included in returned DimensionEvidence");
 }
 

@@ -297,12 +297,16 @@ export function convertCookingApplianceType(takeoff, roomId, runId, nextType, op
   const runs = [...getRunList(room, path)];
   const prev = runs[path.runIndex];
   const next = applyCookingApplianceToRun(prev, nextType, opts);
+  const interrupts = cookingApplianceInterruptsCountertop(nextType) === true;
+  if (interrupts && opts.sidesConfirmed === true) next.applianceSidesConfirmed = true;
+  else delete next.applianceSidesConfirmed;
   runs[path.runIndex] = { ...next, _estimatorOwned: true };
   base.rooms[path.roomIndex] = setRunList({ ...room, _estimatorOwned: true }, path, runs);
 
   const needsSegmentation =
-    cookingApplianceInterruptsCountertop(nextType) === true &&
+    interrupts &&
     !next.adjacentApplianceGap &&
+    next.applianceSidesConfirmed !== true &&
     !(opts.gapWidthIn > 0);
 
   return {
@@ -315,7 +319,8 @@ export function convertCookingApplianceType(takeoff, roomId, runId, nextType, op
         ? "cooktop"
         : null,
       toType: nextType,
-      removedCooktopCutout: cookingApplianceInterruptsCountertop(nextType) === true
+      removedCooktopCutout: interrupts,
+      ...(next.applianceSidesConfirmed === true ? { sidesConfirmed: true } : {})
     })
   };
 }

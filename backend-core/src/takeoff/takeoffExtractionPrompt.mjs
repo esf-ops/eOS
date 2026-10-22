@@ -39,7 +39,7 @@
  *     visible geometry. Do not deduct cutouts from material sf. Nonstandard depths must
  *     cite evidence. Conflict → requiresEstimatorReview, never silent resolution.
  */
-export const PROMPT_VERSION = "v6.3";
+export const PROMPT_VERSION = "v6.4";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -95,17 +95,34 @@ const SCHEMA_EXAMPLE = `
             },
             {
               "id": "<uuid>",
-              "label": "Stove wall",
-              "lengthIn": 72.0,
+              "label": "Stove wall — left of range",
+              "lengthIn": 26.5,
               "depthIn": 25.5,
               "shape": "rect",
               "pieceType": "counter",
               "backsplashEligible": true,
-              "cutouts": [{ "type": "cooktop", "quantity": 1, "source": "ai_suggested" }],
+              "cutouts": [],
+              "cookingAppliance": { "type": "slide_in_range", "confidence": "high", "reviewRequired": false, "source": "ai_suggested", "widthIn": 30 },
               "sourcePages": [1],
-              "notes": ["Range at right end — backsplash interrupted"],
+              "notes": ["30\" slide-in range to the right — separate piece, no cooktop cutout"],
               "lengthEvidenceId": "dim-002",
-              "assemblyNotes": "Length from evidence dim-002 'Stove wall 72\"'; standard 25.5\" depth assumed.",
+              "assemblyNotes": "Length from evidence dim-002 'left of range 26 1/2\"'; range labeled RANGE with no base cabinet under it.",
+              "assemblyConfidence": "high"
+            },
+            {
+              "id": "<uuid>",
+              "label": "Stove wall — right of range",
+              "lengthIn": 24.0,
+              "depthIn": 25.5,
+              "shape": "rect",
+              "pieceType": "counter",
+              "backsplashEligible": true,
+              "cutouts": [],
+              "cookingAppliance": { "type": "slide_in_range", "confidence": "high", "reviewRequired": false, "source": "ai_suggested", "widthIn": 30 },
+              "sourcePages": [1],
+              "notes": ["30\" slide-in range to the left — separate piece, no cooktop cutout"],
+              "lengthEvidenceId": "dim-004",
+              "assemblyNotes": "Length from evidence dim-004 'right of range 24\"'.",
               "assemblyConfidence": "high"
             }
           ]
@@ -230,6 +247,23 @@ CUTOUTS AND EXCLUSIONS — CRITICAL RULE
   For "other", include a short "note" describing the opening. Do NOT use freeform strings.
   Your cutout suggestion is not final; the estimator confirms per run before approval.
 • NEVER map a free-standing or slide-in range to cutouts type "cooktop".
+• HOW TO TELL A COOKTOP FROM A RANGE — a burner symbol alone proves nothing; both are drawn with burners.
+  Range (freestanding_range / slide_in_range) cues:
+    - Labeled RANGE, R, SLIDE-IN, FREESTANDING, STOVE, GAS RANGE, DUAL FUEL, or "30\" RANGE"
+    - No base-cabinet code under the appliance; the cabinet sequence skips its width (B18 | 30" opening | B18)
+    - Appliance drawn full depth or projecting past the counter front line, breaking the counter outline
+  Cooktop cues:
+    - Labeled COOKTOP / COOK TOP / CKTP or a cooktop model/size note
+    - A base-cabinet code directly under it (B36, DB36, CB36, DEFF B36, "cooktop base")
+    - A separate wall oven, oven tower, or "micro/oven combo in tall cab" elsewhere in the kitchen
+    - Cooktop set in an island top
+  Conflicting or insufficient cues → unknown_cooking_appliance. A vent/range HOOD label alone is not evidence either way.
+  The kind of drawing (builder floor plan, architectural set) is not evidence either way.
+  Never assume a standard range width (30", 36"): widthIn stays null unless written on the plan.
+• A run that spans an unresolved cooking appliance (unknown, or a range whose side lengths are not labeled)
+  must set requiresEstimatorReview = true and say in assemblyNotes which dimensions are unresolved.
+• When cookingAppliance is a range, every run touching the range opening carries that cookingAppliance and
+  NO cooktop cutout. Mention the range in that run's notes.
 • Do NOT add sink/cooktop/faucet cutouts to area.exclusions[].
 • Record them in area.notes[] or area.cutouts[] (if that field is present) for reference only.
 • Do NOT subtract sink/cooktop/cutout area from material square footage.
@@ -367,6 +401,7 @@ function _buildEvidenceContextSection(evidence) {
   const dims         = evidence.dimensions;
   const notes        = evidence.notes ?? [];
   const cutouts      = evidence.cutouts ?? [];
+  const appliances   = evidence.cookingAppliances ?? [];
   const refTotals    = evidence.referenceTotals ?? [];
   const uncertain    = evidence.uncertainItems ?? [];
 
@@ -411,6 +446,26 @@ function _buildEvidenceContextSection(evidence) {
       lines.push(`  [${c.type ?? "cutout"}] ${c.label} · ${c.confidence ?? "?"} confidence · page ${c.pageNumber ?? "?"}`);
     }
     lines.push("");
+  }
+
+  if (appliances.length > 0) {
+    lines.push("Cooking appliances identified (classification + evidence cues):");
+    for (const a of appliances) {
+      const sides = [
+        a.widthIn != null ? `width ${a.widthIn}"` : "width not labeled",
+        a.leftCounterLengthIn != null ? `left counter ${a.leftCounterLengthIn}"` : null,
+        a.rightCounterLengthIn != null ? `right counter ${a.rightCounterLengthIn}"` : null,
+      ].filter(Boolean).join(", ");
+      const cues = Array.isArray(a.cues) && a.cues.length > 0 ? ` — cues: ${a.cues.join("; ")}` : "";
+      lines.push(`  [${a.type ?? "unknown_cooking_appliance"}] ${a.label ?? "cooking appliance"} · ${sides} · ${a.confidence ?? "?"} confidence · page ${a.pageNumber ?? "?"}${cues}`);
+    }
+    lines.push(
+      "  freestanding_range / slide_in_range → TWO runs (left and right of the opening), cookingAppliance on both, NO cooktop cutout.",
+      "  If a side length is not labeled, keep one run, set cookingAppliance to the range type with reviewRequired = true, no cooktop cutout.",
+      "  cooktop → one continuous run with a cooktop cutout. unknown_cooking_appliance → no cooktop cutout, flag review.",
+      "  Re-check the drawing; if your reading disagrees with this classification, use unknown_cooking_appliance and explain in assemblyNotes.",
+      "",
+    );
   }
 
   if (refTotals.length > 0) {

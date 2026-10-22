@@ -14,6 +14,7 @@ import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import { emptyReviewState, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 import { sfFromRun } from "./takeoffMeasurementCalc.mjs";
 import { normalizeRunCutouts } from "./takeoffCutoutScope.mjs";
+import { cookingApplianceApprovalIssue } from "./takeoffCookingAppliance.mjs";
 
 /**
  * Hard blockers only — must map to a real calculation / assignment / persist failure.
@@ -30,7 +31,8 @@ export const CONSOLIDATED_BLOCKING_CODES = new Set([
   "DUPLICATE_PIECE_DOUBLE_COUNT",
   "TAKEOFF_PROCESSING",
   "TAKEOFF_FAILED",
-  "CALCULATION_FAILED"
+  "CALCULATION_FAILED",
+  "COOKING_APPLIANCE_UNRESOLVED"
 ]);
 
 /**
@@ -379,6 +381,13 @@ export function collectConsolidatedHardBlockers(takeoffResult, reviewState, comp
         )
       );
       continue;
+    }
+
+    const applianceIssue = cookingApplianceApprovalIssue(p.run);
+    if (applianceIssue) {
+      blocking.push(
+        blocker(applianceIssue.code, `${room} · ${name}: ${applianceIssue.message}`, path, "appliance")
+      );
     }
 
     const len = Number(p.run.lengthIn) || 0;

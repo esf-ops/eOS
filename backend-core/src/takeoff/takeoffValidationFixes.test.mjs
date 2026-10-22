@@ -38,7 +38,16 @@ function makeTakeoffWithSinkExclusion() {
 {
   assert.equal(inferCutoutType("Undermount sink"), "sink");
   assert.equal(inferCutoutType("Cooktop opening"), "cooktop");
+  assert.notEqual(inferCutoutType("Range opening cutout"), "cooktop", "range is never a cooktop cutout");
+  assert.notEqual(inferCutoutType("Stove cutout"), "cooktop");
   console.log("ok: inferCutoutType");
+}
+
+{
+  const takeoff = makeTakeoffWithSinkExclusion();
+  takeoff.rooms[0].areas[0].exclusions = [{ label: "Stove opening (range)", lengthIn: 30, depthIn: 25.5 }];
+  assert.equal(listCutoutExclusionFixes(takeoff).length, 0, "range opening is a real material gap, not a cutout");
+  console.log("ok: range/stove opening exclusions are not offered as cutout fixes");
 }
 
 {

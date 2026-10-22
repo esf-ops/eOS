@@ -25,7 +25,7 @@
  */
 
 /** Bump when dimension evidence extraction rules or schema change. */
-export const EVIDENCE_PROMPT_VERSION = "v2";
+export const EVIDENCE_PROMPT_VERSION = "v3";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 
@@ -78,6 +78,18 @@ const EVIDENCE_SCHEMA_EXAMPLE = `
       "label": "Sink cutout",
       "confidence": "high",
       "notes": ["Shown in center of sink wall"]
+    }
+  ],
+  "cookingAppliances": [
+    {
+      "pageNumber": 1,
+      "type": "slide_in_range",
+      "label": "30\\" range on stove wall",
+      "widthIn": 30,
+      "leftCounterLengthIn": 26.5,
+      "rightCounterLengthIn": 24,
+      "cues": ["Labeled RANGE", "No base cabinet code under appliance", "Appliance face projects past counter front line"],
+      "confidence": "high"
     }
   ],
   "referenceTotals": [
@@ -149,6 +161,13 @@ note.category values:
 
 cutout.type values:
   "sink" | "cooktop" | "faucet" | "other"
+  ("cooktop" ONLY when the cookingAppliances[] entry for that appliance is type "cooktop")
+
+cookingAppliance.type values:
+  "cooktop" | "freestanding_range" | "slide_in_range" | "unknown_cooking_appliance"
+cookingAppliance.widthIn / leftCounterLengthIn / rightCounterLengthIn:
+  Only when written on the plan (or derivable from labeled cabinet widths). Otherwise null — never estimate from the drawing.
+cookingAppliance.cues: the concrete plan evidence you used (labels, cabinet codes, symbol geometry, notes).
 
 referenceTotal fields:
   rawText:         exact text as written on the plan (required)
@@ -200,7 +219,28 @@ CUTOUTS — SEPARATE FROM DIMENSIONS
 1. Sink cutouts, cooktop cutouts, faucet holes, and other opening callouts go in cutouts[] array.
 2. Do NOT put cutouts in dimensions[].
 3. Cutouts are fabrication operations, NOT material exclusions. They do not reduce material sf.
-4. Common cutout indicators: "sink", "cooktop", "faucet", "cutout", "C/O", "undermount", symbol indicating an opening.
+4. Common cutout indicators: "sink", "cooktop", "faucet", "cutout", "C/O", "undermount".
+5. A burner symbol is NOT by itself a cooktop cutout — ranges and cooktops are both drawn with burners. Classify every cooking appliance in cookingAppliances[] first (rules below); only a "cooktop" gets a cutouts[] entry.
+
+COOKING APPLIANCES — COOKTOP vs RANGE (record EVERY cooking appliance in cookingAppliances[])
+A cooktop is set INTO continuous stone (one piece + cutout). A free-standing or slide-in range sits in an
+OPENING between two separate countertop pieces (no cutout).
+Range cues (freestanding_range / slide_in_range):
+  • Labeled "RANGE", "R", "SLIDE-IN", "SLIDE IN", "FREESTANDING", "STOVE", "30\\" RANGE", "GAS RANGE", "DUAL FUEL"
+  • No base-cabinet code under the appliance — the cabinet sequence skips its width (e.g. B18 | 30" opening | B18)
+  • Appliance box drawn full counter depth or projecting past the counter front line, breaking the counter outline
+  • Use slide_in_range when labeled slide-in or the appliance sits flush between cabinets with stone on both sides;
+    otherwise freestanding_range
+Cooktop cues (cooktop):
+  • Labeled "COOKTOP", "COOK TOP", "CKTP", or a cooktop model/size note
+  • A base-cabinet code directly under it (e.g. "B36", "DB36", "CB36", "DEFF B36", "cooktop base")
+  • A separate wall oven, oven tower, or "micro/oven combo in tall cab" elsewhere in the kitchen
+  • Cooktop on an island top
+Conflicting or insufficient cues → "unknown_cooking_appliance", confidence "low". NEVER default to cooktop.
+The kind of drawing (builder floor plan, architectural set, sketch) is NOT evidence either way — a burner
+symbol on a floor plan with no label, no cabinet codes and no visible counter break is "unknown_cooking_appliance".
+A vent/range HOOD label alone says nothing about cooktop vs range.
+Never assume a standard width (30", 36") — widthIn and side lengths stay null unless written on the plan.
 
 NOTES — CAPTURE ALL FABRICATION NOTES
 1. Capture ALL annotation notes: "4\\" B/S", "no B/S", "FHB", "waterfall", "miter", "grain match", "tile on wall", "customer tile", "farmhouse sink", "seating overhang", etc.

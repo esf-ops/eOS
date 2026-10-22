@@ -7,8 +7,11 @@
 
 /** @typedef {"move_to_cutouts" | "move_to_notes" | "remove"} CutoutExclusionFixAction */
 
-/** Matches sink/cooktop/faucet cutout labels misplaced in exclusions[]. */
-export const CUTOUT_KEYWORDS_RE = /\b(sink|cooktop|faucet|cutout|undermount|range|stove)\b/i;
+/**
+ * Matches sink/cooktop/faucet cutout labels misplaced in exclusions[].
+ * Range/stove openings are true material gaps (the range interrupts the stone), not cutouts.
+ */
+export const CUTOUT_KEYWORDS_RE = /\b(sink|cooktop|faucet|cutout|undermount)\b/i;
 
 export const CUTOUT_EXCLUSION_DIAGNOSTIC_CODES = new Set([
   "CUTOUT_IN_EXCLUSIONS_WARNING",
@@ -22,7 +25,7 @@ export const CUTOUT_EXCLUSION_DIAGNOSTIC_CODES = new Set([
 export function inferCutoutType(label) {
   const l = String(label ?? "").toLowerCase();
   if (/\b(sink|undermount)\b/.test(l)) return "sink";
-  if (/\b(cooktop|range|stove)\b/.test(l)) return "cooktop";
+  if (/\bcook\s?top\b/.test(l)) return "cooktop";
   if (/\bfaucet\b/.test(l)) return "faucet";
   return "cutout";
 }

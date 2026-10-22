@@ -250,6 +250,7 @@ export async function runDimensionEvidence({
     dimensions:             parsed.dimensions,
     notes:                  Array.isArray(parsed.notes) ? parsed.notes : [],
     cutouts:                Array.isArray(parsed.cutouts) ? parsed.cutouts : [],
+    cookingAppliances:      Array.isArray(parsed.cookingAppliances) ? parsed.cookingAppliances : [],
     referenceTotals:        Array.isArray(parsed.referenceTotals) ? parsed.referenceTotals : [],
     uncertainItems:         Array.isArray(parsed.uncertainItems) ? parsed.uncertainItems : [],
     reviewRequired:         Boolean(parsed.reviewRequired ?? false),
