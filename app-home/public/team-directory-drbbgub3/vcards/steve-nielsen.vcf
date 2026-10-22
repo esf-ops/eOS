@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Nielsen;Steve;;;
+FN:Steve Nielsen
+ORG:Elite Stone Fabrications
+TITLE:Programmer
+TEL;TYPE=WORK,VOICE:(319) 329-3960
+EMAIL;TYPE=INTERNET,WORK:steve.nielsen@elitestonefabrication.com
+END:VCARD

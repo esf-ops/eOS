@@ -1,0 +1,9 @@
+BEGIN:VCARD
+VERSION:3.0
+N:Robinson;George;;;
+FN:George Robinson
+ORG:Elite Stone Fabrications
+TITLE:Customer Service Manager
+TEL;TYPE=WORK,VOICE:(319) 455-4200
+EMAIL;TYPE=INTERNET,WORK:george.robinson@elitestonefabrication.com
+END:VCARD
