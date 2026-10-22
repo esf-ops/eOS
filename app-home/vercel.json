@@ -1,5 +1,11 @@
 {
   "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "headers": [
+    {
+      "source": "/team-directory-drbbgub3(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    }
+  ],
   "git": {
     "deploymentEnabled": {
       "main": true,
