@@ -1,0 +1,24 @@
+{
+  "id": "/team-directory-drbbgub3/",
+  "name": "Who to Call",
+  "short_name": "Who to Call",
+  "start_url": "/team-directory-drbbgub3/",
+  "scope": "/team-directory-drbbgub3/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#b22a2a",
+  "icons": [
+    {
+      "src": "/team-directory-drbbgub3/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/team-directory-drbbgub3/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
