@@ -29,7 +29,7 @@ VERSION:3.0
 N:Moffit;Jessica;;;
 FN:Jessica Moffit
 ORG:Elite Stone Fabrications
-TITLE:Accounts Receivable and Payable Specialist
+TITLE:Accounts Payable Specialist
 TEL;TYPE=WORK,VOICE:(319) 455-4200
 EMAIL;TYPE=INTERNET,WORK:jessica@elitestonefabrication.com
 END:VCARD
@@ -38,7 +38,7 @@ VERSION:3.0
 N:Knake;Lindsay;;;
 FN:Lindsay Knake
 ORG:Elite Stone Fabrications
-TITLE:Office Manager
+TITLE:Office Manager, Accounts Receivable
 TEL;TYPE=WORK,VOICE:(319) 455-4200
 EMAIL;TYPE=INTERNET,WORK:lindsay.knake@elitestonefabrication.com
 END:VCARD
@@ -215,8 +215,8 @@ EMAIL;TYPE=INTERNET,WORK:bryce.werderman@elitestonefabrication.com
 END:VCARD
 BEGIN:VCARD
 VERSION:3.0
-N:Wilson;Brock;;;
-FN:Brock Wilson
+N:Willson;Brock;;;
+FN:Brock Willson
 ORG:Elite Stone Fabrications
 TITLE:Warehouse Manager
 TEL;TYPE=WORK,VOICE:(563) 400-7729
