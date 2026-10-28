@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "*": false
+    }
+  },
+  "ignoreCommand": "node ../scripts/vercel-ignore-build.mjs app-jobs-command-center"
+}

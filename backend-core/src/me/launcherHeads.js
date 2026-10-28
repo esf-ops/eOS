@@ -129,6 +129,14 @@ export const HEAD_LAUNCHER_CATALOG = [
     roleNote: "Read-only Installer Day View — no schedule editing or Moraware writeback in v1."
   },
   {
+    slug: "jobs_command_center",
+    label: "Jobs Command Center",
+    description: "One place for every QuickBooks job with Moraware production context beside the money.",
+    category: "Sales / Accounts",
+    href: "/jobs",
+    roleNote: "Admin / super_admin only in v1. Read-only. Exact identity links only — no writeback."
+  },
+  {
     slug: "install",
     label: "eliteOS Install Head",
     description: "Install scheduling and install-day boards.",
@@ -311,7 +319,8 @@ function defaultSlugSet(role, userKind) {
     return new Set(EOS_HEAD_SLUGS);
   }
   if (r === "executive") {
-    const ex = EOS_HEAD_SLUGS.filter((s) => s !== "system_admin");
+    // Jobs Command Center stays admin/super_admin-only until explicitly opened (FEATURE_DECISIONS).
+    const ex = EOS_HEAD_SLUGS.filter((s) => s !== "system_admin" && s !== "jobs_command_center");
     return new Set(ex);
   }
 

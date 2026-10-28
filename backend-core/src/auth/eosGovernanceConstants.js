@@ -34,7 +34,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "elite100_quote_flow", // Elite 100 Quote Flow — Inbox → Estimate Queue → Estimates (clean staff head)
   "account_directory", // Account Directory — standalone account identity + estimating contacts (not Estimate Studio)
   "sales_ops", // Sales Ops — personalized plans + Monday-backed account operations
-  "slab_ai" // slabOS AI Studio — specialized AI tool catalog for fabrication (orchestration head)
+  "slab_ai", // slabOS AI Studio — specialized AI tool catalog for fabrication (orchestration head)
+  "jobs_command_center" // Jobs Command Center — QB Customer:Job + Moraware ops in one place (admin-only v1)
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

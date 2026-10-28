@@ -58,6 +58,11 @@ export const PROJECT_DEPENDENCIES = Object.freeze({
     "app-quote/src/lib/quoteTypes.ts",
     "shared/eliteos-ui",
     "shared/eliteos-supabase"
+  ],
+  "app-jobs-command-center": [
+    "backend-core/src/jobsCommandCenter",
+    "shared/eliteos-ui",
+    "shared/eliteos-supabase"
   ]
 });
 

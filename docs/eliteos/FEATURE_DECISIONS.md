@@ -5300,3 +5300,18 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | New: `app-estimate-builder/**`, `backend-core/src/estimateBuilder/**`. Additive: `quoteRoutes.js` (mount), `quoteSourceConfig.js`, `eosGovernanceConstants.js`, `headDeploymentUrls.js`, `launcherHeads.js`, `scripts/testHeadAccess.js`, `app-home` config/launcher (title, Beta badge), `app-quote-library/src/lib/labels.ts`, `scripts/vercel-ignore-build.mjs` + verify scripts, root `package.json` (`eos:build:estimate-builder`, `eos:test:estimate-builder`). |
 
 ---
+
+### 399. Jobs Command Center head — admin-only QB + Moraware job workspace (2026-10-28)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-10-28 |
+| **Decision** | Ship a new protected head **`app-jobs-command-center`** (slug **`jobs_command_center`**) as the first production surface of the Connected Workspace "Quotes & Jobs" idea: **one row per QuickBooks Customer:Job**, Job Detail with QB money (estimates / sales orders / invoices / payments / open A/R) beside Moraware production context from **exact Account Directory links**. Placement is a **new head** (not inside Account Directory). **v1 access: `admin` and `super_admin` only** via `requireRole` + `requireHeadAccess`; executive role defaults exclude the slug so opening to others later is a deliberate grant (drop the role gate, assign head access). |
+| **Why** | Operators need one place to track every job that lives in QuickBooks (quote/estimate/bill) and Moraware (ops) without guessing joins or waiting for writeback. |
+| **APIs** | `GET /api/jobs-command-center/projects`, `GET /api/jobs-command-center/projects/:projectRef`. Org from caller profile only. Browser DTOs scrub QuickBooks ListIDs / TxnIDs; project ref is `ad_qb_customer_facts.id`. |
+| **Out of scope (v1)** | Sold-job handoff / 1:1 QB job ↔ Moraware job link; writeback; company-wide finance rankings for non-admin; Machines calendar assignee perfection. Moraware on the card is **account-linked jobs**, labeled as not a proven 1:1 handoff. |
+| **Env** | `HEAD_URL_JOBS_COMMAND_CENTER` on Brain for launcher URL + CORS. |
+| **Production deploy (2026-10-28)** | Vercel project **`eliteos-jobs-command-center`** (`prj_3S8R9fmtJA1dGM7fVo9FzeAE23Aq`), root `app-jobs-command-center`, GitHub `esf-ops/eOS` / `main`. Hostname **`https://jobs.eliteosfab.com`**. Required Cloudflare DNS-only CNAME: `jobs` → `38eca744d49c2e88.vercel-dns-016.com`. Brain `HEAD_URL_JOBS_COMMAND_CENTER=https://jobs.eliteosfab.com` set on `backend-core` production+preview. |
+| **Revisit trigger** | Open head to non-admin roles via System Admin grants; ship `workspace_project_handoffs`; recover stale QB/Moraware feeds before treating totals as current reporting. |
+
+---
