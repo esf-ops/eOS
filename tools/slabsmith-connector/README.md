@@ -72,7 +72,10 @@ Header: same sync token. Body: `multipart/form-data` with `slab_id`, `inventory_
 
 ## Scheduling
 
-See `install-task-scheduler.example.ps1` for an **disabled-by-default** hourly Task Scheduler example (60 minutes).
+- Inventory: `install-task-scheduler.example.ps1` — hourly XML `--send` (**disabled by default**).
+- Images: `install-image-upload-task.example.ps1` — every 6 hours `--upload` (**disabled by default**).
+
+Enable only after one successful manual inventory send and a limited image upload (`--limit 5`).
 
 ## Security
 
@@ -82,12 +85,15 @@ See `install-task-scheduler.example.ps1` for an **disabled-by-default** hourly T
 
 ## What this does / does not do
 
-- **Does:** ingest Slabsmith XML into Supabase `slab_inventory` with `external_source=slabsmith`; discover local slab JPGs and write an image manifest JSON.
-- **Does not:** connect to Slabsmith SQL, modify SlabCloud rows, delete missing slabs, upload orphan/unmatched images, or schedule automatic image upload (manual `--upload` only).
-- **Does not:** change SlabCloud FTP scripts or production default `SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud`.
+- **Does:** ingest Slabsmith XML into Supabase `slab_inventory` with `external_source=slabsmith`; discover local slab JPGs; upload matched pairs to Brain.
+- **Does not:** connect to Slabsmith SQL, modify SlabCloud rows, delete missing slabs, or upload orphan/unmatched images.
+- **Does not:** expose data to Thryve — that is the separate Brain partner API (`docs/slabos/slabsmith-partner-api-v1.md`).
 
 ## Future
 
 Replace dependency on SlabCloud-exported XML with an eliteOS-owned read-only Slabsmith SQL export job.
 
-See also: [docs/slabos/slabsmith-local-sync-v1.md](../../docs/slabos/slabsmith-local-sync-v1.md)
+See also:
+
+- [docs/slabos/slabsmith-local-sync-v1.md](../../docs/slabos/slabsmith-local-sync-v1.md)
+- [docs/slabos/slabsmith-partner-api-v1.md](../../docs/slabos/slabsmith-partner-api-v1.md)

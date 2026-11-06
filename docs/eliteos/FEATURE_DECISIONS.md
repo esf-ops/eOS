@@ -5393,3 +5393,35 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Open head to non-admin roles via System Admin grants; ship `workspace_project_handoffs`; recover stale QB/Moraware feeds before treating totals as current reporting. |
 
 ---
+
+### 400. OpenClaw estimating pilot — lab coordinator only (2026-10-29)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-10-29 |
+| **Status** | Local pilot. Not a production head. Not mounted in `backend-core/src/server.js`. |
+| **Decision** | OpenClaw may coordinate a simulated Elite 100 estimate only through six tools on the Quote Intake Lab loopback server (`127.0.0.1:5197`), and only when `QIL_OPENCLAW_PILOT=1`. The tools are ingest, classify, simulated takeoff, read gaps, price draft, and get review package. Pricing calls `priceEstimateDocument` / `calculateQuote` in process. The agent cannot supply square footage, a price group, a rate, or a total. Provider-proposed takeoff totals are ignored. A priced result is a lab draft: `customerQuote` stays false until a person accepts it, and this pilot has no promotion route. |
+| **Why** | The lab already classifies mail and measures synthetic plans. The missing piece was a coordinator that stops on the existing gates and prices through the production engine without writing `quote_headers`. |
+| **Out of scope** | Live mailbox, Graph, Gemini, production takeoff jobs, Elite 100 Quote Flow, Internal Estimate import, Estimate Builder save, Quote Library, email send, launcher registration, and installing OpenClaw on a server. Hermes Agent is not the pilot host. |
+| **Security** | Flag default off returns 404 for `/pilot/*`. When on, routes still require `QIL_LAB_REQUEST_TOKEN` and the lab origin allowlist. Request bodies that contain price, rate, sqft, scenario, or organization fields are rejected. The OpenClaw client refuses any host other than loopback. Organization id is not taken from the caller. Audit events are kept on the lab review package. |
+| **Benchmark** | `npm run benchmark:pilot` in `app-quote-intake-lab` runs 10 synthetic cases offline. Model cost is $0 because the simulated providers make no API call. |
+| **Revisit trigger** | A human asks to point the same tools at production intake, live Gemini, or Quote Library. That is a new decision, not a flag flip. |
+
+---
+
+### 401. Slabsmith partner API v1 — Elite-controlled Thryve path (no VPN/SQL)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-06 |
+| **Decision** | External Slabsmith integrators (starting with Thryve) consume inventory + images via Brain routes under `/api/integrations/slabsmith/partner/v1`, authenticated with a dedicated `SLABSMITH_PARTNER_API_TOKEN`. They do **not** receive VPN or MS SQL credentials. Data comes from the existing Windows connector → eliteOS Slabsmith cache. |
+| **Why** | Thryve asked for VPN + direct SQL read/write. Elite keeps control by offering a contracted API over the governed cache, matching the same “connector pushes outbound; secrets stay in Brain” pattern used elsewhere. |
+| **Read** | `GET .../health`, `GET .../inventory`, `GET .../inventory/:key`. Org from partner env (not request body). Source fixed to `external_source=slabsmith`. Explicit DTO; images from `slab_images`. Gated by `SLABSMITH_PARTNER_API_ENABLED=1`. |
+| **Write** | `POST .../write-requests` stores allowlisted field patches (`status`, `rack`, `lot`, `finish`, `price_group`, `notes`) in `slabsmith_partner_write_requests` only when `SLABSMITH_PARTNER_WRITE_ENABLED=1`. Default off. **Does not mutate Slabsmith SQL.** Apply worker is a separate future enablement. |
+| **Security** | Partner token ≠ sync token (enforced). Timing-safe compare. 404 when disabled. No service role or sync token in responses. Brain-only RLS on write-request table (draft SQL). |
+| **SQL** | `backend-core/supabase/eliteos_slabsmith_partner_write_requests_v1.sql` — additive; apply before enabling write gate. |
+| **Out of scope (v1)** | VPN, Slabsmith SQL connection, Windows apply worker, writing images back into Slabsmith, changing connector ingest semantics. |
+| **Impacted files/docs** | `slabsmithPartnerAuth.js`, `slabsmithPartnerApi.js` (+ test), `server.js` mount, `docs/slabos/slabsmith-partner-api-v1.md`, connector README / image schedule example, this entry. |
+| **Revisit trigger** | Boss approves Slabsmith SQL writeback; Thryve provides exact field map; Windows apply worker ships. |
+
+---

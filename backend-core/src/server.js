@@ -35,6 +35,7 @@ import { attachSalesOpsMondayScheduleRoutes } from "./salesOps/salesOpsMondaySch
 import { attachIntegrationFeedRoutes } from "./integrationHealth/integrationFeedRoutes.mjs";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
 import { attachSlabsmithImageUploadRoutes } from "./slabsmith/slabsmithImageUploadApi.js";
+import { attachSlabsmithPartnerRoutes } from "./slabsmith/slabsmithPartnerApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
@@ -1370,6 +1371,10 @@ attachSlabsmithIngestRoutes(app, {
 });
 
 attachSlabsmithImageUploadRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachSlabsmithPartnerRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
