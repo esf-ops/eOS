@@ -128,36 +128,48 @@ function prefersShareSheet(): boolean {
   return ios || ipadOs;
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0 || !dataUrl.startsWith("data:")) {
+    throw new Error("Could not prepare this photo for saving.");
+  }
+  const header = dataUrl.slice(0, comma);
+  const payload = dataUrl.slice(comma + 1);
+  const mime = /data:([^;,]+)/.exec(header)?.[1] || "image/png";
+  const binary = /;base64/i.test(header) ? atob(payload) : decodeURIComponent(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+}
+
 /**
- * Save a rendered preview.
- * A detached <a download> on a data URL does nothing on iPhone Safari, and
- * desktop Chrome drops the click when the rendered image is large.
+ * Save a rendered preview during the click that asked for it.
+ * Waiting on fetch() first drops the browser's permission to start a download,
+ * and a sandboxed kiosk frame blocks the click entirely unless the parent allows downloads.
  */
-export async function downloadDataUrl(dataUrl: string, filename: string): Promise<void> {
-  const response = await fetch(dataUrl);
-  if (!response.ok) throw new Error("Could not prepare this photo for saving.");
-  const blob = await response.blob();
+export function downloadDataUrl(dataUrl: string, filename: string): void {
+  const blob = dataUrlToBlob(dataUrl);
   const file = new File([blob], filename, { type: blob.type || "image/png" });
 
   if (prefersShareSheet() && navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: "Countertop preview" });
-      return;
-    } catch (err) {
+    void navigator.share({ files: [file], title: "Countertop preview" }).catch((err: unknown) => {
       if (err instanceof DOMException && err.name === "AbortError") return;
-    }
+      triggerBlobDownload(blob, filename);
+    });
+    return;
   }
 
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  } finally {
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
-  }
+  triggerBlobDownload(blob, filename);
 }

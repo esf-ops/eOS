@@ -144,7 +144,7 @@ export function KioskSectionFrame({
               title={section.title}
               onLoad={() => setFrameLoaded(true)}
               referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-pointer-lock"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-top-navigation allow-pointer-lock"
             />
           </div>
         ) : section.kind === "handoff" ? (
