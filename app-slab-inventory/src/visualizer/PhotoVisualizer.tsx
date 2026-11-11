@@ -8,6 +8,7 @@ import {
 } from "../lib/elite100VisualizerTextures";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
 import { exportBrandedPreview, exportPlainPreview } from "./exportBranded";
+import { exportFailureMessage } from "./saveImage";
 import {
   fitCanvasSize,
   loadImage,
@@ -147,6 +148,7 @@ export function PhotoVisualizer({
   const [photoSource, setPhotoSource] = useState<"upload" | "sample">("upload");
   const [sampleId, setSampleId] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [masks, setMasks] = useState<VisualizerMask[]>([]);
   const [activeMaskId, setActiveMaskId] = useState<string | null>(null);
   const [draftPoints, setDraftPoints] = useState<NormPoint[]>([]);
@@ -499,22 +501,30 @@ export function PhotoVisualizer({
 
   const handleExportBranded = useCallback(() => {
     if (!photoImage || !canCompare) return;
-    exportBrandedPreview({
+    setExportError(null);
+    void exportBrandedPreview({
       scene: { photo: photoImage, masks, textureImages, draftPoints: [], isDrawing: false, activeMaskId: null, showMaskOutlines: false, renderTextures: true },
       exportMeta,
       colorName: selectedTexture?.colorName ?? null,
       materialName: selectedTexture?.materialName ?? null,
       priceGroup: selectedTexture?.priceGroup ?? null,
       brandLabel: copy.exportBrandLabel,
+    }).catch((err: unknown) => {
+      const message = exportFailureMessage(err);
+      if (message) setExportError(message);
     });
   }, [photoImage, canCompare, masks, textureImages, exportMeta, selectedTexture, copy.exportBrandLabel]);
 
   const handleExportPlain = useCallback(() => {
     if (!photoImage || !canCompare) return;
-    exportPlainPreview(
+    setExportError(null);
+    void exportPlainPreview(
       { photo: photoImage, masks, textureImages, draftPoints: [], isDrawing: false, activeMaskId: null, showMaskOutlines: false, renderTextures: true },
       selectedTexture?.slug ?? "preview",
-    );
+    ).catch((err: unknown) => {
+      const message = exportFailureMessage(err);
+      if (message) setExportError(message);
+    });
   }, [photoImage, canCompare, masks, textureImages, selectedTexture]);
 
   const handleCopySummary = useCallback(async () => {
@@ -550,6 +560,7 @@ export function PhotoVisualizer({
       </header>
 
       {photoError ? <div className="banner banner-error pv-banner" role="alert">{photoError}</div> : null}
+      {exportError ? <div className="banner banner-error pv-banner" role="alert">{exportError}</div> : null}
       {error ? <div className="banner banner-error pv-banner" role="alert">{error}</div> : null}
       {textureLoadError ? <div className="banner banner-warn pv-banner" role="status">{textureLoadError}</div> : null}
 

@@ -2,9 +2,10 @@ import type { MaskSettings, NormPoint, SceneInput, VisualizerMask } from "./type
 
 const RENDER_TEXTURE_CACHE = new Map<string, HTMLImageElement>();
 
-export function loadImage(src: string): Promise<HTMLImageElement> {
+export function loadImage(src: string, crossOrigin: boolean = false): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    if (crossOrigin && /^https?:/i.test(src)) img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
     img.src = src;
@@ -14,7 +15,14 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
 export async function loadRenderTexture(url: string): Promise<HTMLImageElement> {
   const cached = RENDER_TEXTURE_CACHE.get(url);
   if (cached) return cached;
-  const img = await loadImage(url);
+  // CORS first so the composited canvas can be saved. If the host blocks it,
+  // fall back so the color still draws; export then reports the failure.
+  let img: HTMLImageElement;
+  try {
+    img = await loadImage(url, true);
+  } catch {
+    img = await loadImage(url, false);
+  }
   RENDER_TEXTURE_CACHE.set(url, img);
   return img;
 }

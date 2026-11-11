@@ -1,5 +1,6 @@
 import type { ExportMeta, SceneInput } from "./types";
 import { renderToCanvas } from "./render";
+import { canvasToJpegBlob, saveImageBlob } from "./saveImage";
 
 export type BrandedExportOptions = {
   scene: Omit<SceneInput, "photo"> & { photo: HTMLImageElement };
@@ -12,7 +13,7 @@ export type BrandedExportOptions = {
   brandLabel?: string;
 };
 
-export function exportBrandedPreview(options: BrandedExportOptions): void {
+export async function exportBrandedPreview(options: BrandedExportOptions): Promise<void> {
   const {
     scene,
     exportMeta,
@@ -33,13 +34,13 @@ export function exportBrandedPreview(options: BrandedExportOptions): void {
     showMaskOutlines: false,
     renderTextures: true,
   });
-  if (!base) return;
+  if (!base) throw new Error("Could not draw this preview.");
 
   const oc = document.createElement("canvas");
   oc.width = base.width;
   oc.height = base.height;
   const ctx = oc.getContext("2d");
-  if (!ctx) return;
+  if (!ctx) throw new Error("Could not draw this preview.");
 
   ctx.drawImage(base, 0, 0);
 
@@ -81,16 +82,14 @@ export function exportBrandedPreview(options: BrandedExportOptions): void {
 
   const slug = (colorName ?? "preview").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const date = new Date().toISOString().slice(0, 10);
-  const link = document.createElement("a");
-  link.download = `elite-stone-visualizer-${slug}-${date}.jpg`;
-  link.href = oc.toDataURL("image/jpeg", 0.92);
-  link.click();
+  const blob = await canvasToJpegBlob(oc);
+  await saveImageBlob(blob, `elite-stone-visualizer-${slug}-${date}.jpg`);
 }
 
-export function exportPlainPreview(
+export async function exportPlainPreview(
   scene: Omit<SceneInput, "photo"> & { photo: HTMLImageElement },
   slug: string,
-): void {
+): Promise<void> {
   const base = renderToCanvas(scene.photo, {
     ...scene,
     draftPoints: [],
@@ -99,10 +98,8 @@ export function exportPlainPreview(
     showMaskOutlines: false,
     renderTextures: true,
   });
-  if (!base) return;
+  if (!base) throw new Error("Could not draw this preview.");
   const date = new Date().toISOString().slice(0, 10);
-  const link = document.createElement("a");
-  link.download = `eliteos-visualizer-${slug}-${date}.jpg`;
-  link.href = base.toDataURL("image/jpeg", 0.92);
-  link.click();
+  const blob = await canvasToJpegBlob(base);
+  await saveImageBlob(blob, `eliteos-visualizer-${slug}-${date}.jpg`);
 }

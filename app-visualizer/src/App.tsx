@@ -237,7 +237,9 @@ export function App() {
 
   function handleDownload() {
     if (!renderedImage) return;
-    downloadDataUrl(renderedImage, `countertop-preview-${materialId || "result"}.png`);
+    void downloadDataUrl(renderedImage, `countertop-preview-${materialId || "result"}.png`).catch(() => {
+      setError("This photo could not be saved on this device. The preview is still on screen.");
+    });
   }
 
   const canGenerate = Boolean(roomFile && materialId && config?.renderEnabled !== false);

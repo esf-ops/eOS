@@ -120,9 +120,44 @@ export async function renderPublicVisualizer(params: {
   )) as VisualizerRenderResult;
 }
 
-export function downloadDataUrl(dataUrl: string, filename: string) {
-  const link = document.createElement("a");
-  link.href = dataUrl;
-  link.download = filename;
-  link.click();
+function prefersShareSheet(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const ios = /iPad|iPhone|iPod/.test(ua);
+  const ipadOs = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return ios || ipadOs;
+}
+
+/**
+ * Save a rendered preview.
+ * A detached <a download> on a data URL does nothing on iPhone Safari, and
+ * desktop Chrome drops the click when the rendered image is large.
+ */
+export async function downloadDataUrl(dataUrl: string, filename: string): Promise<void> {
+  const response = await fetch(dataUrl);
+  if (!response.ok) throw new Error("Could not prepare this photo for saving.");
+  const blob = await response.blob();
+  const file = new File([blob], filename, { type: blob.type || "image/png" });
+
+  if (prefersShareSheet() && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "Countertop preview" });
+      return;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+  }
 }
