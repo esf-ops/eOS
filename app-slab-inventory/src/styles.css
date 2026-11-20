@@ -7262,3 +7262,12 @@ html.pp-landing-kiosk-root #root {
   }
 }
 
+
+/* Edge profiles entry points (3D viewer) */
+.e100-edge-btn { margin-left: auto; flex: 0 0 auto; min-height: 48px; padding: 0 22px; border: 0; border-radius: 999px; background: #8b0000; color: #fff; font: inherit; font-weight: 800; font-size: .9rem; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.e100-edge-card { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: clamp(20px, 3vw, 32px); border: 0; border-radius: 18px; background: linear-gradient(135deg, #1b1b1d 0%, #3a0f0f 100%); color: #fff; font: inherit; text-align: left; cursor: pointer; }
+.e100-edge-card-eyebrow { font-weight: 800; font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: #ff9d98; }
+.e100-edge-card-title { font-family: "Playfair Display", Georgia, serif; font-weight: 800; font-size: clamp(1.5rem, 3vw, 2.2rem); }
+.e100-edge-card-sub { font-size: .95rem; color: #d8d2cb; }
+.e100-public-lightbox-edges { min-height: 40px; padding: 0 18px; border: 0; border-radius: 10px; background: #8b0000; color: #fff; font-size: 0.95rem; font-weight: 800; letter-spacing: .04em; cursor: pointer; }
+.e100-public-lightbox-kiosk .e100-public-lightbox-edges { min-width: 52px; min-height: 52px; font-size: 1.1rem; }

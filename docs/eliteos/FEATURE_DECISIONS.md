@@ -5425,3 +5425,18 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Boss approves Slabsmith SQL writeback; Thryve provides exact field map; Windows apply worker ships. |
 
 ---
+
+### 402. Elite 100 3D Edge Profiles viewer (kiosk + public page)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | The public Elite 100 page (`/public/elite100`, which the kiosk embeds) gets a native three.js Edge Profiles viewer: header button, a card after the last color group, and a "See edges" button in the color lightbox that opens it in that color. It is our own geometry, not SlabCloud code or data. |
+| **What it does** | Drag/pinch 3D slab, auto-rotate that pauses on touch, Polished/Honed toggle, compare two edges, real Elite 100 photo wrapped on the slab (plain stone if a color has no photo), and a flat 2D cross-section fallback when WebGL is unavailable. All Elite 100 colors are selectable (group filters + search). |
+| **Content rules** | Public-safe only: no prices. Small Ogee, Crescent and Knife carry an "Upcharge" tag, mirroring `UPGRADED_EDGE_TOKENS` in `app-digital-estimate/src/edgeGroups.ts`. Edge tokens match the estimate flow. |
+| **Data** | No backend or schema change. Colors and photos come from the existing public showroom payload and the static texture catalog. |
+| **Known gaps** | Edge cross-sections are drawn by eye, not from tooling/CNC dimensions; radius notes on Eased and Large Eased are omitted until real radii are confirmed. Not yet tested on the showroom Chromebox. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/*` (new), `PublicElite100Page.tsx`, `lib/PublicElite100ColorLightbox.tsx`, `styles.css`, `package.json` (`three`). The viewer is lazy-loaded. |
+| **Revisit trigger** | Real edge dimensions available; kiosk hardware can't run WebGL smoothly; edge upcharges get a public price display decision. |
+
+---
