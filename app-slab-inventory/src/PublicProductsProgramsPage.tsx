@@ -19,7 +19,7 @@ const FIXTURE_FAUCET_IMAGES = [
   "/product-catalog/faucets/faucet-delta-9113-ar-dst/stainless.png",
 ];
 
-const SHOWER_CARD_IMAGE = "/shower-program/inspiration/pro-veMrdtPQ.jpeg";
+const SHOWER_CARD_IMAGE = "/shower-program/shower-hero.jpg";
 
 export default function PublicProductsProgramsPage() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -103,9 +103,9 @@ export default function PublicProductsProgramsPage() {
               <img src={SHOWER_CARD_IMAGE} alt="" className="pp-landing-shower-img" loading="eager" />
             </div>
             <div className="pp-landing-card-body">
-              <h2 className="pp-landing-card-title">The Groutless Stone Shower</h2>
+              <h2 className="pp-landing-card-title">Shower Program</h2>
               <p className="pp-landing-card-copy">
-                Explore stocked shower bases, curated wall surfaces, inspiration, and program options.
+                Explore the program wall colors, stocked shower bases, and options.
               </p>
               <span className="pp-landing-card-cta">Explore →</span>
             </div>

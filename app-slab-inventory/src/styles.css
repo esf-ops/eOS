@@ -7309,3 +7309,4 @@ html.pp-landing-kiosk-root #root {
   color: var(--eos-ink); font-weight: 700; font-size: 1rem; text-decoration: none;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
 }
+.pp-landing-shower-img { object-position: center 38%; }

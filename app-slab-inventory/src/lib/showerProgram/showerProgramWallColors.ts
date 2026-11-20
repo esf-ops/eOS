@@ -16,10 +16,14 @@ import {
 export type ResolvedShowerWallColor = ShowerWallColorRef & {
   textureUrl: string | null;
   catalogItemId: string | null;
+  /** The matching Elite 100 showroom item (opens the color detail), if one was found. */
+  item: Elite100ShowroomItem | null;
 };
 
+const letters = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
+
 function normalizeKey(colorName: string, materialName: string): string {
-  return `${colorName.trim().toLowerCase()}::${materialName.trim().toLowerCase()}`;
+  return `${letters(colorName)}::${letters(materialName)}`;
 }
 
 /** Build lookup from Elite 100 public showroom payload. */
@@ -40,12 +44,20 @@ export function resolveShowerWallColors(
   elite100: Elite100ShowroomData | null,
 ): ResolvedShowerWallColor[] {
   const lookup = buildElite100ColorLookup(elite100);
+  // Fallback: a supplier label on the program sheet can differ from the Elite 100 material name,
+  // so if the exact color + supplier is not found, match on the color name alone.
+  const byColor = new Map<string, Elite100ShowroomItem>();
+  for (const item of lookup.values()) {
+    const k = letters(item.color_name ?? "");
+    if (k && !byColor.has(k)) byColor.set(k, item);
+  }
   return refs.map((ref) => {
-    const hit = lookup.get(normalizeKey(ref.elite100ColorName, ref.elite100MaterialName));
+    const hit = lookup.get(normalizeKey(ref.elite100ColorName, ref.elite100MaterialName)) ?? byColor.get(letters(ref.elite100ColorName)) ?? null;
     return {
       ...ref,
       catalogItemId: hit?.catalog_item_id ?? null,
       textureUrl: hit ? elite100CardImageSrc(hit) : null,
+      item: hit,
     };
   });
 }
