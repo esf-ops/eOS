@@ -24,6 +24,7 @@ import {
 } from "./productCatalogBlancoSinkAssets";
 import { resolveHeroOnlySinkFolderAssets } from "./productCatalogHeroOnlySinkAssets";
 import { PRODUCT_CATALOG_FAUCET_OVERRIDES } from "./productCatalogFaucetOverrides";
+import { PRODUCT_CATALOG_SPECIALTY_OVERRIDES } from "./productCatalogSpecialtyAssets";
 import {
   resolveFaucetFolderAssets,
 } from "./productCatalogFaucetAssets";
@@ -258,6 +259,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
 const OVERRIDE_BY_ID = new Map<string, ProductCatalogAssetOverride>([
   ...PRODUCT_CATALOG_ASSET_OVERRIDES.map((o) => [o.productId, o] as const),
   ...PRODUCT_CATALOG_FAUCET_OVERRIDES.map((o) => [o.productId, o] as const),
+  ...PRODUCT_CATALOG_SPECIALTY_OVERRIDES.map((o) => [o.productId, o] as const),
 ]);
 
 export function getProductCatalogAssetOverride(productId: string): ProductCatalogAssetOverride | undefined {
