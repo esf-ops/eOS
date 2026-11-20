@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import {
   Elite100ShowroomSection,
@@ -7,6 +7,13 @@ import {
 import { fetchPublicElite100Showroom } from "./lib/publicElite100Api";
 import { isKioskOrArreyaMode } from "./lib/publicElite100Route";
 import { PublicElite100ColorLightbox } from "./lib/PublicElite100ColorLightbox";
+import { lookupElite100Texture } from "./lib/elite100TextureAssets";
+import type { EdgeViewerColor } from "./lib/edgeProfiles/EdgeProfilesViewer";
+
+// The 3D viewer (three.js) is loaded only when someone opens it.
+const EdgeProfilesViewer = lazy(() =>
+  import("./lib/edgeProfiles/EdgeProfilesViewer").then((m) => ({ default: m.EdgeProfilesViewer })),
+);
 
 export default function PublicElite100Page() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -14,6 +21,8 @@ export default function PublicElite100Page() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Elite100ShowroomItem | null>(null);
+  const [edgeOpen, setEdgeOpen] = useState(false);
+  const [edgeColorKey, setEdgeColorKey] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Elite 100 · Elite Stone Fabrication";
@@ -62,6 +71,30 @@ export default function PublicElite100Page() {
     [data],
   );
 
+  const edgeColors = useMemo<EdgeViewerColor[]>(
+    () => (data?.groups ?? []).flatMap((group) => group.items).map((item) => {
+      const name = item.color_name ?? item.display_name ?? item.color_key;
+      const tex = lookupElite100Texture(name, item.color_key);
+      const textureUrl = tex?.fullUrl
+        ?? item.reference_image_url_1024
+        ?? item.reference_image_url_600
+        ?? item.reference_image_url
+        ?? item.visual_asset_url_1024
+        ?? item.visual_asset_url_600
+        ?? item.visual_asset_url
+        ?? null;
+      // Every color is listed; one without a photo still appears and shows as plain stone.
+      return {
+        key: item.color_key,
+        name,
+        group: item.price_group,
+        textureUrl,
+        thumbUrl: tex?.thumbUrl ?? item.reference_image_url_600 ?? textureUrl,
+      };
+    }),
+    [data],
+  );
+
   const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : ""].filter(Boolean).join(" ");
 
   return (
@@ -81,6 +114,9 @@ export default function PublicElite100Page() {
               Premium showroom collection · {totalCount > 0 ? `${totalCount} colors` : "Elite Stone Fabrication"}
             </p>
           </div>
+          <button type="button" className="e100-edge-btn" onClick={() => { setEdgeColorKey(null); setEdgeOpen(true); }}>
+            Edge profiles
+          </button>
         </div>
       </header>
 
@@ -111,9 +147,20 @@ export default function PublicElite100Page() {
                 />
               ) : null
             ))}
+            <button type="button" className="e100-edge-card" onClick={() => { setEdgeColorKey(null); setEdgeOpen(true); }}>
+              <span className="e100-edge-card-eyebrow">Explore in 3D</span>
+              <span className="e100-edge-card-title">Edge Profiles</span>
+              <span className="e100-edge-card-sub">Turn each edge, compare two side by side, and see it in your color.</span>
+            </button>
           </div>
         )}
       </main>
+
+      {edgeOpen ? (
+        <Suspense fallback={null}>
+          <EdgeProfilesViewer colors={edgeColors} initialColorKey={edgeColorKey} onClose={() => setEdgeOpen(false)} />
+        </Suspense>
+      ) : null}
 
       <footer className="e100-public-footer">
         <p>Elite Stone Fabrication · Elite 100 showroom · Display only</p>
@@ -123,6 +170,7 @@ export default function PublicElite100Page() {
         <PublicElite100ColorLightbox
           item={selected}
           kiosk={kiosk}
+          onSeeEdges={() => { setEdgeColorKey(selected.color_key); setEdgeOpen(true); }}
           onClose={() => setSelected(null)}
         />
       ) : null}

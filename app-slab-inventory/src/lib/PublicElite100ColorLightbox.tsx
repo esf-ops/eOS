@@ -18,6 +18,8 @@ type PublicElite100ColorLightboxProps = {
   item: Elite100ShowroomItem;
   kiosk?: boolean;
   onClose: () => void;
+  /** When set, shows a "See edges" button that opens the 3D edge viewer in this color. */
+  onSeeEdges?: () => void;
   /**
    * When true (Cambria vendor showcase), show live inventory counts.
    * Homeowner Elite 100 public showroom keeps this false.
@@ -32,6 +34,7 @@ export function PublicElite100ColorLightbox({
   item,
   kiosk = false,
   onClose,
+  onSeeEdges,
   showInventoryCount = false,
   variant = "default",
 }: PublicElite100ColorLightboxProps) {
@@ -154,6 +157,11 @@ export function PublicElite100ColorLightbox({
             <button type="button" className="e100-public-lightbox-zoom" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom out">−</button>
             <span className="e100-public-lightbox-zoom-label" aria-live="polite">{Math.round(scale * 100)}%</span>
             <button type="button" className="e100-public-lightbox-zoom" onClick={() => zoomBy(ZOOM_STEP)} aria-label="Zoom in">+</button>
+            {onSeeEdges ? (
+              <button type="button" className="e100-public-lightbox-edges" onClick={onSeeEdges}>
+                See edges
+              </button>
+            ) : null}
             <button type="button" className="e100-public-lightbox-close" onClick={onClose}>
               Close
             </button>
