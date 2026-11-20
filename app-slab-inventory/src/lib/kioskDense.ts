@@ -1,5 +1,12 @@
 import { useEffect } from "react";
 import { isKioskOrArreyaMode } from "./publicProductCatalogRoute";
+import "./kioskPolish.css";
+
+/**
+ * Master switch for the kiosk design-polish layer (lib/kioskPolish.css).
+ * Set to false to restore the pre-polish look everywhere; or add &polish=0 to a page URL to compare.
+ */
+export const KIOSK_POLISH = true;
 
 
 /**
@@ -51,4 +58,14 @@ export function useKioskTitle(title: string | null, enabled: boolean) {
     if (!enabled || typeof window === "undefined" || window.parent === window) return;
     window.parent.postMessage({ type: "esf-kiosk-title", title }, "*");
   }, [title, enabled]);
+}
+
+/** Turns the polish layer on for this page (adds `kiosk-polish` to <html>). No effect outside dense kiosk mode. */
+export function useKioskPolish(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled || !KIOSK_POLISH || typeof document === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("polish") === "0") return;
+    document.documentElement.classList.add("kiosk-polish");
+    return () => document.documentElement.classList.remove("kiosk-polish");
+  }, [enabled]);
 }

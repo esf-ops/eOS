@@ -1,0 +1,107 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap");
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+   KIOSK POLISH LAYER — one self-contained design pass for Products & Programs in the kiosk.
+
+   HOW TO TURN IT OFF (any one of these fully restores the previous look):
+     1. In lib/kioskDense.ts set  KIOSK_POLISH = false      (one line, whole layer disabled)
+     2. Add  &polish=0  to a page URL to compare before/after on the spot
+     3. Delete this file and its import in lib/kioskDense.ts
+
+   Everything here is scoped to  html.kiosk-polish  so it never touches the web (non-kiosk) pages,
+   the Elite 100 page, or anything else. Nothing in styles.css was changed to make this work.
+   ════════════════════════════════════════════════════════════════════════════════════════ */
+
+html.kiosk-polish {
+  --kp-red: #8b0000;
+  --kp-red-dark: #6b0000;
+  --kp-ink: #141821;
+  --kp-mute: #5b616d;
+  --kp-faint: #8a8f99;
+  --kp-line: #e7e4df;
+  --kp-soft: #f7f6f3;
+  --kp-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --kp-shadow: 0 1px 2px rgba(20, 24, 33, 0.04), 0 10px 28px rgba(20, 24, 33, 0.06);
+}
+html.kiosk-polish body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* No monospace anywhere in the catalog: one typeface family, tabular numbers for codes */
+html.kiosk-polish [class*="pc-"] { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+html.kiosk-polish .pc-card-code,
+html.kiosk-polish .pc-accessory-sku,
+html.kiosk-polish .pc-finish-catalog { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+/* ── Category tabs: large touch pills, ESF red when active ─────────────────────────── */
+html.kiosk-polish .pc-tab-bar { gap: 10px; border-bottom: 0; margin-bottom: 18px; }
+html.kiosk-polish .pc-tab {
+  min-height: 56px; padding: 0 26px; margin: 0; gap: 10px;
+  border: 1px solid var(--kp-line); border-radius: 999px; background: #fff;
+  font-size: 1.08rem; font-weight: 700; color: var(--kp-mute); box-shadow: var(--kp-shadow);
+}
+html.kiosk-polish .pc-tab.active { background: var(--kp-red); border-color: var(--kp-red); color: #fff; box-shadow: 0 8px 22px rgba(139, 0, 0, 0.28); }
+html.kiosk-polish .pc-tab-count { font-size: 0.82rem; padding: 3px 10px; background: rgba(20, 24, 33, 0.07); color: inherit; }
+html.kiosk-polish .pc-tab.active .pc-tab-count { background: rgba(255, 255, 255, 0.24); color: #fff; }
+
+/* ── Search ──────────────────────────────────────────────────────────────────────── */
+html.kiosk-polish .pc-search-wrap { max-width: 720px; }
+html.kiosk-polish .pc-search-wrap svg { left: 22px; width: 22px; height: 22px; color: var(--kp-faint); }
+html.kiosk-polish .pc-search {
+  min-height: 58px; padding: 0 22px 0 56px; border-radius: 999px; border: 1px solid var(--kp-line);
+  background: #fff; font-size: 1.1rem; color: var(--kp-ink); box-shadow: var(--kp-shadow);
+}
+html.kiosk-polish .pc-search:focus { border-color: var(--kp-red); box-shadow: 0 0 0 4px rgba(139, 0, 0, 0.12); }
+html.kiosk-polish .pc-result-meta, html.kiosk-polish .pc-result-count { font-size: 1.02rem; color: var(--kp-mute); margin: 0 0 10px; }
+
+/* ── Section headings: serif with a red marker ───────────────────────────────────── */
+html.kiosk-polish .pc-manufacturer-heading,
+html.kiosk-polish .pc-specialty-heading {
+  font-family: var(--kp-display); font-weight: 600; font-size: clamp(1.5rem, 2vw, 2.05rem); letter-spacing: -0.01em;
+  color: var(--kp-ink); border: 0; padding: 0 0 0 16px; border-left: 4px solid var(--kp-red); line-height: 1.1;
+}
+html.kiosk-polish .pc-manufacturer-catalog, html.kiosk-polish .pc-specialty-catalog { gap: 44px; }
+html.kiosk-polish .pc-manufacturer-section, html.kiosk-polish .pc-specialty-section { gap: 20px; }
+
+/* ── Product cards: one clean card, brand in red caps, readable text ─────────────── */
+html.kiosk-polish .pc-card-mat { padding: 12px; border: 1px solid var(--kp-line); border-radius: 24px; box-shadow: var(--kp-shadow); background: #fff; }
+html.kiosk-polish .pc-card-media { border: 0; border-radius: 16px; background: #fff; }
+html.kiosk-polish .pc-card:active .pc-card-mat { transform: scale(0.985); }
+html.kiosk-polish .pc-card-body { padding: 16px 6px 6px; gap: 3px; }
+html.kiosk-polish .pc-card-category { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.16em; color: var(--kp-red); }
+html.kiosk-polish .pc-card-name { font-size: 1.16rem; font-weight: 700; line-height: 1.25; color: var(--kp-ink); letter-spacing: -0.005em; }
+html.kiosk-polish .pc-card-meta { font-size: 0.96rem; color: var(--kp-mute); }
+html.kiosk-polish .pc-card-code { font-size: 0.92rem; font-weight: 600; color: var(--kp-faint); margin-top: 2px; }
+html.kiosk-polish .pc-website-btn { border-radius: 999px; border: 2px solid var(--kp-red); color: var(--kp-red); background: #fff; font-weight: 800; }
+
+/* ── Product detail window ───────────────────────────────────────────────────────── */
+html.kiosk-polish .pc-modal-overlay { background: rgba(20, 24, 33, 0.58); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+html.kiosk-polish .pc-modal { max-height: calc(100vh - 48px); border-radius: 30px; border: 0; box-shadow: 0 34px 90px rgba(0, 0, 0, 0.38); }
+html.kiosk-polish .pc-modal-layout { max-height: calc(100vh - 48px); }
+html.kiosk-polish .pc-modal-info { max-height: calc(100vh - 48px); padding: 34px 36px 30px; }
+html.kiosk-polish .pc-modal-close {
+  top: 18px; right: 18px; width: 54px; height: 54px; font-size: 1.9rem; border: 0; background: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+html.kiosk-polish .pc-modal-eyebrow { font-size: 0.8rem; font-weight: 800; letter-spacing: 0.18em; color: var(--kp-red); margin-bottom: 10px; }
+html.kiosk-polish .pc-modal-title { font-family: var(--kp-display); font-weight: 600; font-size: clamp(1.9rem, 2.5vw, 2.7rem); letter-spacing: -0.01em; line-height: 1.08; margin-bottom: 18px; color: var(--kp-ink); }
+html.kiosk-polish .pc-detail-grid { gap: 12px 26px; font-size: 1.06rem; margin-bottom: 28px; }
+html.kiosk-polish .pc-detail-grid dt { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em; color: var(--kp-faint); align-self: center; }
+html.kiosk-polish .pc-detail-grid dd { font-weight: 600; color: var(--kp-ink); }
+html.kiosk-polish .pc-section-title { font-size: 0.82rem; font-weight: 800; letter-spacing: 0.16em; color: var(--kp-red); margin-bottom: 12px; }
+html.kiosk-polish .pc-accessory-toggle { min-height: 66px; padding: 14px 20px; border-radius: 18px; background: #fff; border: 1px solid var(--kp-line); box-shadow: var(--kp-shadow); }
+html.kiosk-polish .pc-accessory-toggle[aria-expanded="true"] { background: var(--kp-soft); border-color: #d9d4cc; }
+html.kiosk-polish .pc-accessory-toggle-label { font-size: 0.92rem; letter-spacing: 0.1em; color: var(--kp-ink); }
+html.kiosk-polish .pc-accessory-toggle-icon { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--kp-red); color: #fff; font-size: 1.5rem; }
+html.kiosk-polish .pc-accessory-name { font-weight: 600; color: var(--kp-ink); }
+html.kiosk-polish .pc-accessory-sku { color: var(--kp-faint); }
+html.kiosk-polish .pc-finish-selected { font-size: 1.02rem; }
+html.kiosk-polish .pc-finish-swatch-label { font-size: 0.86rem; color: var(--kp-mute); }
+html.kiosk-polish .pc-spec-link, html.kiosk-polish .pc-spec-link-btn { color: var(--kp-red); font-size: 1rem; font-weight: 700; }
+
+/* ── Floating action pills (top-right): one shared look ──────────────────────────── */
+html.kiosk-polish .pp-catalog-back { min-height: 56px; padding: 0 28px; font-size: 1.02rem; font-weight: 700; color: var(--kp-ink); }
+html.kiosk-polish .e100-edge-btn { min-height: 56px; padding: 0 28px; }
+
+/* ── Products & Programs hub cards ───────────────────────────────────────────────── */
+html.kiosk-polish .pp-landing-card { border-radius: 28px; box-shadow: var(--kp-shadow); border: 1px solid var(--kp-line); }
+html.kiosk-polish .pp-landing-card-title { font-family: var(--kp-display); font-weight: 600; font-size: clamp(1.7rem, 2.3vw, 2.5rem); letter-spacing: -0.01em; color: var(--kp-ink); }
+html.kiosk-polish .pp-landing-card-copy { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: clamp(1.05rem, 1.25vw, 1.3rem); color: var(--kp-mute); }
+html.kiosk-polish .pp-landing-card-cta { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 1.08rem; color: var(--kp-red); }

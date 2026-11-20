@@ -19,7 +19,7 @@ import {
   publicCatalogTabQueryValue,
   publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
-import { isDenseKiosk, keepDense, useKioskInset, useKioskTitle } from "./lib/kioskDense";
+import { isDenseKiosk, keepDense, useKioskInset, useKioskPolish, useKioskTitle } from "./lib/kioskDense";
 import {
   ProductCatalogCard,
   ProductCatalogModal,
@@ -60,6 +60,7 @@ export default function PublicProductCatalogPage({
   const dense = useMemo(() => isDenseKiosk(), []);
   useKioskInset(dense);
   useKioskTitle(pageTitle, dense);
+  useKioskPolish(dense);
   const catalogItems = useMemo(
     () => filterCatalogReadyItems(getProductCatalogItemsWithAssets()),
     []

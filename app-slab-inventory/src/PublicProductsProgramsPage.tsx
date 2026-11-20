@@ -6,7 +6,7 @@ import {
   publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
 import { PUBLIC_SHOWER_PROGRAM_PATH } from "./lib/publicShowerProgramRoute";
-import { isDenseKiosk, keepDense, useKioskInset, useKioskTitle } from "./lib/kioskDense";
+import { isDenseKiosk, keepDense, useKioskInset, useKioskPolish, useKioskTitle } from "./lib/kioskDense";
 
 const FIXTURE_SINK_IMAGES = [
   "/product-catalog/sinks/blanco-blanco-precis-24-sink/hero.jpg",
@@ -26,6 +26,7 @@ export default function PublicProductsProgramsPage() {
   const dense = useMemo(() => isDenseKiosk(), []);
   useKioskInset(dense);
   useKioskTitle(null, dense);
+  useKioskPolish(dense);
 
   useEffect(() => {
     if (!kiosk) return;
