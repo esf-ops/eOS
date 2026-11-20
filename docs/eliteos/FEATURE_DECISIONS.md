@@ -5491,3 +5491,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Real-kiosk review; extend the layer to other pages; remove the switch once the design is settled. |
 
 ---
+
+### 407. Kiosk: classic framed layout on phones and portrait tablets
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | The full-screen section layout from decision 403 now applies only above 768px wide (the kiosk's existing small-screen breakpoint). On phones and portrait tablets the kiosk keeps the previous framed layout and does not send `dense=1` to the embedded pages, so they show their normal headers. |
+| **Why** | The floating logo pill is sized for the big touchscreen. On a phone it stacked into two lines and covered the page's first heading and the Edge Profiles button, and the Products & Programs cards were squeezed. This matters because brochures now carry a QR code that people scan on phones. |
+| **How** | `@media not all and (max-width: 768px)` wraps the full-screen block in `styles.css`; `usePhone()` in `KioskSectionFrame.tsx` uses the exact complement query, so CSS and page never disagree and it flips live on resize. |
+| **Impacted files** | `app-kiosk/src/components/KioskSectionFrame.tsx`, `app-kiosk/src/styles.css`. Kiosk only; slab-inventory is unchanged. |
+| **Revisit trigger** | A purpose-built phone layout for the section pages. |
+
+---

@@ -13,6 +13,23 @@ interface KioskSectionFrameProps {
   onNavigate: (section: RoutableSectionId) => void;
 }
 
+/**
+ * Phones and portrait tablets (768px and narrower, the kiosk's existing small-screen breakpoint) keep the classic
+ * framed layout; the full-screen layout is for the big screen and wider tablets.
+ * This must stay the exact complement of the `@media not all and (max-width: 768px)` block in styles.css.
+ */
+const PHONE_QUERY = "(max-width: 768px)";
+function usePhone(): boolean {
+  const [phone, setPhone] = useState(() => typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_QUERY);
+    const onChange = () => setPhone(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return phone;
+}
+
 /** How long to wait for an embedded frame before surfacing the fallback. */
 const FRAME_TIMEOUT_MS = 8000;
 
@@ -41,6 +58,9 @@ export function KioskSectionFrame({
   onHome,
 }: KioskSectionFrameProps) {
   const hasUrl = section.url.trim().length > 0;
+  const phone = usePhone();
+  /** Full-screen (dense) mode: our own pages that opt in, on screens wider than a phone. */
+  const dense = Boolean(section.dense) && !phone;
   const [mode, setMode] = useState<Mode>(() => initialMode(section));
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [frameTimedOut, setFrameTimedOut] = useState(false);
@@ -87,11 +107,11 @@ export function KioskSectionFrame({
 
   // Dense pages sit beside the floating logo pill. Tell the embedded page how much room the pill takes
   // (it asks when ready, and we re-send when the pill resizes) so its own top row can start after it.
-  const frameSrc = section.dense && hasUrl
+  const frameSrc = dense && hasUrl
     ? `${section.url}${section.url.includes("?") ? "&" : "?"}dense=1`
     : section.url;
   useEffect(() => {
-    if (mode !== "embedded" || !section.dense || !hasUrl) return;
+    if (mode !== "embedded" || !dense || !hasUrl) return;
     let origin = "";
     try { origin = new URL(section.url).origin; } catch { return; }
     const bar = document.querySelector<HTMLElement>(".kiosk-topbar");
@@ -119,7 +139,7 @@ export function KioskSectionFrame({
       window.removeEventListener("resize", send);
       ro?.disconnect();
     };
-  }, [mode, frameLoaded, section.id, section.url, section.dense, section.pill, hasUrl]);
+  }, [mode, frameLoaded, section.id, section.url, dense, section.pill, hasUrl]);
 
   const openEmbedded = () => {
     setFrameLoaded(false);
