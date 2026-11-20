@@ -6,6 +6,7 @@ import {
 } from "./lib/elite100Showroom";
 import { fetchPublicElite100Showroom } from "./lib/publicElite100Api";
 import { isKioskOrArreyaMode } from "./lib/publicElite100Route";
+import { isDenseKiosk, useKioskInset, useKioskTitle } from "./lib/kioskDense";
 import { PublicElite100ColorLightbox } from "./lib/PublicElite100ColorLightbox";
 import { lookupElite100Texture } from "./lib/elite100TextureAssets";
 import type { EdgeViewerColor } from "./lib/edgeProfiles/EdgeProfilesViewer";
@@ -17,6 +18,9 @@ const EdgeProfilesViewer = lazy(() =>
 
 export default function PublicElite100Page() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
+  const dense = useMemo(() => isDenseKiosk(), []);
+  useKioskInset(dense);
+  useKioskTitle(null, dense);
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchPublicElite100Showroom>> | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +99,7 @@ export default function PublicElite100Page() {
     [data],
   );
 
-  const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : ""].filter(Boolean).join(" ");
+  const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : "", dense ? "kiosk-dense" : ""].filter(Boolean).join(" ");
 
   return (
     <div className={rootClass}>

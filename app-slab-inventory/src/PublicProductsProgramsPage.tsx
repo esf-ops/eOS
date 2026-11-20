@@ -6,6 +6,7 @@ import {
   publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
 import { PUBLIC_SHOWER_PROGRAM_PATH } from "./lib/publicShowerProgramRoute";
+import { isDenseKiosk, keepDense, useKioskInset, useKioskTitle } from "./lib/kioskDense";
 
 const FIXTURE_SINK_IMAGES = [
   "/product-catalog/sinks/blanco-blanco-precis-24-sink/hero.jpg",
@@ -22,6 +23,9 @@ const SHOWER_CARD_IMAGE = "/shower-program/inspiration/pro-veMrdtPQ.jpeg";
 
 export default function PublicProductsProgramsPage() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
+  const dense = useMemo(() => isDenseKiosk(), []);
+  useKioskInset(dense);
+  useKioskTitle(null, dense);
 
   useEffect(() => {
     if (!kiosk) return;
@@ -52,10 +56,10 @@ export default function PublicProductsProgramsPage() {
     );
   }, []);
 
-  const fixturesHref = publicProductCatalogFixturesUrl(kiosk);
-  const showerHref = `${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`;
+  const fixturesHref = keepDense(publicProductCatalogFixturesUrl(kiosk));
+  const showerHref = keepDense(`${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`);
 
-  const rootClass = ["pc-public-page", "pp-landing-page", kiosk ? "pc-public-kiosk pp-landing-kiosk" : ""]
+  const rootClass = ["pc-public-page", "pp-landing-page", kiosk ? "pc-public-kiosk pp-landing-kiosk" : "", dense ? "kiosk-dense" : ""]
     .filter(Boolean)
     .join(" ");
 

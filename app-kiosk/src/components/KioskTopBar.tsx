@@ -1,4 +1,3 @@
-import { BRAND } from "../lib/kioskConfig";
 
 interface KioskTopBarProps {
   /** Section title shown to the right of the brand. Omit on home. */
@@ -47,7 +46,6 @@ export function KioskTopBar({ sectionTitle }: KioskTopBarProps) {
     <header className="kiosk-topbar">
       <div className="kiosk-brand">
         <EsfLogo large={isHome} />
-        <span className="kiosk-brand-sub">{BRAND.poweredBy}</span>
       </div>
 
       {sectionTitle ? (

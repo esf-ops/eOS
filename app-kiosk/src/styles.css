@@ -371,17 +371,6 @@ body {
   color: var(--ink);
 }
 
-.kiosk-brand-sub {
-  display: block;
-  font-size: clamp(0.68rem, 0.8vw, 0.9rem);
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  margin-top: 4px;
-  white-space: nowrap;
-}
-
 .kiosk-topbar-section {
   display: flex;
   align-items: center;
@@ -1675,10 +1664,6 @@ body {
     max-width: min(240px, 70vw);
   }
 
-  .kiosk-brand-sub {
-    white-space: normal;
-  }
-
   .kiosk-topbar-section {
     flex: 1 1 auto;
     width: 100%;
@@ -2032,4 +2017,26 @@ body {
   .kiosk-card-art {
     height: 118px;
   }
+}
+
+/* ── Section pages: full-bleed content with a floating logo pill and Home button ───────────
+   Scoped to [data-view="section"] so the landing page is untouched. */
+.kiosk-app[data-view="section"] .kiosk-topbar {
+  position: absolute; top: 14px; left: 14px; z-index: 6;
+  padding: 8px 22px 8px 18px; gap: 14px;
+  background: rgba(255, 255, 255, 0.84); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow-md);
+}
+/* Third-party pages (Live Inventory): pill floats bottom-right so it never covers their search/filter bar */
+.kiosk-app[data-view="section"] .kiosk-section[data-pill="bottom-right"] .kiosk-topbar {
+  top: auto; left: auto; bottom: 16px; right: 16px;
+}
+.kiosk-app[data-view="section"] .kiosk-topbar-section { margin: 0; }
+.kiosk-app[data-view="section"] .kiosk-topbar-section-title { font-size: 1.45rem; line-height: 1; }
+.kiosk-app[data-view="section"] .kiosk-section-body { padding: 0; }
+.kiosk-app[data-view="section"] .kiosk-frame-wrap { border-radius: 0; border: 0; box-shadow: none; }
+.kiosk-app[data-view="section"] .kiosk-footer--section { position: absolute; left: 16px; bottom: 16px; padding: 0; z-index: 6; }
+.kiosk-app[data-view="section"] .kiosk-home-btn--footer {
+  min-height: 56px; background: rgba(255, 255, 255, 0.88);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
