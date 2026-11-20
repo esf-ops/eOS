@@ -5440,3 +5440,54 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Real edge dimensions available; kiosk hardware can't run WebGL smoothly; edge upcharges get a public price display decision. |
 
 ---
+
+### 403. Kiosk full-screen section layout (floating pills, dense pages)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | Kiosk section pages (not the landing page) now fill the screen. The framed card, bottom Home row and duplicate page headers are gone. The kiosk floats a logo pill (top-left, showing the page title) and a Home pill (bottom-left) over the page; Live Inventory (third-party SlabCloud) puts the pill bottom-right so it never covers its search bar. "Powered by slabOS" is removed from the kiosk. |
+| **How** | The kiosk adds `?dense=1` to our own pages (`dense: true` in `kioskConfig.ts`). A dense page hides its own header, sizes content to the screen, floats its action pills, and uses `postMessage` to tell the kiosk its title and to learn how much room the pill takes (`lib/kioskDense.ts`). Pages without `dense=1` are unchanged. |
+| **Scope** | Elite 100, Products & Programs hub, Fixtures & Accessories. Cambria showcase untouched. No backend or schema change. |
+| **Deploy order** | slab-inventory first, then kiosk. An older page given `dense=1` just ignores it. |
+| **Impacted files** | `app-kiosk/src/{components/KioskSectionFrame.tsx,components/KioskTopBar.tsx,lib/kioskConfig.ts,styles.css}`, `app-slab-inventory/src/{lib/kioskDense.ts,PublicElite100Page.tsx,PublicProductsProgramsPage.tsx,PublicProductCatalogPage.tsx,styles.css}`, edge viewer clears the floating buttons. |
+| **Revisit trigger** | Real Chromebox/4K testing finds a layout issue; a third-party page gains a restylable mode. |
+
+---
+
+### 404. Shower Program kiosk/web page rebuilt in the ESF brand (2026 colors)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | The Shower Program page (`/public/shower-program`, kiosk and web) is rebuilt: the overview is the program wall colors as Elite 100-style carousels per group (Promo, A, B, C) with the four options (Shower Bases, Program Options, How It Works, Program Guide) as a floating bar. Sub-pages are restyled with Fraunces headings and ESF red. Removed: the "Coming Soon / Build Your Shower" card, the customer-snapshot gallery, and the separate Wall Collection page. The Products & Programs card is now "Shower Program" with a new marble photo (`public/shower-program/shower-hero.jpg`). |
+| **Data** | The program shows the **2026** colors (`SHOWER_PROGRAM_WALL_COLORS`) until the 2027 program launches. The 2027 sheet differs (adds Allure White, Grey Galaxy, Pebbles Ice, Super White, Calacatta Rusta; those three Promo colors are not in the live Elite 100 catalog yet). Swap the list and the guide flyer on cutover; the 2027 PDF is intentionally not published. Colors resolve to Elite 100 items by color + supplier, falling back to color name; all 14 were verified against the live public catalog. |
+| **Kiosk** | The "Open PDF" link is hidden on the kiosk (a new PDF tab has no way back); the guide is a tap-to-enlarge image. |
+| **Impacted files** | `PublicShowerProgramPage.tsx`, `lib/showerProgram/{showerProgram.css,showerProgramWallColors.ts}`, `PublicProductsProgramsPage.tsx`, `public/shower-program/shower-hero.jpg`, `styles.css` (card crop). Old `sp-*` styles in `styles.css` are now unused. |
+| **Revisit trigger** | 2027 program goes live; hero photo approval; unused `sp-*` CSS cleanup. |
+
+---
+
+### 405. Specialty Items: product photos on the kiosk catalog
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | The 10 curated Specialty Items (Point Pod x4, Hubbell x3, FreePower, Glowback LED, InvisaCook) now show the same artwork used on the ESF specialty sell sheets, registered as asset overrides in `lib/productCatalogSpecialtyAssets.ts` (same pattern as the faucet overrides). Images live at `public/product-catalog/specialty/<product id>/hero.jpg`. Product shots are trimmed to the artwork; the three lifestyle photos are cropped for the cards. |
+| **Source** | `Digital Assets/Specialty` on the Document Studio drive. The three Hubbell source images are small and look soft on large screens; better source images would help. |
+| **Impacted files** | `lib/productCatalogSpecialtyAssets.ts` (new), `lib/productCatalogAssets.ts` (one import + one spread), 10 images. |
+| **Revisit trigger** | Higher-resolution Hubbell images; new specialty items. |
+
+---
+
+### 406. Kiosk design polish layer (Products & Programs) with an off switch
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-20 |
+| **Decision** | One self-contained stylesheet (`lib/kioskPolish.css`) restyles the kiosk Products & Programs and Fixtures & Accessories pages: serif headings (Fraunces) with Inter everywhere else (no monospace), ESF red for active/accent states instead of navy, large pill tabs and search, a single clean product card, a redesigned product detail window, and matching hub cards and floating pills. |
+| **Safety** | Every rule is scoped to `html.kiosk-polish`; nothing in `styles.css` changed. To turn it off: set `KIOSK_POLISH = false` in `lib/kioskDense.ts`, or add `&polish=0` to a page URL to compare, or delete the file and its import. It applies only in dense kiosk mode, never on the web pages. |
+| **Impacted files** | `lib/kioskPolish.css` (new), `lib/kioskDense.ts` (switch + hook), `PublicProductsProgramsPage.tsx` and `PublicProductCatalogPage.tsx` (one hook call each). |
+| **Revisit trigger** | Real-kiosk review; extend the layer to other pages; remove the switch once the design is settled. |
+
+---
