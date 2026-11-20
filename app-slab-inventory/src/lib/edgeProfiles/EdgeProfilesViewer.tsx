@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORNER_RADII_NOTES, EDGE_PROFILES, type EdgeProfile } from "./edgeProfileData";
 import { EdgeScene, webglAvailable, type SlabFinish } from "./edgeScene";
+import { isDenseKiosk } from "../kioskDense";
 import "./edgeProfiles.css";
 
 export type EdgeViewerColor = {
@@ -32,6 +33,7 @@ function EdgeIcon({ edge }: { edge: EdgeProfile }) {
 
 export function EdgeProfilesViewer({ colors, initialColorKey = null, onClose }: Props) {
   const canUse3d = useMemo(() => webglAvailable(), []);
+  const dense = useMemo(() => isDenseKiosk(), []);
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<EdgeScene | null>(null);
@@ -124,7 +126,7 @@ export function EdgeProfilesViewer({ colors, initialColorKey = null, onClose }: 
   const activeToken = compare && slot === "B" ? edgeB.token : edgeA.token;
 
   return (
-    <div className="edge3d" role="dialog" aria-modal="true" aria-label="Edge profiles">
+    <div className={`edge3d${dense ? " edge3d--dense" : ""}`} role="dialog" aria-modal="true" aria-label="Edge profiles">
       <div className="edge3d-main">
         <div className="edge3d-stage" ref={stageRef}>
           {show3d ? (

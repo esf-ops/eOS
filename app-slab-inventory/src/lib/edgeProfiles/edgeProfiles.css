@@ -75,3 +75,8 @@
 }
 @media (prefers-reduced-motion: reduce) { .edge3d * { scroll-behavior: auto; } }
 .edge3d-chip-plain { background: #e9e6e1; }
+
+/* Inside the kiosk the floating Home button (bottom-left) and logo pill (top-left) sit over the page; keep clear of them. */
+.edge3d--dense .edge3d-colorbar { padding-left: 190px; }
+.edge3d--dense .edge3d-hint { left: var(--kiosk-inset-left, 420px); top: 24px; }
+@media (max-width: 820px) { .edge3d--dense .edge3d-colorbar { padding-left: 8px; } }

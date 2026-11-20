@@ -17,7 +17,6 @@
 export const BRAND = {
   showroomName: "Elite Stone Showroom",
   fabricationName: "Elite Stone Fabrication",
-  poweredBy: "Powered by slabOS",
   helpLine: "Need help? Ask an Elite Stone associate.",
 } as const;
 
@@ -70,6 +69,13 @@ export interface KioskSection {
   kind: KioskSectionKind;
   /** Configured public destination (may be empty -> hero fallback). */
   url: string;
+  /**
+   * Our own public page that supports dense kiosk mode (?dense=1): it drops its duplicate header and
+   * fills the screen. Leave off for third-party pages (e.g. SlabCloud) we cannot restyle.
+   */
+  dense?: boolean;
+  /** Where the floating logo pill sits on this section. Defaults to top-left. */
+  pill?: "top-left" | "bottom-right";
   /** Visual accent used for the nav card artwork. */
   accent:
     | "stone"
@@ -116,6 +122,7 @@ export const KIOSK_SECTIONS: KioskSection[] = [
     // Appends ?kiosk=1 so the Elite 100 page activates its kiosk display mode
     // (larger cards, hidden scroll-hint gradient, touch-optimised layout).
     url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_ELITE100_URL)),
+    dense: true,
     accent: "stone",
   },
   {
@@ -129,6 +136,7 @@ export const KIOSK_SECTIONS: KioskSection[] = [
     kind: "iframe-or-hero",
     // Appends ?kiosk=1 so the Product Catalog page activates its kiosk display mode.
     url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_PRODUCT_CATALOG_URL)),
+    dense: true,
     accent: "catalog",
   },
   {
@@ -143,6 +151,8 @@ export const KIOSK_SECTIONS: KioskSection[] = [
     // No hard-coded production URL: set VITE_KIOSK_LIVE_INVENTORY_URL to a
     // PUBLIC-safe inventory view (no costs, slab IDs, or availability metadata).
     url: envUrl(import.meta.env.VITE_KIOSK_LIVE_INVENTORY_URL),
+    // Third-party page: its search/filter bar runs along the top, so the pill floats bottom-right instead.
+    pill: "bottom-right",
     accent: "inventory",
   },
   {
@@ -171,6 +181,7 @@ export const KIOSK_EXTRA_SECTIONS: KioskSection[] = [
     actionLabel: "Explore Shower Program",
     kind: "iframe-or-hero",
     url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_SHOWER_PROGRAM_URL)),
+    dense: true,
     accent: "shower",
   },
 ];

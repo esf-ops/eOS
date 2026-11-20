@@ -45,6 +45,9 @@ export function KioskSectionFrame({
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [frameTimedOut, setFrameTimedOut] = useState(false);
   const timeoutRef = useRef<number | undefined>(undefined);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Title the embedded page asks the pill to show (e.g. "Fixtures & Accessories"); null = the section's own title.
+  const [pageTitle, setPageTitle] = useState<string | null>(null);
 
   // On section navigation: reset state and auto-advance to embedded when URL is present.
   useEffect(() => {
@@ -52,6 +55,7 @@ export function KioskSectionFrame({
     setMode(next);
     setFrameLoaded(false);
     setFrameTimedOut(false);
+    setPageTitle(null);
 
     if (DEV) {
       const urlOrigin = (() => {
@@ -81,6 +85,42 @@ export function KioskSectionFrame({
     };
   }, [mode, frameLoaded]);
 
+  // Dense pages sit beside the floating logo pill. Tell the embedded page how much room the pill takes
+  // (it asks when ready, and we re-send when the pill resizes) so its own top row can start after it.
+  const frameSrc = section.dense && hasUrl
+    ? `${section.url}${section.url.includes("?") ? "&" : "?"}dense=1`
+    : section.url;
+  useEffect(() => {
+    if (mode !== "embedded" || !section.dense || !hasUrl) return;
+    let origin = "";
+    try { origin = new URL(section.url).origin; } catch { return; }
+    const bar = document.querySelector<HTMLElement>(".kiosk-topbar");
+    const send = () => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || !bar) return;
+      const left = section.pill === "bottom-right" ? 0 : Math.ceil(bar.getBoundingClientRect().right + 20);
+      win.postMessage({ type: "esf-kiosk-inset", left }, origin);
+    };
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const d = e.data as { type?: string; title?: unknown } | null;
+      if (d?.type === "esf-kiosk-ready") send();
+      if (d?.type === "esf-kiosk-title") {
+        setPageTitle(typeof d.title === "string" && d.title.trim() ? d.title.trim().slice(0, 60) : null);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    window.addEventListener("resize", send);
+    const ro = typeof ResizeObserver !== "undefined" && bar ? new ResizeObserver(send) : null;
+    if (ro && bar) ro.observe(bar);
+    send();
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("resize", send);
+      ro?.disconnect();
+    };
+  }, [mode, frameLoaded, section.id, section.url, section.dense, section.pill, hasUrl]);
+
   const openEmbedded = () => {
     setFrameLoaded(false);
     setFrameTimedOut(false);
@@ -93,8 +133,8 @@ export function KioskSectionFrame({
       : section.url;
 
   return (
-    <div className="kiosk-section">
-      <KioskTopBar sectionTitle={section.title} />
+    <div className="kiosk-section" data-pill={section.pill ?? "top-left"}>
+      <KioskTopBar sectionTitle={pageTitle ?? section.title} />
 
       <div className="kiosk-section-body">
         {mode === "embedded" && hasUrl ? (
@@ -139,8 +179,9 @@ export function KioskSectionFrame({
 
             <iframe
               key={section.url}
+              ref={iframeRef}
               className={`kiosk-frame${frameLoaded ? " kiosk-frame--ready" : ""}`}
-              src={section.url}
+              src={frameSrc}
               title={section.title}
               onLoad={() => setFrameLoaded(true)}
               referrerPolicy="no-referrer"

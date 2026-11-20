@@ -7271,3 +7271,42 @@ html.pp-landing-kiosk-root #root {
 .e100-edge-card-sub { font-size: .95rem; color: #d8d2cb; }
 .e100-public-lightbox-edges { min-height: 40px; padding: 0 18px; border: 0; border-radius: 10px; background: #8b0000; color: #fff; font-size: 0.95rem; font-weight: 800; letter-spacing: .04em; cursor: pointer; }
 .e100-public-lightbox-kiosk .e100-public-lightbox-edges { min-width: 52px; min-height: 52px; font-size: 1.1rem; }
+
+/* ── Dense kiosk mode (?kiosk=1&dense=1) ──────────────────────────────────────────────
+   The kiosk floats its logo pill (top-left, showing the page title) and Home button (bottom-left) over the page,
+   so the page drops its own header and fills the screen. Page actions (Edge profiles, Back) float too.
+   --kiosk-inset-left is sent by the kiosk (width of its pill). */
+.kiosk-dense { --e100-card-width: clamp(240px, calc((100vw - 90px) / 5.3), 520px); background: transparent; min-height: 0; }
+/* the header collapses to nothing; its floating pills are position:fixed so they keep following the scroll */
+.kiosk-dense .pc-public-header, .kiosk-dense .e100-public-header {
+  padding: 0; min-height: 0; height: 0; background: transparent; border-bottom: 0; backdrop-filter: none; overflow: visible;
+}
+.kiosk-dense .pc-public-header-row { max-width: none; margin: 0; height: 0; }
+.kiosk-dense .pc-public-brand,
+.kiosk-dense .e100-public-logo, .kiosk-dense .e100-public-logo-mark, .kiosk-dense .e100-public-brand-text { display: none; }
+.kiosk-dense .e100-public-brand { max-width: none; }
+.kiosk-dense .pc-public-main, .kiosk-dense .e100-public-main {
+  width: 100%; max-width: none; margin: 0; padding: 84px 22px 92px;
+}
+.kiosk-dense .pc-public-footer, .kiosk-dense .e100-public-footer { display: none; }
+.kiosk-dense .e100-public-sections { gap: 6px; }
+.kiosk-dense .e100-section { margin-bottom: 8px; }
+.kiosk-dense .e100-rail { padding-bottom: 14px; }
+.kiosk-dense .pc-public-kiosk .pc-grid, .kiosk-dense.pc-public-kiosk .pc-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+/* Products & Programs hub: no header at all, the two big cards fill the screen */
+.kiosk-dense.pp-landing-kiosk .pc-public-header { display: none; }
+.kiosk-dense.pp-landing-kiosk .pc-public-main.pp-landing-main { padding: 84px 22px 92px; }
+
+/* Floating action pills (top-right). They follow the scroll, same as the kiosk's logo and Home pills. */
+.kiosk-dense .e100-edge-btn,
+.kiosk-dense .pp-catalog-nav { position: fixed; top: 14px; right: 22px; margin: 0; z-index: 20; }
+.kiosk-dense .pp-catalog-nav { display: flex; gap: 10px; }
+.kiosk-dense .e100-edge-btn { min-height: 52px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22); }
+.kiosk-dense .pp-catalog-back {
+  display: inline-flex; align-items: center; min-height: 52px; padding: 0 24px;
+  border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  color: var(--eos-ink); font-weight: 700; font-size: 1rem; text-decoration: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+.pp-landing-shower-img { object-position: center 38%; }

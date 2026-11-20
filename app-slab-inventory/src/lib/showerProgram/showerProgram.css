@@ -1,0 +1,178 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap");
+
+/* Shower Program — ESF brand: white, near-black ink, deep ESF red, Fraunces headings (same as the kiosk). */
+.shw {
+  --shw-red: #8b0000;
+  --shw-red-dark: #6b0000;
+  --shw-ink: #141821;
+  --shw-mute: #5b616d;
+  --shw-line: #e3e1de;
+  --shw-soft: #f7f6f4;
+  --shw-display: "Fraunces", Georgia, "Times New Roman", serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: var(--shw-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.shw button { font: inherit; color: inherit; }
+
+/* ── Header (web) ─────────────────────────────────────────────────────── */
+.shw-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 16px clamp(16px, 3vw, 40px); border-bottom: 1px solid var(--shw-line);
+}
+.shw-brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.shw-logo { height: 46px; width: auto; display: block; }
+.shw-logo-mark { font-weight: 800; color: var(--shw-red); }
+.shw-brand-name { font-family: var(--shw-display); font-weight: 600; font-size: 1.35rem; padding-left: 16px; border-left: 1px solid var(--shw-line); }
+.shw-nav { display: flex; gap: 10px; }
+
+.shw-pill {
+  display: inline-flex; align-items: center; min-height: 52px; padding: 0 24px; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  font-weight: 700; font-size: 1rem; color: var(--shw-ink); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+
+.shw-main { flex: 1; }
+
+/* ── Overview: wall colors as carousels (same cards as the Elite 100 page) + the options bar ── */
+.shw-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.shw-overview { padding: clamp(20px, 3vw, 40px) clamp(16px, 3vw, 44px) clamp(28px, 4vw, 56px); }
+.shw-rails { max-width: 1400px; margin: 0 auto; }
+.shw-section-label {
+  display: flex; align-items: center; gap: 14px; margin: clamp(18px, 2.4vw, 30px) 0 12px;
+  font-size: 0.78rem; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: var(--shw-mute);
+}
+.shw-section-label::after { content: ""; flex: 1; height: 1px; background: var(--shw-line); }
+.shw-check { width: 20px; height: 20px; flex: 0 0 auto; color: var(--shw-red); }
+.shw-lead { margin: 0; max-width: 64ch; font-size: clamp(1.02rem, 1.25vw, 1.3rem); line-height: 1.55; color: var(--shw-mute); }
+
+.shw-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: clamp(10px, 2vw, 24px); }
+.shw-action {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 28px; cursor: pointer; text-decoration: none;
+  border: 2px solid var(--shw-red); border-radius: 999px; background: #fff; color: var(--shw-red);
+  font-weight: 800; font-size: 1rem; letter-spacing: 0.02em; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+.shw-action:active { background: var(--shw-red); color: #fff; }
+
+/* ── Sub-pages ────────────────────────────────────────────────────────── */
+.shw-page { padding: clamp(20px, 3vw, 40px) clamp(16px, 3vw, 44px) clamp(28px, 4vw, 56px); }
+.shw-page-title { margin: 0 0 20px; font-family: var(--shw-display); font-weight: 600; font-size: clamp(1.8rem, 2.6vw, 2.6rem); }
+
+.shw-card { position: relative; overflow: hidden; background: #fff; border: 1px solid var(--shw-line); border-radius: 16px; text-align: left; }
+.shw-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--shw-red); z-index: 1; }
+.shw-card-title { margin: 0 0 14px; font-family: var(--shw-display); font-weight: 600; font-size: 1.5rem; }
+.shw-note { color: var(--shw-mute); }
+
+/* bases */
+.shw-bases { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: clamp(14px, 1.6vw, 24px); }
+.shw-base { display: flex; flex-direction: column; padding: 0; cursor: pointer; }
+.shw-base-art { display: flex; align-items: center; justify-content: center; background: #fafaf9; padding: 22px 16px 12px; min-height: clamp(170px, 24vh, 280px); }
+.shw-base-art img { max-width: 100%; max-height: clamp(150px, 22vh, 250px); object-fit: contain; display: block; }
+.shw-base-body { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px 20px; }
+.shw-base-size { font-family: var(--shw-display); font-weight: 600; font-size: 1.9rem; }
+.shw-base-meta { color: var(--shw-mute); font-size: 0.98rem; }
+.shw-base-cta { margin-top: 10px; color: var(--shw-red); font-weight: 800; }
+
+.shw-detail { display: grid; grid-template-columns: minmax(280px, 440px) minmax(0, 1fr); gap: clamp(16px, 2vw, 28px); align-items: start; }
+.shw-detail-info { padding: 28px 26px 24px; }
+.shw-detail-name { margin: 0 0 14px; font-family: var(--shw-display); font-weight: 600; font-size: 1.8rem; }
+.shw-dl { margin: 0; display: grid; gap: 0; }
+.shw-dl div { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--shw-line); }
+.shw-dl dt { color: var(--shw-mute); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; align-self: center; }
+.shw-dl dd { margin: 0; font-size: 1.08rem; font-weight: 600; }
+.shw-detail-art { display: grid; gap: 16px; }
+.shw-figure { margin: 0; padding: 26px 22px 18px; }
+.shw-figure figcaption { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--shw-mute); margin-bottom: 12px; }
+.shw-figure img { width: 100%; max-height: 52vh; object-fit: contain; display: block; }
+
+/* options */
+.shw-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(14px, 1.6vw, 24px); }
+.shw-option { padding: 28px 26px 24px; }
+.shw-option--wide { grid-column: 1 / -1; }
+.shw-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; font-size: 1.15rem; font-weight: 650; }
+.shw-list li { display: flex; align-items: center; gap: 10px; }
+.shw-option-desc { margin: 16px 0 0; color: var(--shw-mute); font-size: 1rem; line-height: 1.5; }
+.shw-guidelines { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; font-size: 1.08rem; line-height: 1.5; }
+.shw-guidelines li::marker { color: var(--shw-red); font-weight: 800; }
+
+/* process */
+.shw-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: clamp(12px, 1.4vw, 20px); }
+.shw-step { padding: 26px 20px 22px; }
+.shw-step-num { display: block; font-family: var(--shw-display); font-weight: 600; font-size: 3rem; line-height: 1; color: var(--shw-red); }
+.shw-step-title { margin: 12px 0 6px; font-size: 1.2rem; font-weight: 800; }
+.shw-step-body { margin: 0; color: var(--shw-mute); font-size: 0.98rem; line-height: 1.5; }
+.shw-benefits { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 18px 28px; }
+.shw-benefits li { display: flex; gap: 10px; align-items: flex-start; }
+.shw-benefits .shw-check { margin-top: 3px; }
+.shw-benefits strong { display: block; font-size: 1.05rem; }
+.shw-benefit-body { display: block; margin-top: 3px; color: var(--shw-mute); font-size: 0.95rem; line-height: 1.5; }
+
+/* guide */
+.shw-guide { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: clamp(20px, 3vw, 44px); align-items: start; }
+.shw-guide-preview { display: block; padding: 0; cursor: zoom-in; }
+.shw-guide-preview img { display: block; width: 100%; height: auto; max-height: 74vh; object-fit: contain; background: #fff; }
+.shw-guide-hint { position: absolute; right: 12px; bottom: 12px; background: rgba(20, 24, 33, 0.82); color: #fff; font-size: 0.78rem; font-weight: 700; padding: 8px 14px; border-radius: 999px; }
+.shw-guide-side { display: grid; gap: 22px; align-content: start; }
+.shw-lightbox { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(10, 12, 16, 0.88); padding: 24px; }
+.shw-lightbox img { max-width: 94vw; max-height: 94vh; background: #fff; border-radius: 8px; }
+.shw-lightbox-close { position: absolute; top: 18px; right: 22px; width: 60px; height: 60px; border-radius: 50%; border: 0; background: #fff; color: var(--shw-ink); font-size: 2rem; line-height: 1; cursor: pointer; }
+
+/* ── Dense kiosk mode: the kiosk floats its logo pill + Home; this page drops its own header ── */
+.shw--dense .shw-header { padding: 0; border: 0; height: 0; }
+.shw--dense .shw-brand { display: none; }
+.shw--dense .shw-nav { position: fixed; top: 14px; right: 22px; z-index: 20; }
+.shw--dense .shw-page-title { display: none; }
+.shw--dense { --e100-card-width: clamp(240px, calc((100vw - 90px) / 5.3), 520px); }
+.shw--dense .shw-overview { padding: 84px 22px 124px; }
+.shw--dense .shw-rails { max-width: none; }
+.shw--dense .shw-page { padding: 84px 28px 92px; }
+.shw--dense .shw-pill { min-height: 52px; }
+
+/* ── Smaller screens ──────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .shw-detail, .shw-guide { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .shw-options { grid-template-columns: 1fr; }
+  .shw-brand-name { display: none; }
+  .shw-dl div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* Kiosk (65" touchscreen): larger, more readable, vertically centered */
+.shw--dense .shw-check { width: 24px; height: 24px; }
+.shw--dense .shw-base-meta, .shw--dense .shw-step-body, .shw--dense .shw-benefit-body { font-size: 1.1rem; }
+.shw--dense .shw-dl dd { font-size: 1.2rem; }
+.shw--dense .shw-base-art { min-height: 36vh; padding: 28px 22px 16px; }
+.shw--dense .shw-base-art img { max-height: 34vh; }
+.shw--dense .shw-base-size { font-size: 2.4rem; }
+.shw--dense .shw-base-cta { font-size: 1.1rem; }
+.shw--dense .shw-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.shw--dense .shw-step { padding: 30px 26px 26px; }
+.shw--dense .shw-step-num { font-size: 3.6rem; }
+.shw--dense .shw-step-title { font-size: 1.4rem; }
+.shw--dense .shw-list { font-size: 1.35rem; }
+.shw--dense .shw-guidelines { font-size: 1.2rem; }
+.shw--dense .shw-option-desc { font-size: 1.12rem; }
+.shw--dense .shw-page { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; }
+.shw--dense .shw-option-desc, .shw--dense .shw-guidelines { max-width: 80ch; }
+.shw-guide-side .shw-action { justify-self: start; }
+.shw--dense .shw-guide { grid-template-columns: minmax(0, 700px) minmax(0, 1fr); }
+.shw--dense .shw-guide-preview img { max-height: 80vh; }
+
+/* Elite 100 carousel look inside the shower page */
+.shw--kiosk .e100-scroll-btn { width: 48px; height: 48px; font-size: 1.75rem; }
+.shw--kiosk .e100-section-title { font-size: clamp(1.15rem, 2vw, 1.45rem); }
+.shw--kiosk .e100-rail-wrap::after { display: none; }
+.shw--kiosk .cp-card { min-width: var(--e100-card-width, 400px); }
+.shw--dense .e100-section { margin-bottom: 8px; }
+.shw--dense .e100-rail { padding-bottom: 14px; }
+
+/* Options bar: floats along the bottom of the kiosk, beside the Home button, and follows the scroll */
+.shw--dense .shw-actions {
+  position: fixed; bottom: 16px; left: 200px; right: 22px; z-index: 20; margin: 0; pointer-events: none;
+}
+.shw--dense .shw-action { pointer-events: auto; min-height: 56px; padding: 0 30px; font-size: 1.1rem; }

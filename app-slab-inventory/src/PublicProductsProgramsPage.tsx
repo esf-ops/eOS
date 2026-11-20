@@ -6,6 +6,7 @@ import {
   publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
 import { PUBLIC_SHOWER_PROGRAM_PATH } from "./lib/publicShowerProgramRoute";
+import { isDenseKiosk, keepDense, useKioskInset, useKioskPolish, useKioskTitle } from "./lib/kioskDense";
 
 const FIXTURE_SINK_IMAGES = [
   "/product-catalog/sinks/blanco-blanco-precis-24-sink/hero.jpg",
@@ -18,10 +19,14 @@ const FIXTURE_FAUCET_IMAGES = [
   "/product-catalog/faucets/faucet-delta-9113-ar-dst/stainless.png",
 ];
 
-const SHOWER_CARD_IMAGE = "/shower-program/inspiration/pro-veMrdtPQ.jpeg";
+const SHOWER_CARD_IMAGE = "/shower-program/shower-hero.jpg";
 
 export default function PublicProductsProgramsPage() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
+  const dense = useMemo(() => isDenseKiosk(), []);
+  useKioskInset(dense);
+  useKioskTitle(null, dense);
+  useKioskPolish(dense);
 
   useEffect(() => {
     if (!kiosk) return;
@@ -52,10 +57,10 @@ export default function PublicProductsProgramsPage() {
     );
   }, []);
 
-  const fixturesHref = publicProductCatalogFixturesUrl(kiosk);
-  const showerHref = `${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`;
+  const fixturesHref = keepDense(publicProductCatalogFixturesUrl(kiosk));
+  const showerHref = keepDense(`${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`);
 
-  const rootClass = ["pc-public-page", "pp-landing-page", kiosk ? "pc-public-kiosk pp-landing-kiosk" : ""]
+  const rootClass = ["pc-public-page", "pp-landing-page", kiosk ? "pc-public-kiosk pp-landing-kiosk" : "", dense ? "kiosk-dense" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -99,9 +104,9 @@ export default function PublicProductsProgramsPage() {
               <img src={SHOWER_CARD_IMAGE} alt="" className="pp-landing-shower-img" loading="eager" />
             </div>
             <div className="pp-landing-card-body">
-              <h2 className="pp-landing-card-title">The Groutless Stone Shower</h2>
+              <h2 className="pp-landing-card-title">Shower Program</h2>
               <p className="pp-landing-card-copy">
-                Explore stocked shower bases, curated wall surfaces, inspiration, and program options.
+                Explore the program wall colors, stocked shower bases, and options.
               </p>
               <span className="pp-landing-card-cta">Explore →</span>
             </div>

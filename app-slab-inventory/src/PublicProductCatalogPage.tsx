@@ -19,6 +19,7 @@ import {
   publicCatalogTabQueryValue,
   publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
+import { isDenseKiosk, keepDense, useKioskInset, useKioskPolish, useKioskTitle } from "./lib/kioskDense";
 import {
   ProductCatalogCard,
   ProductCatalogModal,
@@ -56,6 +57,10 @@ export default function PublicProductCatalogPage({
   rootClassName,
 }: PublicProductCatalogPageProps = {}) {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
+  const dense = useMemo(() => isDenseKiosk(), []);
+  useKioskInset(dense);
+  useKioskTitle(pageTitle, dense);
+  useKioskPolish(dense);
   const catalogItems = useMemo(
     () => filterCatalogReadyItems(getProductCatalogItemsWithAssets()),
     []
@@ -140,6 +145,7 @@ export default function PublicProductCatalogPage({
   const rootClass = [
     "pc-public-page",
     kiosk ? "pc-public-kiosk" : "",
+    dense ? "kiosk-dense" : "",
     rootClassName ?? "",
   ].filter(Boolean).join(" ");
 
@@ -160,7 +166,7 @@ export default function PublicProductCatalogPage({
           </div>
           {kiosk && !lockedCategory ? (
             <nav className="pp-catalog-nav" aria-label="Catalog navigation">
-              <a href={publicProductsProgramsLandingUrl(true)} className="pp-catalog-back">
+              <a href={keepDense(publicProductsProgramsLandingUrl(true))} className="pp-catalog-back">
                 ← Products & Programs
               </a>
             </nav>
