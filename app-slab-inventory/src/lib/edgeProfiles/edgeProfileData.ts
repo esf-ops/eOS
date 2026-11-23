@@ -16,14 +16,14 @@ export type EdgeProfile = {
 };
 
 export const EDGE_PROFILES: readonly EdgeProfile[] = [
-  { token: "edge_eased", name: "Eased", spec: null, upcharge: false, path: "M10 10 H128 Q150 10 150 32 V76 Q150 80 146 80 H10 Z" },
+  { token: "edge_eased", name: "Eased", spec: null, upcharge: false, path: "M10 10 H143 Q150 10 150 17 V73 Q150 80 143 80 H10 Z" },
   { token: "edge_large_eased", name: "Large Eased", spec: null, upcharge: false, path: "M10 10 H114 Q150 10 150 46 V76 Q150 80 146 80 H10 Z" },
   { token: "edge_bevel", name: '1/4" Bevel', spec: 'R 1/8" bottom', upcharge: false, path: "M10 10 H128 L150 32 V76 Q150 80 146 80 H10 Z" },
   { token: "edge_full_bullnose", name: "Full Bullnose", spec: null, upcharge: false, path: "M10 10 H115 A35 35 0 0 1 115 80 H10 Z" },
-  { token: "edge_large_ogee", name: "Ogee", spec: null, upcharge: false, path: "M10 10 H85 C100 10 104 22 116 26 C140 32 154 40 150 56 C147 68 138 80 124 80 H10 Z" },
-  { token: "edge_small_ogee", name: "Small Ogee", spec: null, upcharge: true, path: "M10 10 H92 C104 10 106 20 116 22 C134 26 150 28 150 44 V76 Q150 80 146 80 H10 Z" },
+  { token: "edge_large_ogee", name: "Ogee", spec: null, upcharge: false, path: "M10 10 H92 A22 22 0 0 0 114 32 A36 36 0 0 1 150 68 V76 Q150 80 146 80 H10 Z" },
+  { token: "edge_small_ogee", name: "Small Ogee", spec: null, upcharge: true, path: "M10 10 H112 A16 16 0 0 0 128 26 A22 22 0 0 1 150 48 V76 Q150 80 146 80 H10 Z" },
   { token: "edge_crescent", name: "Crescent", spec: null, upcharge: true, path: "M10 10 H128 Q158 45 128 80 H10 Z" },
-  { token: "edge_knife", name: "Knife", spec: null, upcharge: true, path: "M10 10 H141 Q150 10 145.7 17.9 L114 76 Q111 80 106 80 H10 Z" },
+  { token: "edge_knife", name: "Knife", spec: null, upcharge: true, path: "M10 10 H142 Q151 10 143.5 18 L89 76 Q85.5 80 80 80 H10 Z" },
 ];
 
 export const CORNER_RADII_NOTES: readonly string[] = [
