@@ -5564,10 +5564,18 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
-### 414. Edge Profiles viewer: Mitered Edge and Waterfall Edge demonstrations
+### 414. Edge Profiles viewer: Mitered Edge demonstration
 
 | Field | Detail |
 |-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | A **Mitered Edge** is added at the bottom of the list under a "Mitered" heading, tagged **Upcharge**: a short apron (about a 2" edge) cut at 45 degrees and joined at the corner so the stone's veining wraps over the edge. A hairline shows the miter joint on the end faces and along the corner. It is shown on a longer countertop (about 600 drawing units back from the edge, 360 along it, versus 200 / 240 for the normal edge samples) so it reads as a real countertop. |
+| **Waterfall** | A Waterfall Edge (full-height leg) was built and then removed from this change at Chris's request ("get rid of the waterfall for now"); it was never merged. Rebuild later using the same `drop`/`seam` fields. |
+| **Content rules** | Presentation only: no price, only the Upcharge tag (Chris's call, 2026-11-23). Not a token in the estimate flow, so `upcharge` for this entry is not mirrored from `UPGRADED_EDGE_TOKENS`; add a token there if it should flow into quotes. Proportions are representative, drawn by eye (the apron is 3 cm thick). |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/{edgeProfileData.ts, edgeGeometry.ts, edgeScene.ts, EdgeProfilesViewer.tsx, edgeProfiles.css}`. The data type gains optional `section`, `viewBox`, `drop`, `seam`, `depth`, `length`; the stone photo now mirrors past one tile so long pieces keep continuous veining. |
+| **Revisit trigger** | The edge gets an estimate-flow token or public pricing; real dimensions confirmed with the shop; waterfall comes back. |
+
+-------|--------|
 | **Date** | 2026-11-23 |
 | **Decision** | Two constructions are added to the list under a "Mitered & waterfall" heading: a **Mitered Edge** (a short apron, about a 2" edge, cut at 45 degrees and joined at the corner) and a **Waterfall Edge** (the slab turns down into a leg that runs to the floor; the leg is shortened in the viewer). The stone's veining wraps over the corner, and a hairline shows the miter joint on the end faces and along the corner. |
 | **Content rules** | Presentation only: no prices, no upcharge tag (pricing for these is not decided here). Not tokens in the estimate flow. Proportions are representative, drawn by eye (the apron is 3 cm thick, the leg is truncated at about 8.6 cm below the slab). |

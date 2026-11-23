@@ -124,11 +124,11 @@ export class EdgeScene {
     this.camera.updateProjectionMatrix();
   }
 
-  private geometryFor(edge: EdgeProfile, length: number): THREE.BufferGeometry {
-    const key = `${edge.token}:${length}`;
+  private geometryFor(edge: EdgeProfile, length: number, depth: number): THREE.BufferGeometry {
+    const key = `${edge.token}:${length}:${depth}`;
     let geo = this.geoCache.get(key);
     if (!geo) {
-      geo = buildEdgeGeometry(edge.path, length);
+      geo = buildEdgeGeometry(edge.path, length, depth);
       this.geoCache.set(key, geo);
     }
     return geo;
@@ -159,27 +159,33 @@ export class EdgeScene {
       child.traverse((o) => { if (o instanceof THREE.LineSegments) o.geometry.dispose(); });
     }
     this.compare = edges.length > 1;
-    const length = this.compare ? 150 : 240;
+    const baseLength = this.compare ? 150 : 240;
     const gap = 30;
+    // Each piece can set its own length along the edge and how far the countertop runs back (the mitered edge is longer).
+    const lengths = edges.map((e) => (this.compare ? baseLength : e.length ?? baseLength));
+    const depths = edges.map((e) => e.depth ?? SLAB_DEPTH_UNITS);
     edges.forEach((edge, i) => {
-      const mesh = new THREE.Mesh(this.geometryFor(edge, length), this.material);
+      const length = lengths[i]!;
+      const mesh = new THREE.Mesh(this.geometryFor(edge, length, depths[i]!), this.material);
       mesh.scale.setScalar(S);
       const offset = this.compare ? (i === 0 ? -1 : 1) * ((length + gap) / 2) * S : 0;
       mesh.position.z = offset;
       if (edge.seam) mesh.add(this.seamLines(edge.seam, length));
       this.group.add(mesh);
     });
-    // Shapes that hang below the slab (mitered edge, waterfall): drop the shadow to the bottom and frame the whole piece.
+    // Shapes that hang below the slab (mitered edge): drop the shadow to the bottom and frame the whole piece.
     const hang = Math.max(0, ...edges.map((e) => e.drop ?? 0)) * S;
     this.shadow.position.y = -SCENE_THICKNESS / 2 - 0.35 - hang;
-    const span = (this.compare ? length * 2 + gap : length) * S;
-    const centerX = (-SLAB_DEPTH_UNITS / 2) * S;
-    this.shadow.scale.set(SLAB_DEPTH_UNITS * S + 5, span + 5, 1);
+    const depth = Math.max(...depths);
+    const extraDepth = Math.max(0, depth - SLAB_DEPTH_UNITS) * S;
+    const span = (this.compare ? lengths[0]! + lengths[1]! + gap : lengths[0]!) * S;
+    const centerX = (-depth / 2) * S;
+    this.shadow.scale.set(depth * S + 5, span + 5, 1);
     this.shadow.position.x = centerX;
-    this.controls.target.set(centerX * 0.4, -hang / 2, 0);
+    this.controls.target.set(centerX * (extraDepth > 0 ? 0.55 : 0.4), -hang / 2, 0);
     this.controls.minDistance = this.compare ? 10 : 7;
-    this.controls.maxDistance = (this.compare ? 40 : 28) + hang * 1.5;
-    const dist = (this.compare ? 25 : 14.5) + hang * 2.2;
+    this.controls.maxDistance = (this.compare ? 40 : 28) + hang * 1.5 + extraDepth * 2;
+    const dist = (this.compare ? 25 : 14.5) + hang * 2.2 + extraDepth * 1.3;
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
     this.controls.update();
@@ -211,7 +217,8 @@ export class EdgeScene {
       (tex) => {
         if (this.disposed) { tex.dispose(); return; }
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        // Mirrored so a long countertop that runs past one photo tile continues the veining instead of jumping.
+        tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
         tex.repeat.set(1 / TEXTURE_TILE_UNITS, 1 / TEXTURE_TILE_UNITS);
         tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
         this.applyTexture(tex);
