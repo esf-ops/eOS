@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORNER_RADII_NOTES, EDGE_PROFILES, type EdgeProfile } from "./edgeProfileData";
 import { EdgeScene, webglAvailable, type SlabFinish } from "./edgeScene";
 import { isDenseKiosk } from "../kioskDense";
@@ -25,8 +25,11 @@ function groupLabel(g: string) {
 
 function EdgeIcon({ edge }: { edge: EdgeProfile }) {
   return (
-    <svg viewBox="0 0 160 90" className="edge3d-icon" aria-hidden>
+    <svg viewBox={edge.viewBox ?? "0 0 160 90"} className="edge3d-icon" aria-hidden>
       <path d={edge.path} fill="#e4e0db" stroke="#222" strokeWidth="3" strokeLinejoin="round" />
+      {edge.seam ? (
+        <line x1={edge.seam[0]} y1={edge.seam[1]} x2={edge.seam[2]} y2={edge.seam[3]} stroke="#8b0000" strokeWidth="2.5" strokeDasharray="6 4" />
+      ) : null}
     </svg>
   );
 }
@@ -241,19 +244,21 @@ export function EdgeProfilesViewer({ colors, initialColorKey = null, onClose }: 
 
         <div className="edge3d-list">
           {EDGE_PROFILES.map((edge) => (
-            <button
-              key={edge.token}
-              type="button"
-              className={`edge3d-edge${activeToken === edge.token ? " is-on" : ""}`}
-              onClick={() => pickEdge(edge)}
-            >
-              <EdgeIcon edge={edge} />
-              <span className="edge3d-edge-text">
-                <strong>{edge.name}</strong>
-                {edge.spec ? <small>{edge.spec}</small> : null}
-              </span>
-              {edge.upcharge ? <span className="edge3d-tag">Upcharge</span> : null}
-            </button>
+            <Fragment key={edge.token}>
+              {edge.section ? <div className="edge3d-list-head">{edge.section}</div> : null}
+              <button
+                type="button"
+                className={`edge3d-edge${activeToken === edge.token ? " is-on" : ""}`}
+                onClick={() => pickEdge(edge)}
+              >
+                <EdgeIcon edge={edge} />
+                <span className="edge3d-edge-text">
+                  <strong>{edge.name}</strong>
+                  {edge.spec ? <small>{edge.spec}</small> : null}
+                </span>
+                {edge.upcharge ? <span className="edge3d-tag">Upcharge</span> : null}
+              </button>
+            </Fragment>
           ))}
         </div>
 

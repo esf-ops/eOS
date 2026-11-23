@@ -134,9 +134,30 @@ export class EdgeScene {
     return geo;
   }
 
+  /** Hairline for a mitered joint: on both end faces and along the outer corner. Drawn in the mesh's own (drawing) units. */
+  private seamLines(seam: readonly [number, number, number, number], length: number): THREE.LineSegments {
+    const [x1, y1, x2, y2] = seam;
+    const a = { x: x1 - 150, y: -(y1 - 45) };
+    const b = { x: x2 - 150, y: -(y2 - 45) };
+    const half = length / 2 + 0.3;
+    // The outer corner is slightly eased, so sit the corner line just inside the sharp point.
+    const c = { x: a.x - 1.2, y: a.y - 1.2 };
+    const pts = [
+      a.x, a.y, half, b.x, b.y, half,
+      a.x, a.y, -half, b.x, b.y, -half,
+      c.x, c.y, -length / 2, c.x, c.y, length / 2,
+    ];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.6 }));
+  }
+
   /** One slab, or two side by side to compare edges. */
   setEdges(edges: readonly EdgeProfile[]) {
-    for (const child of [...this.group.children]) this.group.remove(child);
+    for (const child of [...this.group.children]) {
+      this.group.remove(child);
+      child.traverse((o) => { if (o instanceof THREE.LineSegments) o.geometry.dispose(); });
+    }
     this.compare = edges.length > 1;
     const length = this.compare ? 150 : 240;
     const gap = 30;
@@ -145,16 +166,20 @@ export class EdgeScene {
       mesh.scale.setScalar(S);
       const offset = this.compare ? (i === 0 ? -1 : 1) * ((length + gap) / 2) * S : 0;
       mesh.position.z = offset;
+      if (edge.seam) mesh.add(this.seamLines(edge.seam, length));
       this.group.add(mesh);
     });
+    // Shapes that hang below the slab (mitered edge, waterfall): drop the shadow to the bottom and frame the whole piece.
+    const hang = Math.max(0, ...edges.map((e) => e.drop ?? 0)) * S;
+    this.shadow.position.y = -SCENE_THICKNESS / 2 - 0.35 - hang;
     const span = (this.compare ? length * 2 + gap : length) * S;
     const centerX = (-SLAB_DEPTH_UNITS / 2) * S;
     this.shadow.scale.set(SLAB_DEPTH_UNITS * S + 5, span + 5, 1);
     this.shadow.position.x = centerX;
-    this.controls.target.set(centerX * 0.4, 0, 0);
+    this.controls.target.set(centerX * 0.4, -hang / 2, 0);
     this.controls.minDistance = this.compare ? 10 : 7;
-    this.controls.maxDistance = this.compare ? 40 : 28;
-    const dist = this.compare ? 25 : 14.5;
+    this.controls.maxDistance = (this.compare ? 40 : 28) + hang * 1.5;
+    const dist = (this.compare ? 25 : 14.5) + hang * 2.2;
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
     this.controls.update();
