@@ -5503,4 +5503,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-kiosk/src/components/KioskSectionFrame.tsx`, `app-kiosk/src/styles.css`. Kiosk only; slab-inventory is unchanged. |
 | **Revisit trigger** | A purpose-built phone layout for the section pages. |
 
+### 408. Edge Profiles viewer: tooling-alignment tweaks from the shop (Truman via Tanner)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | Four shape changes to the 3D Edge Profiles viewer so it matches the shop's tooling: (1) **Eased** now has an equal roll on top and bottom, a bit bigger than the old bottom roll (about 1/8", 7 drawing units, from 4). (2) **Ogee** and **Small Ogee** get a deeper cove that ends in a hard line where it meets the top surface (the old curves blended smoothly into the top). (3) **Knife** is steeper and more aggressive (underside now pulled back to x=89 instead of 114). |
+| **Interpretation to confirm** | The email's first note ("make eased large eased") was read as: the old Eased shape (big top roll) is really the large eased look, which Large Eased already provides, so Eased becomes the standard small, equal roll and **Large Eased is unchanged** (R36 top). If the shop wants Large Eased to change too, it is one path string in `edgeProfileData.ts`. |
+| **Still by eye** | These are still drawn by eye, not from CNC dimensions; no radius notes are published. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (4 path strings). No geometry code, backend or schema change. |
+| **Revisit trigger** | Real tooling dimensions available; shop review of the new shapes. |
+
 ---
