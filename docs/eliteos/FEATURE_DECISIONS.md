@@ -5514,4 +5514,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (4 path strings). No geometry code, backend or schema change. |
 | **Revisit trigger** | Real tooling dimensions available; shop review of the new shapes. |
 
+### 409. Edge Profiles viewer: Ogee and Small Ogee now traced from the real shop samples
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | The Ogee and Small Ogee cross-sections are now traced from photos of the physical sample edges (supplied by Chris, side-on shots), replacing the by-eye shapes from decision 408. Both have a hard line where the top surface meets the cove, a steep cove, then a convex bulge. **Ogee**: the bulge runs all the way down and curves back under, with no flat face. **Small Ogee**: a wider, shallower bulge ending in a flat vertical face (about a third of the thickness) with a small bottom radius. |
+| **Accuracy** | Proportions were measured off the photos (slab thickness = 70 drawing units) and are close but not CNC-exact; the photos are hand-held so some perspective error remains. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (2 path strings). |
+| **Revisit trigger** | Real tooling dimensions available. |
+
 ---
