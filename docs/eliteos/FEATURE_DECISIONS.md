@@ -5542,4 +5542,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts`. |
 | **Revisit trigger** | Real tooling dimensions available. |
 
+### 412. Edge Profiles viewer: Ogee traced from the shop's own sketch
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | After several rounds of describing the Ogee in words, the profile is now traced directly from Chris's hand sketch: the green line was extracted from the photo, scaled to the 3 cm slab thickness, and fitted with three smooth curves (mean deviation about 0.3 mm). Shape: hard corner at the top surface, a short steep drop, one long gradual sweep down to the shoulder at about the vein height (just under half the thickness) near the edge, then the widest point and a rounded underside. This replaces the shapes from decisions 408/409/410/411 for the Ogee only. |
+| **Why** | Describing curves in words was not converging; measuring the sketch is objective and repeatable. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (one path string, now cubic curves). |
+| **Revisit trigger** | Real tooling dimensions available. |
+
 ---
