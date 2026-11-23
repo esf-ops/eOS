@@ -5582,4 +5582,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/{edgeProfileData.ts, edgeScene.ts, EdgeProfilesViewer.tsx, edgeProfiles.css}`. The data type gains optional `section`, `viewBox`, `drop`, `seam`. |
 | **Revisit trigger** | These get estimate-flow tokens or public pricing; real dimensions (apron depth, leg length) confirmed with the shop. |
 
+### 415. Kiosk: Elite Stone Fabrication favicon
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | The kiosk (`kiosk.eliteosfab.com`) now has a favicon: the ESF mark from the Elite Stone Fabrications logo (the swoosh and "ESF", without the long wordmark, which is unreadable at tab size) on a white rounded square so it reads on both light and dark browser tabs. Files: `favicon.ico` (16/32/48), `favicon-32x32.png`, `icon-192.png`, `apple-touch-icon.png`, linked from `app-kiosk/index.html`. |
+| **Why** | The kiosk had no favicon, so tabs and bookmarks showed the browser's default icon. |
+| **Impacted files** | `app-kiosk/index.html`, `app-kiosk/public/{favicon.ico,favicon-32x32.png,icon-192.png,apple-touch-icon.png}`. Kiosk only. |
+| **Revisit trigger** | A designed square brand mark exists, or the same icon is wanted on the other heads. |
+
 ---
