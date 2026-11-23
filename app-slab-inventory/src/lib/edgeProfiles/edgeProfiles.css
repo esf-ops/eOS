@@ -40,6 +40,7 @@
 .edge3d-seg button + button { border-left: 1px solid #3a3a3d; }
 .edge3d-seg button.is-on { background: #8b0000; color: #fff; }
 .edge3d-list { display: flex; flex-direction: column; gap: 8px; }
+.edge3d-list-head { margin-top: 6px; font-weight: 800; font-size: .62rem; letter-spacing: .2em; text-transform: uppercase; color: #d9534f; }
 .edge3d-edge { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 6px 12px 6px 8px; border: 2px solid #2d2d2f; border-radius: 12px; background: #202022; color: #f2f0ed; font: inherit; text-align: left; cursor: pointer; }
 .edge3d-edge.is-on { border-color: #c0392b; background: #2a2020; }
 .edge3d-icon { width: 76px; height: 44px; flex: 0 0 auto; background: #fafafa; border-radius: 6px; padding: 3px; }
