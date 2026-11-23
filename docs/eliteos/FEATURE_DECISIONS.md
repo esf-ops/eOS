@@ -5552,4 +5552,26 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (one path string, now cubic curves). |
 | **Revisit trigger** | Real tooling dimensions available. |
 
+### 413. Edge Profiles viewer: continuous stone photo (no mid-thickness seam)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | The stone photo is now mapped as one continuous sheet: over the top, around the finished edge and down the underside (u = distance along the profile, v = distance along the slab), with each end face continuing the top surface. |
+| **Why** | The default extrusion mapping started the photo at the slab's mid-thickness (so the top and bottom halves sampled opposite edges of the photo) and switched direction on curved faces. Every edge showed a horizontal seam where the veining jumped. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeGeometry.ts` (UVs only; no shape change). |
+| **Revisit trigger** | Real slab-photo orientation/scale rules (how big a vein should look) need tuning. |
+
+---
+
+### 414. Edge Profiles viewer: Mitered Edge and Waterfall Edge demonstrations
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | Two constructions are added to the list under a "Mitered & waterfall" heading: a **Mitered Edge** (a short apron, about a 2" edge, cut at 45 degrees and joined at the corner) and a **Waterfall Edge** (the slab turns down into a leg that runs to the floor; the leg is shortened in the viewer). The stone's veining wraps over the corner, and a hairline shows the miter joint on the end faces and along the corner. |
+| **Content rules** | Presentation only: no prices, no upcharge tag (pricing for these is not decided here). Not tokens in the estimate flow. Proportions are representative, drawn by eye (the apron is 3 cm thick, the leg is truncated at about 8.6 cm below the slab). |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/{edgeProfileData.ts, edgeScene.ts, EdgeProfilesViewer.tsx, edgeProfiles.css}`. The data type gains optional `section`, `viewBox`, `drop`, `seam`. |
+| **Revisit trigger** | These get estimate-flow tokens or public pricing; real dimensions (apron depth, leg length) confirmed with the shop. |
+
 ---
