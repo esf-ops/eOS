@@ -5524,4 +5524,13 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (2 path strings). |
 | **Revisit trigger** | Real tooling dimensions available. |
 
+### 410. Edge Profiles viewer: narrower bottom roll on the Ogee
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-23 |
+| **Decision** | After review against a hand sketch from Chris, the Ogee's rounded bottom section is narrower: the last arc is 12 drawing units wide (was 18), so the flat underside runs about 6 units (about 2.5 mm) further toward the edge. Nothing else about the Ogee changes. |
+| **Impacted files** | `app-slab-inventory/src/lib/edgeProfiles/edgeProfileData.ts` (one path string). |
+| **Revisit trigger** | Real tooling dimensions available. |
+
 ---
