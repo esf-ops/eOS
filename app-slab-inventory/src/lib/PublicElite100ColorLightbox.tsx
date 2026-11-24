@@ -27,6 +27,13 @@ type PublicElite100ColorLightboxProps = {
   showInventoryCount?: boolean;
   /** Cambria kiosk — black/gold lightbox chrome (scoped; does not affect Elite 100). */
   variant?: "default" | "cambria";
+  /** Phone layout: full-screen sheet, always-visible Close, previous/next colors and a bottom action bar. Off for kiosk and desktop. */
+  mobile?: boolean;
+  /** Phone only: step to the neighboring color without closing. Omit at the ends of the list. */
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** Phone only: where this color sits in the list being browsed ("3 of 104"). */
+  position?: { index: number; total: number };
 };
 
 /** Public-safe color detail — image zoom; inventory counts only when explicitly enabled. */
@@ -37,6 +44,10 @@ export function PublicElite100ColorLightbox({
   onSeeEdges,
   showInventoryCount = false,
   variant = "default",
+  mobile = false,
+  onPrev,
+  onNext,
+  position,
 }: PublicElite100ColorLightboxProps) {
   const texture = lookupElite100Texture(item.color_name, item.color_key);
   const imageSrc = texture?.fullUrl ?? elite100CardImageSrcFull(item);
@@ -46,6 +57,7 @@ export function PublicElite100ColorLightbox({
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
   const resetView = useCallback(() => {
     setScale(1);
@@ -78,11 +90,23 @@ export function PublicElite100ColorLightbox({
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+      } else if (e.key === "ArrowLeft" && onPrev) {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight" && onNext) {
+        e.preventDefault();
+        onNext();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, onPrev, onNext]);
+
+  /** Phone zoom button: 1x -> 2.5x -> back to 1x. */
+  const cycleZoom = () => {
+    if (scale > 1) resetView();
+    else setScale(2.5);
+  };
 
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -90,7 +114,10 @@ export function PublicElite100ColorLightbox({
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (scale <= 1) return;
+    if (scale <= 1) {
+      if (mobile) swipeRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
     dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -105,6 +132,17 @@ export function PublicElite100ColorLightbox({
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const swipe = swipeRef.current;
+    swipeRef.current = null;
+    if (swipe && e.type === "pointerup") {
+      const dx = e.clientX - swipe.x;
+      const dy = e.clientY - swipe.y;
+      // A quick sideways flick on the photo steps to the next / previous color.
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+        if (dx < 0) onNext?.();
+        else onPrev?.();
+      }
+    }
     dragRef.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
@@ -114,6 +152,7 @@ export function PublicElite100ColorLightbox({
   const rootClass = [
     "e100-public-lightbox-overlay",
     kiosk ? "e100-public-lightbox-kiosk" : "",
+    mobile ? "e100-lb-mobile" : "",
     variant === "cambria" ? "cambria-theme-lightbox" : "",
   ]
     .filter(Boolean)
@@ -140,6 +179,12 @@ export function PublicElite100ColorLightbox({
                 <>
                   <span className="e100-public-lightbox-dot" aria-hidden>·</span>
                   <span>{item.material_name}</span>
+                </>
+              ) : null}
+              {mobile && position ? (
+                <>
+                  <span className="e100-public-lightbox-dot" aria-hidden>·</span>
+                  <span>{position.index + 1} of {position.total}</span>
                 </>
               ) : null}
             </p>
@@ -194,6 +239,19 @@ export function PublicElite100ColorLightbox({
             </div>
           )}
         </div>
+
+        {mobile ? (
+          <div className="e100-lb-m-bar">
+            <button type="button" className="e100-lb-m-nav" onClick={onPrev} disabled={!onPrev} aria-label="Previous color">‹</button>
+            <div className="e100-lb-m-mid">
+              {onSeeEdges ? (
+                <button type="button" className="e100-lb-m-edges" onClick={onSeeEdges}>See edges in 3D</button>
+              ) : null}
+              <button type="button" className="e100-lb-m-zoom" onClick={cycleZoom}>{scale > 1 ? "Reset zoom" : "Zoom in"}</button>
+            </div>
+            <button type="button" className="e100-lb-m-nav" onClick={onNext} disabled={!onNext} aria-label="Next color">›</button>
+          </div>
+        ) : null}
 
         <footer className="e100-public-lightbox-foot">
           <span>Tap outside or press Close · scroll or +/− to zoom</span>

@@ -5592,4 +5592,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-kiosk/index.html`, `app-kiosk/public/{favicon.ico,favicon-32x32.png,icon-192.png,apple-touch-icon.png}`. Kiosk only. |
 | **Revisit trigger** | A designed square brand mark exists, or the same icon is wanted on the other heads. |
 
+### 416. Elite 100 showroom: phone layout
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-24 |
+| **Decision** | On phone-sized screens (768px and narrower, the same cut-off the kiosk uses) the public Elite 100 page (`/public/elite100`) switches to a phone layout: a two-column (three from 560px) browse grid instead of seven sideways carousels, a sticky search box with Promo / Group A-F jump chips, and a full-screen color view with an always-visible Close, previous/next color (buttons and swipe, "4 of 104"), a "See edges in 3D" button and a Zoom toggle. Search matches color or material name ignoring case and punctuation. |
+| **Why** | Marshal reported the Elite 100 page was impossible to navigate on a phone: the color view's header overflowed (Close was clipped off screen), the photo was a thin strip, and the carousels showed about one color at a time. |
+| **Kiosk is untouched** | The phone layout is behind `usePhoneLayout()` and is never used in dense (full-screen) kiosk mode. All its CSS is scoped to `.e100-mobile` / `.e100-lb-mobile`, which are only added at phone width, so kiosk and desktop/tablet rendering are unchanged (verified at 1280px kiosk+dense and 820px). |
+| **Impacted files** | `app-slab-inventory/src/{PublicElite100Page.tsx, lib/PublicElite100ColorLightbox.tsx, lib/elite100Showroom.tsx (data-group attribute), lib/phoneLayout.ts, lib/elite100Mobile.css}`. The color view is shared with the Cambria page; the new phone mode is opt-in (`mobile` prop) and only the Elite 100 page turns it on. |
+| **Revisit trigger** | The same treatment is wanted on the Cambria page or the Shower Program page. |
+
 ---

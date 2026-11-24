@@ -9,6 +9,8 @@ import { isKioskOrArreyaMode } from "./lib/publicElite100Route";
 import { isDenseKiosk, useKioskInset, useKioskTitle } from "./lib/kioskDense";
 import { PublicElite100ColorLightbox } from "./lib/PublicElite100ColorLightbox";
 import { lookupElite100Texture } from "./lib/elite100TextureAssets";
+import { usePhoneLayout } from "./lib/phoneLayout";
+import "./lib/elite100Mobile.css";
 import type { EdgeViewerColor } from "./lib/edgeProfiles/EdgeProfilesViewer";
 
 // The 3D viewer (three.js) is loaded only when someone opens it.
@@ -19,6 +21,8 @@ const EdgeProfilesViewer = lazy(() =>
 export default function PublicElite100Page() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
   const dense = useMemo(() => isDenseKiosk(), []);
+  // Phone layout (browse grid, search, group chips, full-screen color view). Never in the full-screen kiosk (dense) mode.
+  const phone = usePhoneLayout() && !dense;
   useKioskInset(dense);
   useKioskTitle(null, dense);
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchPublicElite100Showroom>> | null>(null);
@@ -27,6 +31,8 @@ export default function PublicElite100Page() {
   const [selected, setSelected] = useState<Elite100ShowroomItem | null>(null);
   const [edgeOpen, setEdgeOpen] = useState(false);
   const [edgeColorKey, setEdgeColorKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Elite 100 · Elite Stone Fabrication";
@@ -75,6 +81,42 @@ export default function PublicElite100Page() {
     [data],
   );
 
+  // Phone search: match color or material name, ignoring case, spaces and punctuation.
+  const searching = phone && query.trim().length > 0;
+  const visibleGroups = useMemo(() => {
+    const groups = data?.groups ?? [];
+    if (!searching) return groups;
+    const norm = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const q = norm(query);
+    return groups
+      .map((g) => ({ ...g, items: g.items.filter((i) => norm(i.color_name).includes(q) || norm(i.display_name).includes(q) || norm(i.material_name).includes(q)) }))
+      .filter((g) => g.items.length > 0);
+  }, [data, query, searching]);
+  const visibleItems = useMemo(() => visibleGroups.flatMap((g) => g.items), [visibleGroups]);
+  const selectedIndex = selected ? visibleItems.findIndex((i) => i.color_key === selected.color_key) : -1;
+
+  // Highlight the group chip for the section currently under the sticky bar.
+  useEffect(() => {
+    if (!phone || searching || !data?.collection) return;
+    const sections = Array.from(document.querySelectorAll<HTMLElement>(".e100-section"));
+    if (sections.length === 0 || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) setActiveGroup(entry.target.getAttribute("data-group"));
+        }
+      },
+      { rootMargin: "-130px 0px -65% 0px" },
+    );
+    sections.forEach((s) => io.observe(s));
+    return () => io.disconnect();
+  }, [phone, searching, data, visibleGroups]);
+
+  const jumpToGroup = (group: string) => {
+    setActiveGroup(group);
+    document.getElementById(`e100-group-${group}`)?.closest("section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const edgeColors = useMemo<EdgeViewerColor[]>(
     () => (data?.groups ?? []).flatMap((group) => group.items).map((item) => {
       const name = item.color_name ?? item.display_name ?? item.color_key;
@@ -99,7 +141,7 @@ export default function PublicElite100Page() {
     [data],
   );
 
-  const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : "", dense ? "kiosk-dense" : ""].filter(Boolean).join(" ");
+  const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : "", dense ? "kiosk-dense" : "", phone ? "e100-mobile" : ""].filter(Boolean).join(" ");
 
   return (
     <div className={rootClass}>
@@ -124,6 +166,41 @@ export default function PublicElite100Page() {
         </div>
       </header>
 
+      {phone && data?.collection ? (
+        <div className="e100m-bar">
+          <label className="e100m-search">
+            <span className="e100m-sr">Search colors</span>
+            <input
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              placeholder={`Search ${totalCount > 0 ? totalCount : "all"} colors`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          {!searching ? (
+            <nav className="e100m-chips" aria-label="Jump to a price group">
+              {data.groups.filter((g) => g.items.length > 0).map((g) => (
+                <button
+                  key={g.price_group}
+                  type="button"
+                  className={`e100m-chip${activeGroup === g.price_group ? " on" : ""}`}
+                  onClick={() => jumpToGroup(g.price_group)}
+                >
+                  {g.price_group === "Promo" ? "Promo" : `Group ${g.price_group}`}
+                </button>
+              ))}
+            </nav>
+          ) : (
+            <p className="e100m-count" aria-live="polite">
+              {visibleItems.length === 0 ? "No colors match" : `${visibleItems.length} color${visibleItems.length === 1 ? "" : "s"}`}
+            </p>
+          )}
+        </div>
+      ) : null}
+
       <main className="e100-public-main">
         {busy && !data ? (
           <div className="e100-public-loading" aria-live="polite">
@@ -140,7 +217,7 @@ export default function PublicElite100Page() {
           </div>
         ) : (
           <div className="e100-public-sections">
-            {data.groups.map((group) => (
+            {visibleGroups.map((group) => (
               group.items.length > 0 ? (
                 <Elite100ShowroomSection
                   key={group.price_group}
@@ -151,6 +228,9 @@ export default function PublicElite100Page() {
                 />
               ) : null
             ))}
+            {searching && visibleItems.length === 0 ? (
+              <p className="e100m-empty">Nothing matches “{query.trim()}”. Try part of a color name, like “calacatta”.</p>
+            ) : null}
             <button type="button" className="e100-edge-card" onClick={() => { setEdgeColorKey(null); setEdgeOpen(true); }}>
               <span className="e100-edge-card-eyebrow">Explore in 3D</span>
               <span className="e100-edge-card-title">Edge Profiles</span>
@@ -174,6 +254,10 @@ export default function PublicElite100Page() {
         <PublicElite100ColorLightbox
           item={selected}
           kiosk={kiosk}
+          mobile={phone}
+          position={phone && selectedIndex >= 0 ? { index: selectedIndex, total: visibleItems.length } : undefined}
+          onPrev={phone && selectedIndex > 0 ? () => setSelected(visibleItems[selectedIndex - 1] ?? null) : undefined}
+          onNext={phone && selectedIndex >= 0 && selectedIndex < visibleItems.length - 1 ? () => setSelected(visibleItems[selectedIndex + 1] ?? null) : undefined}
           onSeeEdges={() => { setEdgeColorKey(selected.color_key); setEdgeOpen(true); }}
           onClose={() => setSelected(null)}
         />
