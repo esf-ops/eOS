@@ -22,7 +22,8 @@ export default function PublicElite100Page() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
   const dense = useMemo(() => isDenseKiosk(), []);
   // Phone layout (browse grid, search, group chips, full-screen color view). Never in the full-screen kiosk (dense) mode.
-  const phone = usePhoneLayout() && !dense;
+  const phoneScreen = usePhoneLayout();
+  const phone = phoneScreen && !dense;
   useKioskInset(dense);
   useKioskTitle(null, dense);
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchPublicElite100Showroom>> | null>(null);
@@ -254,10 +255,12 @@ export default function PublicElite100Page() {
         <PublicElite100ColorLightbox
           item={selected}
           kiosk={kiosk}
-          mobile={phone}
-          position={phone && selectedIndex >= 0 ? { index: selectedIndex, total: visibleItems.length } : undefined}
-          onPrev={phone && selectedIndex > 0 ? () => setSelected(visibleItems[selectedIndex - 1] ?? null) : undefined}
-          onNext={phone && selectedIndex >= 0 && selectedIndex < visibleItems.length - 1 ? () => setSelected(visibleItems[selectedIndex + 1] ?? null) : undefined}
+          // The color view uses the phone layout on any phone-sized screen, including a phone in landscape inside the kiosk's
+          // full-screen (dense) mode, where the kiosk's own floating logo and Home buttons sit over the page's left side.
+          mobile={phoneScreen}
+          position={phoneScreen && selectedIndex >= 0 ? { index: selectedIndex, total: visibleItems.length } : undefined}
+          onPrev={phoneScreen && selectedIndex > 0 ? () => setSelected(visibleItems[selectedIndex - 1] ?? null) : undefined}
+          onNext={phoneScreen && selectedIndex >= 0 && selectedIndex < visibleItems.length - 1 ? () => setSelected(visibleItems[selectedIndex + 1] ?? null) : undefined}
           onSeeEdges={() => { setEdgeColorKey(selected.color_key); setEdgeOpen(true); }}
           onClose={() => setSelected(null)}
         />
