@@ -5603,4 +5603,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/{PublicElite100Page.tsx, lib/PublicElite100ColorLightbox.tsx, lib/elite100Showroom.tsx (data-group attribute), lib/phoneLayout.ts, lib/elite100Mobile.css}`. The color view is shared with the Cambria page; the new phone mode is opt-in (`mobile` prop) and only the Elite 100 page turns it on. |
 | **Revisit trigger** | The same treatment is wanted on the Cambria page or the Shower Program page. |
 
+### 417. Elite 100 showroom: phone layout also applies when the phone is turned sideways
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-24 |
+| **Decision** | The phone layout from decision 416 now also turns on for a phone held in landscape: `(max-width: 768px)` or `(orientation: landscape) and (max-height: 500px)`. In landscape the color view puts the photo on the left and the title, Close, See edges, Zoom and previous/next in a column on the right, and the browse page shows four columns under a one-row search + chips bar. |
+| **Why** | A landscape phone is wider than 768px, so it got the desktop color view: a header a third of the screen tall and a photo running off the bottom (the same complaint as portrait). |
+| **Kiosk is untouched** | No tablet, desktop or kiosk screen is 500px tall or less, and dense (full-screen) kiosk mode never uses the phone layout. Checked at 1024x768 (kiosk) and 1280x800 and 844x390 with `dense=1`. |
+| **Impacted files** | `app-slab-inventory/src/lib/{phoneLayout.ts, elite100Mobile.css}`. |
+| **Revisit trigger** | A real device shows a landscape size this misses (for example a tall foldable). |
+
 ---
