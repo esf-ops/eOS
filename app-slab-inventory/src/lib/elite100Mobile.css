@@ -1,0 +1,119 @@
+/* Elite 100 showroom on a phone.
+   Everything here is scoped to `.e100-mobile` (the page adds it only at phone width and never in the full-screen kiosk) or
+   `.e100-lb-mobile` (the color view, same rule), so the kiosk and desktop looks are not touched.
+   Phone: a two-column browse grid instead of seven sideways carousels, a sticky search + group-jump bar, and a full-screen
+   color view with an always-visible Close, next/previous color and a bottom action bar. */
+
+/* ── Page ───────────────────────────────────────────────────────────────────────────────────── */
+.e100-public-page.e100-mobile .e100-public-header { padding: 12px 14px; }
+.e100-public-page.e100-mobile .e100-public-brand { gap: 10px; }
+.e100-public-page.e100-mobile .e100-public-logo,
+.e100-public-page.e100-mobile .e100-public-logo-mark { width: 44px; height: 44px; }
+.e100-public-page.e100-mobile .e100-public-brand-text { flex: 1; }
+.e100-public-page.e100-mobile .e100-public-title { font-size: 1.02rem; line-height: 1.2; margin: 0 0 2px; }
+.e100-public-page.e100-mobile .e100-public-subtitle { font-size: .74rem; line-height: 1.3; }
+.e100-public-page.e100-mobile .e100-edge-btn { min-height: 40px; padding: 0 14px; font-size: .72rem; letter-spacing: .05em; margin-left: 0; }
+
+/* Sticky search + group chips */
+.e100m-bar {
+  position: sticky; top: 0; z-index: 30;
+  padding: 10px 14px 8px;
+  background: rgba(255, 255, 255, .96);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--eos-line);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .06);
+}
+.e100m-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.e100m-search { display: block; }
+.e100m-search input {
+  width: 100%; height: 44px; padding: 0 16px; box-sizing: border-box;
+  border: 1px solid #d7dde6; border-radius: 999px; background: #f4f6f9;
+  font: inherit; font-size: 1rem; /* 16px keeps iOS from zooming the page on focus */ color: var(--eos-ink);
+  -webkit-appearance: none; appearance: none;
+}
+.e100m-search input:focus { outline: none; border-color: #8b0000; background: #fff; box-shadow: 0 0 0 3px rgba(139, 0, 0, .12); }
+.e100m-chips { display: flex; gap: 8px; margin: 8px -14px 0; padding: 0 14px 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.e100m-chips::-webkit-scrollbar { display: none; }
+.e100m-chip {
+  flex: 0 0 auto; min-height: 38px; padding: 0 16px; border: 1px solid #d7dde6; border-radius: 999px;
+  background: #fff; color: var(--eos-ink); font: inherit; font-size: .84rem; font-weight: 700; cursor: pointer;
+}
+.e100m-chip.on { background: #111; border-color: #111; color: #fff; }
+.e100m-count { margin: 8px 2px 0; font-size: .82rem; color: var(--eos-ink-muted); }
+.e100m-empty { margin: 8px 0 0; padding: 18px; border-radius: 14px; background: #fff; border: 1px solid var(--eos-line); color: var(--eos-ink-mid); font-size: .95rem; line-height: 1.5; }
+
+/* Browse grid */
+.e100-public-page.e100-mobile .e100-public-main { padding: 14px 14px 28px; }
+.e100-public-page.e100-mobile .e100-public-sections { gap: 8px; }
+.e100-public-page.e100-mobile .e100-section { margin-bottom: 18px; scroll-margin-top: 112px; }
+.e100-public-page.e100-mobile .e100-section-head { margin-bottom: 8px; }
+.e100-public-page.e100-mobile .e100-section-controls { display: none; }
+.e100-public-page.e100-mobile .e100-rail-wrap::after { display: none; }
+.e100-public-page.e100-mobile .e100-rail {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px;
+  padding: 4px 0 0; overflow: visible; scroll-snap-type: none; scroll-behavior: auto;
+}
+.e100-public-page.e100-mobile .e100-rail > [role="listitem"] { flex: none; min-width: 0; width: auto; scroll-snap-align: none; }
+.e100-public-page.e100-mobile .cp-card { min-width: 0; width: 100%; -webkit-tap-highlight-color: transparent; }
+.e100-public-page.e100-mobile .cp-card:hover { transform: none; }
+.e100-public-page.e100-mobile .cp-card:active { transform: scale(.98); }
+.e100-public-page.e100-mobile .cp-card:hover .cp-card-img { transform: none; }
+.e100-public-page.e100-mobile .cp-card-mat { border-radius: 14px; }
+.e100-public-page.e100-mobile .cp-card-img-wrap { border-radius: 13px; }
+.e100-public-page.e100-mobile .cp-card-body { padding: 8px 2px 0; }
+.e100-public-page.e100-mobile .cp-card-name { font-size: .88rem; min-height: 0; line-height: 1.25; -webkit-line-clamp: 2; }
+.e100-public-page.e100-mobile .cp-card-material { font-size: .68rem; }
+.e100-public-page.e100-mobile .e100-edge-card { margin-top: 6px; }
+.e100-public-page.e100-mobile .e100-public-footer { font-size: .7rem; }
+@media (min-width: 560px) {
+  .e100-public-page.e100-mobile .e100-rail { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ── Color view (full-screen on a phone) ───────────────────────────────────────────────────── */
+.e100-public-lightbox-overlay.e100-lb-mobile { padding: 0; align-items: stretch; background: #0f1419; }
+.e100-lb-mobile .e100-public-lightbox {
+  width: 100%; max-height: none; height: 100vh; height: 100dvh; border-radius: 0; border: 0; box-shadow: none;
+}
+.e100-lb-mobile .e100-public-lightbox-head {
+  align-items: center; gap: 10px; flex: 0 0 auto;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 10px 16px;
+}
+.e100-lb-mobile .e100-public-lightbox-copy { flex: 1; min-width: 0; }
+.e100-lb-mobile .e100-public-lightbox-title { font-size: 1.2rem; margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e100-lb-mobile .e100-public-lightbox-meta { flex-wrap: nowrap; gap: 6px; font-size: .8rem; white-space: nowrap; overflow: hidden; }
+.e100-lb-mobile .e100-public-lightbox-meta .e100-group-badge { display: none; }
+/* On the narrowest phones shorten the material name, never the "4 of 104" position */
+.e100-lb-mobile .e100-public-lightbox-meta > * { flex: 0 0 auto; }
+.e100-lb-mobile .e100-public-lightbox-meta > :nth-child(4) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.e100-lb-mobile .e100-public-lightbox-avail,
+.e100-lb-mobile .e100-public-lightbox-zoom,
+.e100-lb-mobile .e100-public-lightbox-zoom-label,
+.e100-lb-mobile .e100-public-lightbox-edges,
+.e100-lb-mobile .e100-public-lightbox-foot { display: none; }
+.e100-lb-mobile .e100-public-lightbox-actions { flex: 0 0 auto; }
+.e100-lb-mobile .e100-public-lightbox-close { min-height: 44px; min-width: 76px; padding: 0 16px; }
+
+.e100-lb-mobile .e100-public-lightbox-viewport { flex: 1 1 auto; min-height: 0; max-height: none; }
+.e100-lb-mobile .e100-public-lightbox-stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.e100-lb-mobile .e100-public-lightbox-img { max-width: 100%; max-height: 100%; width: 100%; height: auto; }
+
+.e100-lb-m-bar {
+  flex: 0 0 auto; display: flex; align-items: stretch; gap: 8px;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: #0f1419; border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.e100-lb-m-nav {
+  flex: 0 0 56px; min-height: 52px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 12px;
+  background: rgba(255, 255, 255, .08); color: #f4f6f8; font-size: 2rem; line-height: 1; cursor: pointer;
+}
+.e100-lb-m-nav:disabled { opacity: .3; cursor: default; }
+.e100-lb-m-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.e100-lb-m-edges {
+  min-height: 52px; border: 0; border-radius: 12px; background: #8b0000; color: #fff;
+  font: inherit; font-size: 1rem; font-weight: 800; letter-spacing: .03em; cursor: pointer;
+}
+.e100-lb-m-zoom {
+  min-height: 36px; border: 0; background: transparent; color: rgba(244, 246, 248, .75);
+  font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer;
+}
+.e100-lb-m-mid:has(.e100-lb-m-zoom:only-child) { justify-content: center; }

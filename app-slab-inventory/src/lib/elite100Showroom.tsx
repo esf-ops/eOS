@@ -34,6 +34,7 @@ export function Elite100ShowroomSection({
   return (
     <section
       className={`e100-section${kiosk ? " e100-section-kiosk" : ""}`}
+      data-group={group.price_group}
       aria-labelledby={`e100-group-${group.price_group}`}
     >
       <div className="e100-section-head">
