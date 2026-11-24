@@ -5614,4 +5614,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted files** | `app-slab-inventory/src/lib/{phoneLayout.ts, elite100Mobile.css}`. |
 | **Revisit trigger** | A real device shows a landscape size this misses (for example a tall foldable). |
 
+### 418. Elite 100 color view: phone layout also inside the kiosk's full-screen mode on short screens
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-24 |
+| **Decision** | The phone color view (decisions 416-417) now also opens when the page is in the kiosk's full-screen (dense) mode on a short landscape screen (500px tall or less). The browse page in that mode keeps the kiosk look; only the color view changes. The phone color-view rules got higher specificity so the kiosk's larger title and Close sizing cannot override them. |
+| **Why** | Opening `kiosk.eliteosfab.com/showroom/main/elite100` on an Android phone held sideways: the kiosk shell counts a landscape phone as a big screen (it is wider than 768px) and loads the page with `dense=1`, which my phone layout deliberately skipped, so the original oversized color view came back. |
+| **Kiosk is untouched** | Normal kiosk screens are far taller than 500px; checked 1280x800 kiosk + dense (original color view, 32px title, zoom buttons). |
+| **Impacted files** | `app-slab-inventory/src/PublicElite100Page.tsx`, `app-slab-inventory/src/lib/elite100Mobile.css`. |
+| **Revisit trigger** | The kiosk shell itself should treat short landscape phones as phones (it currently does not), or the browse page in this mode needs the phone grid too. |
+
 ---

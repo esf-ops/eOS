@@ -71,31 +71,31 @@
 
 /* ── Color view (full-screen on a phone) ───────────────────────────────────────────────────── */
 .e100-public-lightbox-overlay.e100-lb-mobile { padding: 0; align-items: stretch; background: #0f1419; }
-.e100-lb-mobile .e100-public-lightbox {
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox {
   width: 100%; max-height: none; height: 100vh; height: 100dvh; border-radius: 0; border: 0; box-shadow: none;
 }
-.e100-lb-mobile .e100-public-lightbox-head {
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-head {
   align-items: center; gap: 10px; flex: 0 0 auto;
   padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 10px 16px;
 }
-.e100-lb-mobile .e100-public-lightbox-copy { flex: 1; min-width: 0; }
-.e100-lb-mobile .e100-public-lightbox-title { font-size: 1.2rem; margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.e100-lb-mobile .e100-public-lightbox-meta { flex-wrap: nowrap; gap: 6px; font-size: .8rem; white-space: nowrap; overflow: hidden; }
-.e100-lb-mobile .e100-public-lightbox-meta .e100-group-badge { display: none; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-copy { flex: 1; min-width: 0; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-title { font-size: 1.2rem; margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta { flex-wrap: nowrap; gap: 6px; font-size: .8rem; white-space: nowrap; overflow: hidden; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta .e100-group-badge { display: none; }
 /* On the narrowest phones shorten the material name, never the "4 of 104" position */
-.e100-lb-mobile .e100-public-lightbox-meta > * { flex: 0 0 auto; }
-.e100-lb-mobile .e100-public-lightbox-meta > :nth-child(4) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.e100-lb-mobile .e100-public-lightbox-avail,
-.e100-lb-mobile .e100-public-lightbox-zoom,
-.e100-lb-mobile .e100-public-lightbox-zoom-label,
-.e100-lb-mobile .e100-public-lightbox-edges,
-.e100-lb-mobile .e100-public-lightbox-foot { display: none; }
-.e100-lb-mobile .e100-public-lightbox-actions { flex: 0 0 auto; }
-.e100-lb-mobile .e100-public-lightbox-close { min-height: 44px; min-width: 76px; padding: 0 16px; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta > * { flex: 0 0 auto; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta > :nth-child(4) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-avail,
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-zoom,
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-zoom-label,
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-edges,
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-foot { display: none; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-actions { flex: 0 0 auto; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-close { min-height: 44px; min-width: 76px; padding: 0 16px; }
 
-.e100-lb-mobile .e100-public-lightbox-viewport { flex: 1 1 auto; min-height: 0; max-height: none; }
-.e100-lb-mobile .e100-public-lightbox-stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-.e100-lb-mobile .e100-public-lightbox-img { max-width: 100%; max-height: 100%; width: 100%; height: auto; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-viewport { flex: 1 1 auto; min-height: 0; max-height: none; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-img { max-width: 100%; max-height: 100%; width: 100%; height: auto; }
 
 .e100-lb-m-bar {
   flex: 0 0 auto; display: flex; align-items: stretch; gap: 8px;
@@ -121,20 +121,20 @@
 /* ── A phone turned sideways (wide but short) ─────────────────────────────────────────────── */
 @media (orientation: landscape) and (max-height: 500px) {
   /* Color view: photo fills the left, title / actions sit in a column on the right (nothing stacks vertically and eats the height) */
-  .e100-lb-mobile .e100-public-lightbox {
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox {
     display: grid; grid-template-columns: minmax(0, 1fr) clamp(220px, 34vw, 300px); grid-template-rows: auto minmax(0, 1fr);
     padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); box-sizing: border-box;
   }
-  .e100-lb-mobile .e100-public-lightbox-viewport { grid-column: 1; grid-row: 1 / span 2; }
-  .e100-lb-mobile .e100-public-lightbox-head {
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-viewport { grid-column: 1; grid-row: 1 / span 2; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-head {
     grid-column: 2; grid-row: 1; align-items: flex-start; padding: 10px 12px 10px 14px;
     border-bottom: 1px solid rgba(255, 255, 255, .08); border-left: 1px solid rgba(255, 255, 255, .08);
   }
-  .e100-lb-mobile .e100-public-lightbox-title { font-size: 1.05rem; }
-  .e100-lb-mobile .e100-public-lightbox-meta { flex-wrap: wrap; white-space: normal; font-size: .74rem; row-gap: 0; }
-  .e100-lb-mobile .e100-public-lightbox-meta > :nth-child(5) { display: none; }
-  .e100-lb-mobile .e100-public-lightbox-meta > :nth-child(6) { flex-basis: 100%; }
-  .e100-lb-mobile .e100-public-lightbox-close { min-height: 40px; min-width: 64px; padding: 0 12px; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-title { font-size: 1.05rem; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta { flex-wrap: wrap; white-space: normal; font-size: .74rem; row-gap: 0; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta > :nth-child(5) { display: none; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-meta > :nth-child(6) { flex-basis: 100%; }
+  .e100-public-lightbox-overlay.e100-lb-mobile .e100-public-lightbox-close { min-height: 40px; min-width: 64px; padding: 0 12px; }
   .e100-lb-m-bar {
     grid-column: 2; grid-row: 2; flex-wrap: wrap; align-content: flex-end; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)) 14px;
     border-left: 1px solid rgba(255, 255, 255, .08);
