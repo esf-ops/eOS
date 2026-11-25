@@ -329,6 +329,7 @@ export default function LiveInventoryApp() {
     primaryReq
       .then((primary) => {
         if (cancelled) return;
+        if (!programsCacheRef.current.has(thicknessMm ?? 0)) programsCacheRef.current.set(thicknessMm ?? 0, primary);
         setPrograms(primary);
         setRefreshing(false);
         if (!thicknessMm) {
