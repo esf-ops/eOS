@@ -18,6 +18,7 @@ export type PieceGeometry = {
   usable_short_in: number | null;
   fit_frontier_in: [number, number][] | null;
   is_rectangular: boolean | null;
+  swatch_url?: string | null;
 };
 
 type Props = {

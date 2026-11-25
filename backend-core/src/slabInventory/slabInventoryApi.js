@@ -38,7 +38,7 @@ import {
   resolveSummarySyncCoverage,
 } from "./slabInventorySummaryQueries.js";
 import { pieceAreaSqft, pieceFitsJob } from "./slabPieceGeometry.js";
-import { GEOMETRY_SELECT_COLUMNS, TABLE_SLAB_PIECE_GEOMETRY } from "./slabPieceGeometryJob.js";
+import { GEOMETRY_CARD_COLUMNS, GEOMETRY_SELECT_COLUMNS, TABLE_SLAB_PIECE_GEOMETRY } from "./slabPieceGeometryJob.js";
 import {
   matchSourceColorWithAliases,
   normalizeColorName as _normColorName,
@@ -817,7 +817,27 @@ export function toPieceGeometryDto(g) {
     usable_short_in: g.max_rect_short_in != null ? Number(g.max_rect_short_in) : null,
     fit_frontier_in: g.fit_frontier_in ?? null,
     is_rectangular: g.is_rectangular ?? null,
+    swatch_url: g.swatch_url ?? null,
   };
+}
+
+/**
+ * Give each color card the texture swatch of its best piece: a full slab before a
+ * remnant, then the largest stone area. Cards without a derived swatch get null.
+ */
+export function attachColorSwatches(cards, rows, geometryMap = new Map()) {
+  const best = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const g = geometryFor(geometryMap, r);
+    if (g?.status !== "ok" || !g.swatch_url) continue;
+    const key = makeColorKey(r.color_name, r.material_name, r.price_group);
+    const score = [trimStr(r.source_inventory_type) === "Slab" ? 1 : 0, Number(g.area_sqft) || 0];
+    const cur = best.get(key);
+    if (!cur || score[0] > cur.score[0] || (score[0] === cur.score[0] && score[1] > cur.score[1])) {
+      best.set(key, { score, url: g.swatch_url });
+    }
+  }
+  return cards.map((c) => ({ ...c, swatch_url: best.get(c.color_key)?.url ?? null }));
 }
 
 /**
@@ -1000,9 +1020,9 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   }
 
   // Derived piece geometry for the given rows. Non-fatal when the table is not installed yet.
-  async function loadGeometryMap(supabase, scope, rows) {
+  async function loadGeometryMap(supabase, scope, rows, select = GEOMETRY_SELECT_COLUMNS) {
     try {
-      const geo = await fetchRowsForInventorySlabIds(supabase, TABLE_SLAB_PIECE_GEOMETRY, scope, rows, GEOMETRY_SELECT_COLUMNS);
+      const geo = await fetchRowsForInventorySlabIds(supabase, TABLE_SLAB_PIECE_GEOMETRY, scope, rows, select);
       return new Map(geo.map((g) => [`${trimStr(g.external_source)}|${trimStr(g.external_slab_id)}`, g]));
     } catch (e) {
       if (isMissingRelationError(e) || e?.code === "PGRST205") return new Map();
@@ -1313,11 +1333,21 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const fit = parseFitParams(req.query);
       const [imgRows, geometryMap] = await Promise.all([
         fetchSlabImagesForInventoryRows(supabase, scope, rowList, SLAB_IMAGE_SELECT_COLUMNS),
-        fit ? loadGeometryMap(supabase, scope, rowList) : Promise.resolve(new Map()),
+        fit
+          ? loadGeometryMap(supabase, scope, rowList)
+          : // Swatches are cosmetic: a geometry read failure must not blank the grid.
+            loadGeometryMap(supabase, scope, rowList, GEOMETRY_CARD_COLUMNS).catch((e) => {
+              console.warn(JSON.stringify({ event: "slab_inventory.color_programs.swatch_read_failed", error: String(e?.message || e) }));
+              return new Map();
+            }),
       ]);
       const imageMap = buildImageMap(imgRows, sourceFilter);
 
-      const cards = summarizeColorDimensions(groupColorPrograms(rowList, imageMap, sourceFilter), rowList, geometryMap, fit);
+      const cards = attachColorSwatches(
+        summarizeColorDimensions(groupColorPrograms(rowList, imageMap, sourceFilter), rowList, geometryMap, fit),
+        rowList,
+        geometryMap
+      );
 
       res.json({
         ok: true,

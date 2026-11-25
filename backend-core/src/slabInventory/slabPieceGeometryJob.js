@@ -2,14 +2,18 @@
  * slabPieceGeometryJob — keep slab_piece_geometry current for active Slabsmith pieces.
  *
  * Idempotent and replay-safe: a piece is (re)derived only when it has no geometry row,
- * or its photo URL / photo updated_at / source dimensions / derivation method changed.
- * Errors are retried after GEOMETRY_ERROR_RETRY_MS. Writes only slab_piece_geometry.
+ * or its photo URL / photo updated_at / source dimensions / derivation method changed,
+ * or it has no swatch yet. Errors are retried after GEOMETRY_ERROR_RETRY_MS.
+ * Writes slab_piece_geometry and derived swatch JPEGs under the org's `slabsmith-derived/` prefix.
  */
+
+import { createHash } from "node:crypto";
 
 import jpeg from "jpeg-js";
 
-import { deriveGeometryFromImage, GEOMETRY_METHOD } from "./slabPieceGeometry.js";
+import { cropResizeRgba, deriveGeometryFromImage, GEOMETRY_METHOD, swatchOutputSize } from "./slabPieceGeometry.js";
 import { fetchAllRowsPaginated, SLAB_IMAGE_ID_CHUNK_SIZE } from "./slabInventorySummaryQueries.js";
+import { sanitizeStorageSegment, SLABSMITH_IMAGE_BUCKET } from "../slabsmith/slabsmithImageStorage.mjs";
 
 export const TABLE_SLAB_PIECE_GEOMETRY = "slab_piece_geometry";
 export const GEOMETRY_SOURCE = "slabsmith";
@@ -17,9 +21,13 @@ const GEOMETRY_IMAGE_PATTERN = "slabsmith_local_upload";
 const GEOMETRY_ERROR_RETRY_MS = 24 * 60 * 60 * 1000;
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
+const SWATCH_JPEG_QUALITY = 84;
 
 export const GEOMETRY_SELECT_COLUMNS =
-  "external_source,external_slab_id,status,px_per_in,outline_px,image_width_px,image_height_px,area_sqft,bbox_long_in,bbox_short_in,max_rect_long_in,max_rect_short_in,fit_frontier_in,fill_ratio,is_rectangular";
+  "external_source,external_slab_id,status,px_per_in,outline_px,image_width_px,image_height_px,area_sqft,bbox_long_in,bbox_short_in,max_rect_long_in,max_rect_short_in,fit_frontier_in,fill_ratio,is_rectangular,swatch_url";
+
+/** Light projection for color cards (no outline / frontier). */
+export const GEOMETRY_CARD_COLUMNS = "external_source,external_slab_id,status,area_sqft,swatch_url";
 
 const sameNum = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.01);
 
@@ -34,8 +42,20 @@ export function geometryNeedsWork(inv, image, existing, now = Date.now()) {
   if (existing.source_image_url !== image.image_url) return true;
   if (image.updated_at && existing.source_image_updated_at && Date.parse(image.updated_at) > Date.parse(existing.source_image_updated_at)) return true;
   if (!sameNum(existing.source_length_in, inv.length_actual_in) || !sameNum(existing.source_width_in, inv.width_actual_in)) return true;
-  if (existing.status === "error" && now - Date.parse(existing.computed_at) > GEOMETRY_ERROR_RETRY_MS) return true;
+  const stale = now - Date.parse(existing.computed_at) > GEOMETRY_ERROR_RETRY_MS;
+  if (existing.status === "error" && stale) return true;
+  // Swatch missing: build it now, but back off a day after a swatch failure.
+  if (existing.status === "ok" && !existing.swatch_url && (!existing.error || stale)) return true;
   return false;
+}
+
+/** Content-addressed swatch path: a new photo gets a new object, so URLs can cache forever. */
+export function swatchStoragePath(inv, image) {
+  const hash = createHash("sha1")
+    .update(`${GEOMETRY_METHOD}|${image.image_url}|${image.updated_at ?? ""}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `org/${inv.organization_id}/slabsmith-derived/${sanitizeStorageSegment(inv.external_slab_id)}/swatch-${hash}.jpg`;
 }
 
 async function loadByIds(db, table, select, ids, extra) {
@@ -72,7 +92,7 @@ export async function selectPendingGeometryWork(db, { organizationId = null } = 
     loadByIds(
       db,
       TABLE_SLAB_PIECE_GEOMETRY,
-      "id,organization_id,external_slab_id,method,status,source_image_url,source_image_updated_at,source_length_in,source_width_in,computed_at",
+      "id,organization_id,external_slab_id,method,status,error,source_image_url,source_image_updated_at,source_length_in,source_width_in,swatch_url,computed_at",
       ids,
       scopeSrc
     ),
@@ -108,9 +128,27 @@ async function fetchJpeg(url, fetchImpl) {
   }
 }
 
+/** Crop the swatch from the decoded photo, encode, upload. Returns the public URL + size. */
+async function uploadSwatch(db, img, rect, path) {
+  const [w, h] = swatchOutputSize(rect);
+  const crop = cropResizeRgba(img, rect, w, h);
+  const { data } = jpeg.encode(crop, SWATCH_JPEG_QUALITY);
+  const buf = Buffer.from(data);
+  const { error } = await db.storage.from(SLABSMITH_IMAGE_BUCKET).upload(path, buf, {
+    contentType: "image/jpeg",
+    upsert: true,
+    cacheControl: "31536000",
+  });
+  if (error) throw new Error(`swatch upload failed: ${error.message}`);
+  const { data: pub } = db.storage.from(SLABSMITH_IMAGE_BUCKET).getPublicUrl(path);
+  const url = String(pub?.publicUrl ?? "").trim();
+  if (!url) throw new Error("swatch upload returned no public URL");
+  return { swatch_url: url, swatch_width_px: w, swatch_height_px: h };
+}
+
 /**
  * Derive + upsert geometry for up to `limit` pending pieces.
- * @param {{ db: import("@supabase/supabase-js").SupabaseClient, limit?: number, concurrency?: number, organizationId?: string|null, fetchImpl?: typeof fetch, decodeImage?: (url: string) => Promise<any> }} opts
+ * @param {{ db: import("@supabase/supabase-js").SupabaseClient, limit?: number, concurrency?: number, organizationId?: string|null, fetchImpl?: typeof fetch, decodeImage?: (url: string) => Promise<any>, writeSwatch?: (img: any, rect: number[], path: string) => Promise<{ swatch_url: string, swatch_width_px: number, swatch_height_px: number }> }} opts
  */
 export async function runSlabGeometryDerivation({
   db,
@@ -119,19 +157,32 @@ export async function runSlabGeometryDerivation({
   organizationId = null,
   fetchImpl = fetch,
   decodeImage,
+  writeSwatch,
 }) {
   const startedAt = Date.now();
   const work = await selectPendingGeometryWork(db, { organizationId });
   const batch = work.pending.slice(0, Math.max(0, limit));
   const decode = decodeImage ?? ((url) => fetchJpeg(url, fetchImpl));
-  const counts = { ok: 0, no_stone: 0, no_dims: 0, error: 0 };
+  const putSwatch = writeSwatch ?? ((img, rect, path) => uploadSwatch(db, img, rect, path));
+  const counts = { ok: 0, no_stone: 0, no_dims: 0, error: 0, swatches: 0, swatch_errors: 0 };
   const errors = [];
 
   async function processOne({ inv, image }) {
     let result;
+    let swatch = { swatch_url: null, swatch_width_px: null, swatch_height_px: null };
     try {
       const img = await decode(image.image_url);
       result = deriveGeometryFromImage(img, { lengthIn: inv.length_actual_in, widthIn: inv.width_actual_in });
+      if (result.status === "ok" && result.swatch_rect_px) {
+        try {
+          swatch = await putSwatch(img, result.swatch_rect_px, swatchStoragePath(inv, image));
+          counts.swatches += 1;
+        } catch (e) {
+          counts.swatch_errors += 1;
+          result.error = `swatch: ${String(e?.message || e)}`.slice(0, 300);
+          if (errors.length < 5) errors.push({ external_slab_id: inv.external_slab_id, error: result.error });
+        }
+      }
     } catch (e) {
       result = { method: GEOMETRY_METHOD, status: "error", error: String(e?.message || e).slice(0, 300) };
       if (errors.length < 5) errors.push({ external_slab_id: inv.external_slab_id, error: result.error });
@@ -160,7 +211,9 @@ export async function runSlabGeometryDerivation({
       fit_frontier_in: null,
       fill_ratio: null,
       is_rectangular: null,
+      swatch_rect_px: null,
       ...result,
+      ...swatch,
       computed_at: nowIso,
       updated_at: nowIso,
     };

@@ -6,14 +6,17 @@
 import assert from "node:assert/strict";
 
 import {
+  cropResizeRgba,
   deriveGeometryFromImage,
   frontierFits,
   GEOMETRY_METHOD,
   pieceAreaSqft,
   pieceFitsJob,
+  swatchOutputSize,
 } from "./slabPieceGeometry.js";
-import { geometryNeedsWork } from "./slabPieceGeometryJob.js";
+import { geometryNeedsWork, runSlabGeometryDerivation, swatchStoragePath } from "./slabPieceGeometryJob.js";
 import {
+  attachColorSwatches,
   parseFitParams,
   rankFitPieces,
   summarizeColorDimensions,
@@ -94,6 +97,7 @@ function synthImage(width, height, isStone) {
     source_image_updated_at: image.updated_at,
     source_length_in: 80,
     source_width_in: 40,
+    swatch_url: "https://x/swatch.jpg",
     computed_at: "2026-11-02T00:00:00Z",
   };
   assert.equal(geometryNeedsWork(inv, image, undefined), true, "missing → derive");
@@ -151,6 +155,125 @@ function synthImage(width, height, isStone) {
   assert.equal(dto.usable_long_in, 80);
   assert.ok(!("source_image_url" in dto) && !("error" in dto), "DTO is explicit, no internals");
   console.log("ok: fit params, color dimensions, waste ranking, geometry DTO");
+}
+
+/* ── Swatch crop: inside usable stone, near-square, never across the L-shape notch ── */
+{
+  const isStone = (x, y) => !(x >= 400 && y < 200);
+  const img = synthImage(800, 400, isStone);
+  const g = deriveGeometryFromImage(img, { lengthIn: 80, widthIn: 40 });
+  const [x, y, w, h] = g.swatch_rect_px;
+  assert.ok(w >= 48 && h >= 48);
+  const aspect = Math.max(w, h) / Math.min(w, h);
+  assert.ok(aspect <= 4 / 3 + 0.02, `swatch aspect within [1, 4:3] (got ${aspect.toFixed(2)})`);
+  for (const [px, py] of [[x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1]]) {
+    assert.ok(isStone(px, py), `swatch corner (${px},${py}) is stone`);
+  }
+  assert.ok(w * h > 300 * 300, "swatch uses the big 40×40 block, not a sliver");
+
+  const rect = deriveGeometryFromImage(synthImage(600, 300, () => true), { lengthIn: 112, widthIn: 56 });
+  assert.ok(rect.swatch_rect_px[2] <= rect.swatch_rect_px[3] * (4 / 3) + 1, "wide slab cropped to ≤ 4:3");
+
+  // Area-average resize: a half-black / half-white source averages to mid-grey.
+  const src = synthImage(4, 2, (px) => px < 2);
+  const out = cropResizeRgba(src, [0, 0, 4, 2], 1, 1);
+  assert.ok(Math.abs(out.data[0] - (120 + 255) / 2) < 1);
+  assert.deepEqual(swatchOutputSize([0, 0, 1280, 960]), [853, 640]);
+  assert.deepEqual(swatchOutputSize([0, 0, 300, 200]), [300, 200], "never upscales");
+  console.log("ok: swatch crop + resize");
+}
+
+/* ── Swatch backfill rules + content-addressed path ── */
+{
+  const inv = { organization_id: "org-1", external_slab_id: "AB/CD", length_actual_in: 80, width_actual_in: 40 };
+  const image = { image_url: "https://x/full.jpg", updated_at: "2026-11-01T00:00:00Z" };
+  const done = {
+    method: GEOMETRY_METHOD,
+    status: "ok",
+    source_image_url: image.image_url,
+    source_image_updated_at: image.updated_at,
+    source_length_in: 80,
+    source_width_in: 40,
+    swatch_url: "https://x/swatch.jpg",
+    computed_at: "2026-11-02T00:00:00Z",
+  };
+  const now = Date.parse("2026-11-02T12:00:00Z");
+  assert.equal(geometryNeedsWork(inv, image, done, now), false);
+  assert.equal(geometryNeedsWork(inv, image, { ...done, swatch_url: null }, now), true, "ok without swatch → build swatch");
+  assert.equal(geometryNeedsWork(inv, image, { ...done, swatch_url: null, error: "swatch: x" }, now), false, "recent swatch failure → back off");
+  assert.equal(geometryNeedsWork(inv, image, { ...done, swatch_url: null, error: "swatch: x" }, now + 2 * 86400000), true);
+  assert.equal(geometryNeedsWork(inv, image, { ...done, status: "no_stone", swatch_url: null }, now), false, "no swatch for non-ok pieces");
+
+  const p1 = swatchStoragePath(inv, image);
+  assert.match(p1, /^org\/org-1\/slabsmith-derived\/AB_CD\/swatch-[0-9a-f]{12}\.jpg$/);
+  assert.equal(swatchStoragePath(inv, image), p1, "stable for the same photo");
+  assert.notEqual(swatchStoragePath(inv, { ...image, updated_at: "2026-11-09T00:00:00Z" }), p1, "new photo → new object");
+  console.log("ok: swatch backfill rules + storage path");
+}
+
+/* ── Job: swatch written for ok pieces; upload failure keeps geometry ── */
+{
+  const upserts = [];
+  const inv = [
+    { id: "1", organization_id: "o", external_slab_id: "A", length_actual_in: 80, width_actual_in: 40 },
+    { id: "2", organization_id: "o", external_slab_id: "B", length_actual_in: 80, width_actual_in: 40 },
+  ];
+  const images = inv.map((r) => ({ organization_id: "o", external_slab_id: r.external_slab_id, image_url: `https://x/${r.external_slab_id}.jpg`, updated_at: null, image_status: "ok" }));
+  const fakeDb = {
+    from(table) {
+      const q = {
+        select: () => q,
+        eq: () => q,
+        in: () => q,
+        order: () => q,
+        range: async () => ({ data: table === "slab_inventory" ? inv : table === "slab_images" ? images : [], error: null }),
+        upsert: async (row) => {
+          upserts.push(row);
+          return { error: null };
+        },
+      };
+      return q;
+    },
+  };
+  const result = await runSlabGeometryDerivation({
+    db: fakeDb,
+    decodeImage: async () => synthImage(800, 400, () => true),
+    writeSwatch: async (_img, rect, path) => {
+      if (path.includes("/B/")) throw new Error("storage down");
+      return { swatch_url: `https://cdn/${path}`, swatch_width_px: rect[2], swatch_height_px: rect[3] };
+    },
+  });
+  assert.equal(result.counts.ok, 2);
+  assert.equal(result.counts.swatches, 1);
+  assert.equal(result.counts.swatch_errors, 1);
+  const a = upserts.find((r) => r.external_slab_id === "A");
+  const b = upserts.find((r) => r.external_slab_id === "B");
+  assert.match(a.swatch_url, /slabsmith-derived\/A\/swatch-/);
+  assert.equal(a.error, null);
+  assert.equal(b.status, "ok", "geometry kept when the swatch upload fails");
+  assert.equal(b.swatch_url, null);
+  assert.match(b.error, /^swatch: storage down/);
+  console.log("ok: derivation job writes swatches, tolerates upload failure");
+}
+
+/* ── Color cards pick a slab swatch before a remnant, then the largest ── */
+{
+  const rows = [
+    { external_source: "slabsmith", external_slab_id: "r1", color_name: "Aria", material_name: "Q", price_group: "B", source_inventory_type: "Remnant" },
+    { external_source: "slabsmith", external_slab_id: "s1", color_name: "Aria", material_name: "Q", price_group: "B", source_inventory_type: "Slab" },
+    { external_source: "slabsmith", external_slab_id: "s2", color_name: "Aria", material_name: "Q", price_group: "B", source_inventory_type: "Slab" },
+    { external_source: "slabsmith", external_slab_id: "n1", color_name: "Bria", material_name: "Q", price_group: "B", source_inventory_type: "Slab" },
+  ];
+  const geo = new Map([
+    ["slabsmith|r1", { status: "ok", area_sqft: 90, swatch_url: "r1.jpg" }],
+    ["slabsmith|s1", { status: "ok", area_sqft: 40, swatch_url: "s1.jpg" }],
+    ["slabsmith|s2", { status: "ok", area_sqft: 55, swatch_url: "s2.jpg" }],
+    ["slabsmith|n1", { status: "error", swatch_url: null }],
+  ]);
+  const cards = attachColorSwatches([{ color_key: "aria--q--b" }, { color_key: "bria--q--b" }], rows, geo);
+  assert.equal(cards[0].swatch_url, "s2.jpg");
+  assert.equal(cards[1].swatch_url, null);
+  console.log("ok: color card swatch selection");
 }
 
 console.log("\nslabPieceGeometry: all tests passed");

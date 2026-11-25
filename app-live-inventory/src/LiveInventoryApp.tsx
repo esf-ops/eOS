@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import MeasureView, { type PieceGeometry } from "./components/MeasureView";
+import { IconArrow, IconDownload, IconRuler, IconSearch, TileMedia, TileSkeleton } from "./components/Tiles";
 import { apiGet, ApiError } from "./lib/api";
 import { browseImageUrl, enrichColorProgramImages } from "./lib/enrichColorImages";
 import { parseJobSize, pieceFitsJob, type JobSize } from "./lib/fit";
@@ -27,6 +28,7 @@ type ColorProgram = {
   representative_thumbnail_url: string | null;
   largest_piece_long_in?: number | null;
   largest_piece_short_in?: number | null;
+  swatch_url?: string | null;
 };
 
 type FitPiece = Piece & {
@@ -73,18 +75,20 @@ type Summary = {
   last_sync?: { finished_at?: string | null; triggered_by?: string | null } | null;
 };
 
-type ToolId = "measure" | "paint" | "inquire" | "wishlist" | "email" | "download" | "quote" | "visualizer";
+type ToolId = "measure" | "download";
 
-const TOOLS: { id: ToolId; label: string; ready: boolean }[] = [
-  { id: "measure", label: "Measure", ready: true },
-  { id: "paint", label: "Paint match", ready: false },
-  { id: "inquire", label: "Inquire", ready: false },
-  { id: "wishlist", label: "Wishlist", ready: false },
-  { id: "email", label: "Email", ready: false },
-  { id: "download", label: "Download", ready: true },
-  { id: "quote", label: "Get a quote", ready: false },
-  { id: "visualizer", label: "3D / AR", ready: false },
-];
+const COMING_TOOLS = ["Paint match", "Inquire", "Wishlist", "Email", "Get a quote", "3D / AR"];
+
+const LETTERS = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
+
+function letterOf(name: string | null | undefined) {
+  const ch = String(name || "").trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(ch) ? ch : "#";
+}
+
+function plural(n: number, one: string, many = `${one}s`) {
+  return `${n} ${n === 1 ? one : many}`;
+}
 
 function fmtIn(n: number | null | undefined) {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -125,6 +129,49 @@ function syncAgeLabel(iso: string | null | undefined) {
   const hrs = Math.round(mins / 60);
   if (hrs < 36) return `Synced ${hrs}h ago`;
   return `Synced ${Math.round(hrs / 24)}d ago`;
+}
+
+function ColorTile({
+  program: p,
+  typeFilter,
+  fitCount,
+  onOpen,
+}: {
+  program: ColorProgram;
+  typeFilter: "all" | "Slab" | "Remnant";
+  fitCount: number | null;
+  onOpen: () => void;
+}) {
+  const size = fmtSize(p.largest_piece_long_in, p.largest_piece_short_in);
+  const showSlabs = typeFilter !== "Remnant" && p.slab_count > 0;
+  const showRemnants = typeFilter !== "Slab" && p.remnant_count > 0;
+  return (
+    <button type="button" className="li-tile" role="listitem" onClick={onOpen}>
+      <TileMedia
+        sources={[
+          { url: p.swatch_url, kind: "swatch" },
+          { url: browseImageUrl(p), kind: "cutout" },
+          { url: p.representative_image_url, kind: "cutout" },
+        ]}
+      >
+        <div className="li-chips">
+          {fitCount != null ? <span className="li-chip accent">{plural(fitCount, "piece")} fit</span> : null}
+          {fitCount == null && showSlabs ? <span className="li-chip">{plural(p.slab_count, "slab")}</span> : null}
+          {fitCount == null && showRemnants ? <span className="li-chip">{plural(p.remnant_count, "remnant")}</span> : null}
+        </div>
+        <span className="li-tile-cta">
+          View pieces <IconArrow />
+        </span>
+      </TileMedia>
+      <div className="li-tile-body">
+        <div className="li-tile-title">
+          <h3>{p.color_name || "Unnamed"}</h3>
+          {size ? <span className="li-tile-size">up to {size}</span> : null}
+        </div>
+        <p>{p.material_name || "—"}</p>
+      </div>
+    </button>
+  );
 }
 
 export default function LiveInventoryApp() {
@@ -322,6 +369,17 @@ export default function LiveInventoryApp() {
     });
   }, [programs, debouncedSearch, typeFilter, material, priceGroup, fitCounts]);
 
+  const letterGroups = useMemo(() => {
+    const groups = new Map<string, ColorProgram[]>();
+    for (const p of visiblePrograms) {
+      const l = letterOf(p.color_name);
+      const list = groups.get(l);
+      if (list) list.push(p);
+      else groups.set(l, [p]);
+    }
+    return LETTERS.filter((l) => groups.has(l)).map((letter) => ({ letter, items: groups.get(letter)! }));
+  }, [visiblePrograms]);
+
   const visibleFitPieces = useMemo(() => {
     const q = debouncedSearch.toLowerCase();
     return (fitResult?.pieces || []).filter((p) => {
@@ -456,9 +514,7 @@ export default function LiveInventoryApp() {
         return;
       }
       setToolNote("No verified image for this piece yet.");
-      return;
     }
-    setToolNote(`${TOOLS.find((t) => t.id === tool)?.label ?? tool} is next — scaffold only.`);
   }
 
   if (!authReady) {
@@ -482,6 +538,9 @@ export default function LiveInventoryApp() {
 
   const syncLabel = syncAgeLabel(summary?.last_sync?.finished_at);
   const activePiece = selectedPiece;
+  const totalPieces = programs.reduce((n, p) => n + (p.total_inventory_count || 0), 0);
+  const filtersActive = Boolean(search || typeFilter !== "all" || material || priceGroup || jobLength || jobWidth);
+  const showFit = Boolean(job && view === "fit");
 
   return (
     <div className="shell">
@@ -497,23 +556,57 @@ export default function LiveInventoryApp() {
         onSignOut={() => void signOut()}
       />
 
+      <header className="li-hero">
+        <div className="li-hero-copy">
+          <h1>Stone in stock</h1>
+          <p>
+            {programs.length ? (
+              <>
+                <strong>{programs.length.toLocaleString()}</strong> colors ·{" "}
+                <strong>{totalPieces.toLocaleString()}</strong> pieces on the rack, measured from every photo
+              </>
+            ) : (
+              "Loading what's on the rack…"
+            )}
+          </p>
+        </div>
+        <div className="li-live" title={summary?.last_sync?.finished_at || undefined}>
+          <span className="li-live-dot" aria-hidden />
+          Live{syncLabel ? ` · ${syncLabel.replace(/^Synced /, "synced ")}` : ""}
+        </div>
+      </header>
+
       <div className="li-filterbar" role="search">
-        <input
-          type="search"
-          placeholder="Search by name or ID"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search by name or ID"
-        />
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value as "all" | "Slab" | "Remnant")}
-          aria-label="Type"
-        >
-          <option value="all">Any type</option>
-          <option value="Slab">Slabs</option>
-          <option value="Remnant">Remnants</option>
-        </select>
+        <label className="li-search">
+          <IconSearch />
+          <input
+            type="search"
+            placeholder="Search colors, brands, item #"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search colors, brands, or item number"
+          />
+        </label>
+        <div className="li-seg" role="radiogroup" aria-label="Piece type">
+          {(
+            [
+              ["all", "All"],
+              ["Slab", "Slabs"],
+              ["Remnant", "Remnants"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={typeFilter === value}
+              className={typeFilter === value ? "active" : ""}
+              onClick={() => setTypeFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <select value={material} onChange={(e) => setMaterial(e.target.value)} aria-label="Material">
           <option value="">Any material</option>
           {(filters?.materials || []).map((m) => (
@@ -530,14 +623,15 @@ export default function LiveInventoryApp() {
             </option>
           ))}
         </select>
-        <div className="li-jobsize" role="group" aria-label="Fits a job piece">
+        <div className={`li-jobsize${job ? " active" : ""}`} role="group" aria-label="Fits a job piece">
+          <IconRuler />
           <span className="li-jobsize-label">Fits</span>
           <input
             type="number"
             inputMode="decimal"
             min={0}
             step={1}
-            placeholder="Length″"
+            placeholder="L″"
             value={jobLength}
             onChange={(e) => setJobLength(e.target.value)}
             aria-label="Job piece length in inches"
@@ -548,15 +642,17 @@ export default function LiveInventoryApp() {
             inputMode="decimal"
             min={0}
             step={1}
-            placeholder="Width″"
+            placeholder="W″"
             value={jobWidth}
             onChange={(e) => setJobWidth(e.target.value)}
             aria-label="Job piece width in inches"
           />
         </div>
-        <button type="button" className="li-reset" onClick={resetFilters}>
-          Reset
-        </button>
+        {filtersActive ? (
+          <button type="button" className="li-reset" onClick={resetFilters}>
+            Clear
+          </button>
+        ) : null}
       </div>
 
       <main className="main">
@@ -584,55 +680,69 @@ export default function LiveInventoryApp() {
             </div>
           ) : (
             <span>
-              <strong>{visiblePrograms.length}</strong> colors
-              {summary?.total_active_slabs != null ? ` · ${summary.total_active_slabs} pieces` : ""}
+              {filtersActive ? (
+                <>
+                  <strong>{visiblePrograms.length}</strong> of {programs.length} colors
+                </>
+              ) : (
+                <>
+                  <strong>{visiblePrograms.length}</strong> colors, A–Z
+                </>
+              )}
             </span>
           )}
           {job ? (
             <span className="li-sync">
               {fitLoading
-                ? "Matching…"
-                : `Pieces that fit ${Math.round(job.lengthIn)}″ × ${Math.round(job.widthIn)}″ — measured from each piece's real shape`}
+                ? "Matching every piece's real shape…"
+                : `Fits ${Math.round(job.lengthIn)}″ × ${Math.round(job.widthIn)}″ — checked against each piece's measured shape`}
             </span>
-          ) : syncLabel ? (
-            <span className="li-sync">{syncLabel}</span>
           ) : null}
         </div>
 
         {error ? <div className="li-error">{error}</div> : null}
-        {loading && !programs.length ? <div className="li-muted">Loading inventory…</div> : null}
+        {loading && !programs.length ? <TileSkeleton count={18} /> : null}
 
-        {job && view === "fit" ? (
+        {showFit ? (
           <>
             <div className="li-grid" role="list">
               {visibleFitPieces.map((p, idx) => {
-                const img = p.thumbnail_url || p.image_url;
                 const usable = usableLabel(p);
+                const remnant = p.source_inventory_type === "Remnant";
                 return (
                   <button
                     key={p.id || p.external_slab_id || `fit-${idx}`}
                     type="button"
-                    className="li-card"
+                    className="li-tile"
                     role="listitem"
                     onClick={() => openFitPiece(p)}
                   >
-                    <div className="li-card-media">
-                      {img ? <img src={img} alt="" loading="lazy" /> : <div className="li-card-placeholder" aria-hidden />}
-                      {idx === 0 ? <span className="li-fit-rank">Best fit</span> : null}
-                    </div>
-                    <div className="li-card-head">
-                      <h2>{p.color_name || "Unnamed"}</h2>
-                      <p>
-                        {p.material_name || "—"} · {p.source_inventory_type === "Remnant" ? "Remnant" : "Slab"}
-                      </p>
-                      <p className="li-card-dims">
-                        {fmtIn(p.length_actual_in)} × {fmtIn(p.width_actual_in)}
-                        {usable ? ` · usable ${usable}` : ""}
-                      </p>
-                      <span className={`li-stock${p.waste_pct != null && p.waste_pct > 50 ? " warn" : ""}`}>
+                    <TileMedia
+                      sources={[
+                        { url: p.thumbnail_url, kind: "cutout" },
+                        { url: p.image_url, kind: "cutout" },
+                      ]}
+                    >
+                      <div className="li-chips">
+                        {idx === 0 ? <span className="li-chip accent">Best fit</span> : null}
+                        <span className="li-chip">{remnant ? "Remnant" : "Slab"}</span>
+                      </div>
+                      <span className={`li-waste${p.waste_pct != null && p.waste_pct > 50 ? " high" : ""}`}>
                         {p.waste_pct != null ? `${Math.round(p.waste_pct)}% leftover` : "Fits"}
-                        {p.waste_sqft != null ? ` · ${p.waste_sqft} ft²` : ""}
                       </span>
+                    </TileMedia>
+                    <div className="li-tile-body">
+                      <div className="li-tile-title">
+                        <h3>{p.color_name || "Unnamed"}</h3>
+                        <span className="li-tile-size">
+                          {fmtIn(p.length_actual_in)} × {fmtIn(p.width_actual_in)}
+                        </span>
+                      </div>
+                      <p>
+                        {p.material_name || "—"}
+                        {usable ? ` · usable ${usable}` : ""}
+                        {p.rack ? ` · ${p.rack}` : ""}
+                      </p>
                     </div>
                   </button>
                 );
@@ -641,69 +751,65 @@ export default function LiveInventoryApp() {
             {!fitLoading && visibleFitPieces.length === 0 ? (
               <p className="li-empty">No pieces in stock fit this size. Try a smaller piece or include slabs.</p>
             ) : null}
+            {fitResult?.total_matches != null && fitResult.total_matches > (fitResult.pieces?.length ?? 0) ? (
+              <p className="li-muted li-more">
+                Showing the {fitResult.pieces?.length} closest fits of {fitResult.total_matches}.
+              </p>
+            ) : null}
           </>
         ) : null}
 
-        <div className="li-grid" role="list" hidden={Boolean(job && view === "fit")}>
-          {visiblePrograms.map((p) => {
-            const img = browseImageUrl(p);
-            const stock =
-              typeFilter === "Remnant"
-                ? p.remnant_count
-                : typeFilter === "Slab"
-                  ? p.slab_count
-                  : p.total_inventory_count;
-            return (
-              <button
-                key={p.color_key}
-                type="button"
-                className="li-card"
-                role="listitem"
-                onClick={() => openColor(p)}
-              >
-                <div className="li-card-media">
-                  {img ? (
-                    <img
-                      src={img}
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => {
-                        const el = e.currentTarget;
-                        const full = p.representative_image_url;
-                        const thumb = p.representative_thumbnail_url;
-                        if (thumb && !el.src.includes(thumb) && el.src !== thumb) {
-                          el.src = thumb;
-                          return;
-                        }
-                        if (full && el.src !== full) {
-                          el.src = full;
-                          return;
-                        }
-                        el.style.display = "none";
-                        el.parentElement?.classList.add("li-card-media--empty");
-                      }}
+        <div className="li-catalog" hidden={showFit}>
+          <div className="li-sections">
+            {letterGroups.map((group) => (
+              <section key={group.letter} id={`li-letter-${group.letter}`} className="li-section" aria-label={group.letter}>
+                <h2 className="li-letter">
+                  {group.letter}
+                  <span>{group.items.length}</span>
+                </h2>
+                <div className="li-grid" role="list">
+                  {group.items.map((p) => (
+                    <ColorTile
+                      key={p.color_key}
+                      program={p}
+                      typeFilter={typeFilter}
+                      fitCount={fitCounts ? fitCounts.get(p.color_key) ?? 0 : null}
+                      onOpen={() => openColor(p)}
                     />
-                  ) : (
-                    <div className="li-card-placeholder" aria-hidden />
-                  )}
+                  ))}
                 </div>
-                <div className="li-card-head">
-                  <h2>{p.color_name || "Unnamed"}</h2>
-                  <p>{p.material_name || "—"}</p>
-                  {fmtSize(p.largest_piece_long_in, p.largest_piece_short_in) ? (
-                    <p className="li-card-dims">Up to {fmtSize(p.largest_piece_long_in, p.largest_piece_short_in)}</p>
-                  ) : null}
-                  <span className="li-stock">
-                    {fitCounts ? `${fitCounts.get(p.color_key) ?? 0} fit` : `In Stock — ${stock}`}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+              </section>
+            ))}
+          </div>
+          {letterGroups.length > 1 ? (
+            <nav className="li-az" aria-label="Jump to letter">
+              {LETTERS.map((l) => {
+                const has = letterGroups.some((g) => g.letter === l);
+                return (
+                  <button
+                    key={l}
+                    type="button"
+                    disabled={!has}
+                    onClick={() =>
+                      document.getElementById(`li-letter-${l}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }
+                  >
+                    {l}
+                  </button>
+                );
+              })}
+            </nav>
+          ) : null}
         </div>
 
         {!loading && view === "colors" && visiblePrograms.length === 0 ? (
-          <p className="li-empty">No colors match these filters.</p>
+          <div className="li-empty-state">
+            <h3>No colors match</h3>
+            <p>{job ? "Nothing in stock fits that size with these filters." : "Try a different search or clear the filters."}</p>
+            <button type="button" className="li-btn" onClick={resetFilters}>
+              Clear filters
+            </button>
+          </div>
         ) : null}
       </main>
 
@@ -721,82 +827,89 @@ export default function LiveInventoryApp() {
             </button>
 
             <div className="li-lightbox-hero">
-              {activePiece?.image_url || activePiece?.thumbnail_url || selectedColor.representative_image_url ? (
-                <img
-                  src={
-                    activePiece?.image_url ||
-                    activePiece?.thumbnail_url ||
-                    selectedColor.representative_image_url ||
-                    ""
-                  }
-                  alt=""
-                />
-              ) : (
-                <div className="li-card-placeholder tall" />
-              )}
+              <TileMedia
+                key={activePiece?.id || selectedColor.color_key}
+                className="li-media--hero"
+                sources={
+                  activePiece
+                    ? [
+                        { url: activePiece.image_url, kind: "cutout" },
+                        { url: activePiece.thumbnail_url, kind: "cutout" },
+                      ]
+                    : [
+                        { url: selectedColor.swatch_url, kind: "swatch" },
+                        { url: selectedColor.representative_image_url, kind: "cutout" },
+                      ]
+                }
+              />
+              {activePiece ? (
+                <p className="li-hero-caption">
+                  {activePiece.source_inventory_type === "Remnant" ? "Remnant" : "Slab"}
+                  {activePiece.inventory_id ? ` · #${activePiece.inventory_id}` : ""}
+                  {activePiece.rack ? ` · ${activePiece.rack}` : ""}
+                </p>
+              ) : null}
             </div>
 
             <div className="li-lightbox-body">
-              <p className="li-kicker">{selectedColor.material_name || "Material"}</p>
+              <p className="li-kicker">
+                {selectedColor.material_name || "Material"}
+                {selectedColor.source_price_group ? ` · Group ${selectedColor.source_price_group}` : ""}
+              </p>
               <h2>{selectedColor.color_name || "Unnamed"}</h2>
 
               {activePiece ? (
-                <dl className="li-specs">
-                  <div>
-                    <dt>Finish</dt>
-                    <dd>—</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd>
+                <>
+                  <div className="li-headline">
+                    <span className="li-headline-size">
                       {fmtIn(activePiece.length_actual_in)} × {fmtIn(activePiece.width_actual_in)}
-                      {pieceAreaLabel(activePiece) ? ` · ${pieceAreaLabel(activePiece)}` : ""}
-                    </dd>
+                    </span>
+                    {pieceAreaLabel(activePiece) ? <span className="li-pill">{pieceAreaLabel(activePiece)}</span> : null}
+                    {usableLabel(activePiece) ? (
+                      <span className="li-pill accent">usable {usableLabel(activePiece)}</span>
+                    ) : null}
                   </div>
-                  {usableLabel(activePiece) ? (
+                  <dl className="li-specs">
                     <div>
-                      <dt>Largest usable</dt>
-                      <dd>{usableLabel(activePiece)}</dd>
+                      <dt>Thickness</dt>
+                      <dd>{activePiece.thickness_nominal || "—"}</dd>
                     </div>
-                  ) : null}
-                  <div>
-                    <dt>Thickness</dt>
-                    <dd>{activePiece.thickness_nominal || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Lot</dt>
-                    <dd>{activePiece.lot || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Location</dt>
-                    <dd>{activePiece.rack || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Price group</dt>
-                    <dd>{activePiece.source_price_group || selectedColor.source_price_group || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Item #</dt>
-                    <dd>{activePiece.inventory_id || "—"}</dd>
-                  </div>
-                </dl>
+                    <div>
+                      <dt>Location</dt>
+                      <dd>{activePiece.rack || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Lot</dt>
+                      <dd>{activePiece.lot || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Item #</dt>
+                      <dd>{activePiece.inventory_id || "—"}</dd>
+                    </div>
+                  </dl>
+                </>
               ) : null}
 
-              <div className="li-tools" aria-label="Slab tools">
-                {TOOLS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={`li-tool${t.id === "measure" ? " primary" : ""}`}
-                    disabled={!activePiece}
-                    onClick={() => activePiece && runTool(t.id, activePiece)}
-                  >
-                    {t.label}
-                    {!t.ready ? <span className="soon">Soon</span> : null}
-                  </button>
-                ))}
+              <div className="li-actions" aria-label="Piece tools">
+                <button
+                  type="button"
+                  className="li-action primary"
+                  disabled={!activePiece}
+                  onClick={() => activePiece && runTool("measure", activePiece)}
+                >
+                  <IconRuler /> Measure
+                </button>
+                <button
+                  type="button"
+                  className="li-action"
+                  disabled={!activePiece}
+                  onClick={() => activePiece && runTool("download", activePiece)}
+                >
+                  <IconDownload /> Photo
+                </button>
               </div>
               {toolNote ? <p className="li-tool-note">{toolNote}</p> : null}
+              <p className="li-coming">Coming next: {COMING_TOOLS.join(" · ")}</p>
 
               <div className="li-tabs" role="tablist" aria-label="Available inventory">
                 <button
@@ -809,7 +922,7 @@ export default function LiveInventoryApp() {
                     void loadColorPieces(selectedColor.color_key, "slab");
                   }}
                 >
-                  Available slabs ({selectedColor.slab_count})
+                  Slabs <span>{selectedColor.slab_count}</span>
                 </button>
                 <button
                   type="button"
@@ -821,7 +934,7 @@ export default function LiveInventoryApp() {
                     void loadColorPieces(selectedColor.color_key, "remnant");
                   }}
                 >
-                  Remnants ({selectedColor.remnant_count})
+                  Remnants <span>{selectedColor.remnant_count}</span>
                 </button>
               </div>
 
@@ -834,7 +947,6 @@ export default function LiveInventoryApp() {
 
               <div className="li-piece-rail" role="list">
                 {pieces.map((piece, idx) => {
-                  const thumb = piece.thumbnail_url || piece.image_url;
                   const selected = activePiece?.id === piece.id;
                   return (
                     <button
@@ -847,9 +959,13 @@ export default function LiveInventoryApp() {
                         setToolNote(null);
                       }}
                     >
-                      <div className="li-piece-thumb">
-                        {thumb ? <img src={thumb} alt="" loading="lazy" /> : <div className="li-card-placeholder" />}
-                      </div>
+                      <TileMedia
+                        className="li-media--thumb"
+                        sources={[
+                          { url: piece.thumbnail_url, kind: "cutout" },
+                          { url: piece.image_url, kind: "cutout" },
+                        ]}
+                      />
                       <div className="li-piece-meta">
                         <strong>
                           {fmtIn(piece.length_actual_in)} × {fmtIn(piece.width_actual_in)}
@@ -858,8 +974,10 @@ export default function LiveInventoryApp() {
                           {pieceAreaLabel(piece) || "—"}
                           {usableLabel(piece) ? ` · usable ${usableLabel(piece)}` : ""}
                         </span>
-                        <span>{piece.inventory_id || piece.lot || "Piece"}</span>
-                        <span>{piece.rack || "—"}</span>
+                        <span>
+                          {piece.inventory_id ? `#${piece.inventory_id}` : piece.lot || "Piece"}
+                          {piece.rack ? ` · ${piece.rack}` : ""}
+                        </span>
                       </div>
                     </button>
                   );

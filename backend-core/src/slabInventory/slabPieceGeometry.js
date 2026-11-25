@@ -220,6 +220,58 @@ export function widestRectangleByHeight(usable, gw, gh) {
   return bestW;
 }
 
+/** Swatch crops stay between square and 4:3 so a cover-fit card crop loses little texture. */
+const SWATCH_MAX_ASPECT = 4 / 3;
+/** Inset from the usable edge (fraction of each side) — keeps slab edges / marker lines out. */
+const SWATCH_INSET = 0.04;
+
+/**
+ * Best texture crop inside the usable stone: over every maximal rectangle, maximise the
+ * area of the largest crop with aspect in [1, SWATCH_MAX_ASPECT]. Returns grid cells.
+ * @returns {{ x: number, y: number, w: number, h: number }|null}
+ */
+export function bestSwatchRect(usable, gw, gh) {
+  const heights = new Int32Array(gw);
+  const stack = new Int32Array(gw + 1);
+  let best = null;
+  let bestScore = 0;
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) heights[x] = usable[y * gw + x] ? heights[x] + 1 : 0;
+    let top = 0;
+    for (let x = 0; x <= gw; x++) {
+      const h = x < gw ? heights[x] : 0;
+      while (top > 0 && heights[stack[top - 1]] >= h) {
+        const bh = heights[stack[--top]];
+        const left = top > 0 ? stack[top - 1] + 1 : 0;
+        const w = x - left;
+        if (bh <= 0 || w <= 0) continue;
+        const s = Math.min(w, bh);
+        const l = Math.min(Math.max(w, bh), s * SWATCH_MAX_ASPECT);
+        const cw = w >= bh ? l : s;
+        const ch = w >= bh ? s : l;
+        if (cw * ch > bestScore) {
+          bestScore = cw * ch;
+          best = { x: left + (w - cw) / 2, y: y - bh + 1 + (bh - ch) / 2, w: cw, h: ch };
+        }
+      }
+      stack[top++] = x;
+    }
+  }
+  return best;
+}
+
+/** Swatch crop in image pixels ([x, y, w, h]), inset from the usable edge. */
+function swatchRectPx(usable, gw, gh, cell) {
+  const r = bestSwatchRect(usable, gw, gh);
+  if (!r) return null;
+  const dx = Math.max(cell, r.w * cell * SWATCH_INSET);
+  const dy = Math.max(cell, r.h * cell * SWATCH_INSET);
+  const w = Math.round(r.w * cell - 2 * dx);
+  const h = Math.round(r.h * cell - 2 * dy);
+  if (w < 48 || h < 48) return null;
+  return [Math.round(r.x * cell + dx), Math.round(r.y * cell + dy), w, h];
+}
+
 /**
  * Pareto set of [short_in, long_in] rectangles from bestW (cells → inches).
  * Orientation-free: a job piece fits when short <= entry.short and long <= entry.long.
@@ -288,10 +340,14 @@ export function deriveGeometryFromImage(img, dims = {}) {
   const outlineCells = simplifyClosedLoop(loop, 1.5);
   const outline_px = outlineCells.map(([x, y]) => [Math.round((x + 0.5) * cell), Math.round((y + 0.5) * cell)]);
 
+  const usable = new Uint8Array(gw * gh);
+  for (let i = 0; i < usable.length; i++) usable[i] = comp[i] && fraction[i] >= USABLE_CELL_FRACTION ? 1 : 0;
+  const swatch_rect_px = swatchRectPx(usable, gw, gh, cell);
+
   const L = Number(dims.lengthIn);
   const W = Number(dims.widthIn);
   if (!(L > 0) || !(W > 0)) {
-    return { ...base, status: "no_dims", outline_px, fill_ratio: round1(fill * 100) / 100 };
+    return { ...base, status: "no_dims", outline_px, swatch_rect_px, fill_ratio: round1(fill * 100) / 100 };
   }
   const longIn = Math.max(L, W);
   const shortIn = Math.min(L, W);
@@ -300,8 +356,6 @@ export function deriveGeometryFromImage(img, dims = {}) {
   const ipp = (ippLong + ippShort) / 2;
   const inchesPerCell = ipp * cell;
 
-  const usable = new Uint8Array(gw * gh);
-  for (let i = 0; i < usable.length; i++) usable[i] = comp[i] && fraction[i] >= USABLE_CELL_FRACTION ? 1 : 0;
   const frontier = buildFitFrontier(widestRectangleByHeight(usable, gw, gh), inchesPerCell);
   let maxRect = [0, 0];
   for (const [s, l] of frontier) if (s * l > maxRect[0] * maxRect[1]) maxRect = [s, l];
@@ -322,7 +376,54 @@ export function deriveGeometryFromImage(img, dims = {}) {
     fit_frontier_in: isRect ? [[round1(shortIn), round1(longIn)]] : frontier,
     fill_ratio: Math.round(fill * 1000) / 1000,
     is_rectangular: isRect,
+    swatch_rect_px,
   };
+}
+
+/**
+ * Area-averaged crop + resize of an RGBA image to `outW × outH` (for swatch JPEGs).
+ * @param {{ data: Uint8Array|Uint8ClampedArray, width: number, height: number }} img
+ * @param {number[]} rect [x, y, w, h] source pixels
+ */
+export function cropResizeRgba(img, rect, outW, outH) {
+  const [rx, ry, rw, rh] = rect;
+  const out = new Uint8Array(outW * outH * 4);
+  const sx = rw / outW;
+  const sy = rh / outH;
+  for (let oy = 0; oy < outH; oy++) {
+    const y0 = Math.max(0, Math.floor(ry + oy * sy));
+    const y1 = Math.min(img.height, Math.max(y0 + 1, Math.floor(ry + (oy + 1) * sy)));
+    for (let ox = 0; ox < outW; ox++) {
+      const x0 = Math.max(0, Math.floor(rx + ox * sx));
+      const x1 = Math.min(img.width, Math.max(x0 + 1, Math.floor(rx + (ox + 1) * sx)));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        let i = (y * img.width + x0) * 4;
+        for (let x = x0; x < x1; x++, i += 4) {
+          r += img.data[i];
+          g += img.data[i + 1];
+          b += img.data[i + 2];
+          n += 1;
+        }
+      }
+      const o = (oy * outW + ox) * 4;
+      out[o] = n ? r / n : 0;
+      out[o + 1] = n ? g / n : 0;
+      out[o + 2] = n ? b / n : 0;
+      out[o + 3] = 255;
+    }
+  }
+  return { data: out, width: outW, height: outH };
+}
+
+/** Output size for a swatch crop: short side `shortPx`, never upscaled. */
+export function swatchOutputSize(rect, shortPx = 640) {
+  const [, , w, h] = rect;
+  const scale = Math.min(1, shortPx / Math.min(w, h));
+  return [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))];
 }
 
 /**
