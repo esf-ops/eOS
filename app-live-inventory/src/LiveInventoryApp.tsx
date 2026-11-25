@@ -3,13 +3,16 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import MeasureView from "./components/MeasureView";
 import { apiGet, ApiError } from "./lib/api";
+import { enrichColorProgramImages } from "./lib/enrichColorImages";
 import { getSupabase } from "./lib/supabase";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const HOME_URL = String(import.meta.env.VITE_HOME_URL || "https://www.eliteosfab.com").replace(/\/+$/, "");
+/** Stock authority — Slabsmith cache. Photos may be sparse; SlabCloud fills blanks. */
 const INVENTORY_SOURCE = "slabsmith";
+const IMAGE_ENRICH_SOURCE = "slabcloud";
 
 type ColorProgram = {
   color_key: string;
@@ -152,17 +155,22 @@ export default function LiveInventoryApp() {
     let cancelled = false;
     (async () => {
       try {
-        const [sum, fil, prog] = await Promise.all([
+        const [sum, fil, prog, photoProg] = await Promise.all([
           apiGet(`/api/slab-inventory/summary?source=${INVENTORY_SOURCE}`, token) as Promise<Summary>,
           apiGet(`/api/slab-inventory/filters?source=${INVENTORY_SOURCE}`, token) as Promise<{ filters?: Filters }>,
           apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}`, token) as Promise<{
             color_programs?: ColorProgram[];
           }>,
+          apiGet(`/api/slab-inventory/color-programs?source=${IMAGE_ENRICH_SOURCE}`, token).catch(() => ({
+            color_programs: [] as ColorProgram[],
+          })) as Promise<{ color_programs?: ColorProgram[] }>,
         ]);
         if (cancelled) return;
         setSummary(sum);
         setFilters(fil.filters || null);
-        setPrograms(Array.isArray(prog.color_programs) ? prog.color_programs : []);
+        const primary = Array.isArray(prog.color_programs) ? prog.color_programs : [];
+        const photos = Array.isArray(photoProg.color_programs) ? photoProg.color_programs : [];
+        setPrograms(enrichColorProgramImages(primary, photos));
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
       }

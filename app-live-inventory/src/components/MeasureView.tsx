@@ -3,6 +3,7 @@ import {
   analyzeSlabImage,
   areaSqFtFromContour,
   buildEdgeLabels,
+  nearestEdgeInsert,
   simplifyPolyline,
   type Point,
 } from "../lib/slabOutline";
@@ -16,6 +17,7 @@ type Props = {
 };
 
 type Mode = "auto" | "edit";
+type EditTool = "move" | "add";
 
 function fmtIn(n: number) {
   return `${Math.round(n * 10) / 10}"`;
@@ -47,17 +49,6 @@ function hitPoint(contour: Point[], x: number, y: number, radius: number) {
   return -1;
 }
 
-function hitEdgeMid(contour: Point[], x: number, y: number, radius: number) {
-  for (let i = 0; i < contour.length; i++) {
-    const a = contour[i];
-    const b = contour[(i + 1) % contour.length];
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    if (Math.hypot(mx - x, my - y) <= radius) return i;
-  }
-  return -1;
-}
-
 export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClose }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -65,6 +56,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
   const dragRef = useRef<{ index: number } | null>(null);
 
   const [mode, setMode] = useState<Mode>("auto");
+  const [editTool, setEditTool] = useState<EditTool>("move");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [contour, setContour] = useState<Point[]>([]);
@@ -72,7 +64,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
   const [areaSqFt, setAreaSqFt] = useState<number | null>(null);
 
   const paint = useCallback(
-    (nextContour: Point[], ipp: number, editMode: boolean) => {
+    (nextContour: Point[], ipp: number, editMode: boolean, tool: EditTool) => {
       const canvas = canvasRef.current;
       const image = imgRef.current;
       if (!canvas || !image) return;
@@ -97,7 +89,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
       ctx.drawImage(image, 0, 0, cw, ch);
 
       const scaled = nextContour.map((p) => ({ x: p.x * scale, y: p.y * scale }));
-      const edges = buildEdgeLabels(nextContour, ipp, 0.8).map((e) => ({
+      const edges = buildEdgeLabels(nextContour, ipp, 0.5).map((e) => ({
         ...e,
         mid: { x: e.mid.x * scale, y: e.mid.y * scale },
       }));
@@ -129,12 +121,29 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
       }
 
       if (editMode) {
+        // Edge midpoints as add targets
+        for (let i = 0; i < scaled.length; i++) {
+          const a = scaled[i];
+          const b = scaled[(i + 1) % scaled.length];
+          const mx = (a.x + b.x) / 2;
+          const my = (a.y + b.y) / 2;
+          ctx.beginPath();
+          ctx.arc(mx, my, tool === "add" ? 6 : 4, 0, Math.PI * 2);
+          ctx.fillStyle = tool === "add" ? "#0c6e3a" : "rgba(30, 76, 146, 0.35)";
+          ctx.fill();
+          if (tool === "add") {
+            ctx.fillStyle = "#fff";
+            ctx.font = "700 11px DM Sans, system-ui, sans-serif";
+            ctx.fillText("+", mx - 3.5, my + 3.5);
+          }
+        }
+
         for (const p of scaled) {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
-          ctx.fillStyle = "#fff";
+          ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+          ctx.fillStyle = "#f59e0b";
           ctx.fill();
-          ctx.strokeStyle = "#1e4c92";
+          ctx.strokeStyle = "#fff";
           ctx.lineWidth = 2;
           ctx.stroke();
         }
@@ -149,13 +158,17 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
     const image = imgRef.current;
     if (!image) return;
     const analyzed = analyzeSlabImage(image, { lengthIn, widthIn });
-    // Fewer vertices so Edit is usable.
-    const epsilon = Math.max(8, Math.min(image.naturalWidth, image.naturalHeight) * 0.012);
+    // Keep enough vertices for irregular remnants (not forced to 4).
+    const epsilon = Math.max(4, Math.min(image.naturalWidth, image.naturalHeight) * 0.006);
     let pts = simplifyPolyline(analyzed.contour, epsilon);
     if (pts.length < 4) pts = analyzed.contour;
+    // Cap runaway outlines but allow complex shapes (L / notches).
+    if (pts.length > 24) {
+      pts = simplifyPolyline(pts, epsilon * 2);
+    }
     setContour(pts);
     setInchesPerPixel(analyzed.inchesPerPixel);
-    paint(pts, analyzed.inchesPerPixel, false);
+    paint(pts, analyzed.inchesPerPixel, false, "move");
   }, [lengthIn, widthIn, paint]);
 
   useEffect(() => {
@@ -170,6 +183,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
       try {
         runAuto();
         setMode("auto");
+        setEditTool("move");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -189,16 +203,18 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
 
   useEffect(() => {
     if (!contour.length || !imgRef.current) return;
-    paint(contour, inchesPerPixel, mode === "edit");
-  }, [mode, contour, inchesPerPixel, paint]);
+    paint(contour, inchesPerPixel, mode === "edit", editTool);
+  }, [mode, editTool, contour, inchesPerPixel, paint]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (mode === "edit" && (e.key === "a" || e.key === "A")) setEditTool("add");
+      if (mode === "edit" && (e.key === "v" || e.key === "V")) setEditTool("move");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, mode]);
 
   function canvasToImage(clientX: number, clientY: number): Point | null {
     const canvas = canvasRef.current;
@@ -210,25 +226,37 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
     return { x: sx / scale, y: sy / scale };
   }
 
+  function insertOnEdge(pt: Point) {
+    const maxDist = 18 / (viewScaleRef.current || 1);
+    const hit = nearestEdgeInsert(contour, pt, maxDist);
+    if (!hit) return false;
+    const next = contour.slice();
+    next.splice(hit.edgeIndex + 1, 0, hit.point);
+    setContour(next);
+    return true;
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (mode !== "edit") return;
     const pt = canvasToImage(e.clientX, e.clientY);
     if (!pt) return;
-    const hitR = 12 / (viewScaleRef.current || 1);
+    const hitR = 14 / (viewScaleRef.current || 1);
+
+    if (editTool === "add") {
+      if (insertOnEdge(pt)) return;
+      return;
+    }
+
     const idx = hitPoint(contour, pt.x, pt.y, hitR);
     if (idx >= 0) {
       dragRef.current = { index: idx };
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
-    // Double-click / alt-click on edge midpoint inserts a vertex.
+
+    // Move tool: double-click / alt-click still adds on an edge.
     if (e.detail >= 2 || e.altKey) {
-      const edge = hitEdgeMid(contour, pt.x, pt.y, hitR * 1.4);
-      if (edge >= 0) {
-        const next = contour.slice();
-        next.splice(edge + 1, 0, { x: pt.x, y: pt.y });
-        setContour(next);
-      }
+      insertOnEdge(pt);
     }
   }
 
@@ -281,17 +309,46 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
               className={mode === "auto" ? "active" : ""}
               onClick={() => {
                 setMode("auto");
+                setEditTool("move");
                 runAuto();
               }}
             >
               Auto
             </button>
-            <button type="button" className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")}>
+            <button
+              type="button"
+              className={mode === "edit" ? "active" : ""}
+              onClick={() => {
+                setMode("edit");
+                setEditTool("move");
+              }}
+            >
               Edit
             </button>
           </div>
-          <div className="li-measure-area" aria-live="polite">
-            Area: <strong>{areaSqFt != null ? `${areaSqFt} ft²` : "—"}</strong>
+          {mode === "edit" ? (
+            <div className="li-measure-modes" role="group" aria-label="Edit tool">
+              <button
+                type="button"
+                className={editTool === "move" ? "active" : ""}
+                onClick={() => setEditTool("move")}
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                className={editTool === "add" ? "active" : ""}
+                onClick={() => setEditTool("add")}
+              >
+                Add point
+              </button>
+            </div>
+          ) : null}
+          <div className="li-measure-meta" aria-live="polite">
+            <span className="li-measure-points">{contour.length} pts</span>
+            <span className="li-measure-area">
+              Area: <strong>{areaSqFt != null ? `${areaSqFt} ft²` : "—"}</strong>
+            </span>
           </div>
           <button type="button" className="li-measure-close" onClick={onClose} aria-label="Close measure">
             ×
@@ -302,7 +359,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
           {error ? <p className="li-error">{error}</p> : null}
           <canvas
             ref={canvasRef}
-            className={mode === "edit" ? "editing" : ""}
+            className={mode === "edit" ? (editTool === "add" ? "adding" : "editing") : ""}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -312,8 +369,10 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
         </div>
         <p className="li-measure-note">
           {mode === "edit"
-            ? "Drag handles to adjust. Double-click an edge to add a point. Right-click a point to remove."
-            : "Auto traces the photo. Switch to Edit to adjust corners and edges."}
+            ? editTool === "add"
+              ? "Click a green + on an edge (or anywhere along an edge) to add a vertex. Switch to Move to drag corners. Right-click a point to remove."
+              : "Drag orange handles to adjust. Use Add point for custom shapes (5+ sides). Right-click a point to remove."
+            : "Auto traces the photo. Switch to Edit → Add point for custom remnant shapes."}
         </p>
       </div>
     </div>

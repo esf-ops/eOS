@@ -48,6 +48,44 @@ export function areaSqFtFromContour(contour: Point[], inchesPerPixel: number) {
   return Math.round((areaSqIn / 144) * 10) / 10;
 }
 
+/** Closest point on segment AB to P, plus distance and t in [0,1]. */
+export function closestPointOnSegment(a: Point, b: Point, p: Point) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const t = clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / len2, 0, 1);
+  const point = { x: a.x + t * dx, y: a.y + t * dy };
+  return { point, t, dist: Math.hypot(p.x - point.x, p.y - point.y) };
+}
+
+/**
+ * Find the nearest edge to insert a vertex. Returns edge index and insert point,
+ * or null if nothing is within maxDist.
+ */
+export function nearestEdgeInsert(
+  contour: Point[],
+  p: Point,
+  maxDist: number
+): { edgeIndex: number; point: Point } | null {
+  let best: { edgeIndex: number; point: Point; dist: number } | null = null;
+  for (let i = 0; i < contour.length; i++) {
+    const a = contour[i];
+    const b = contour[(i + 1) % contour.length];
+    const hit = closestPointOnSegment(a, b, p);
+    // Skip near existing vertices so we don't stack points.
+    if (hit.t < 0.05 || hit.t > 0.95) continue;
+    if (hit.dist > maxDist) continue;
+    if (!best || hit.dist < best.dist) {
+      best = { edgeIndex: i, point: hit.point, dist: hit.dist };
+    }
+  }
+  return best ? { edgeIndex: best.edgeIndex, point: best.point } : null;
+}
+
+export function nameMaterialKey(colorName: string | null | undefined, materialName: string | null | undefined) {
+  return `${String(colorName || "").trim().toLowerCase()}||${String(materialName || "").trim().toLowerCase()}`;
+}
+
 function bboxOf(pts: Point[]) {
   let minX = Infinity;
   let minY = Infinity;

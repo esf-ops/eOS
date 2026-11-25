@@ -5651,8 +5651,10 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Decision** | Live Inventory keeps **SlabCloud-class utility** (color-first browse, sticky filters, min L/W, stock counts, color lightbox with slabs/remnants, Measure Auto + **Edit** with draggable points) but uses the **slabOS / eliteOS visual system** from `eliteos-ui-direction.md` / Home tokens — light `#f6f7fb`, navy ink, burgundy accent, soft washes — **not** a dark SlabCloud skin. Color programs sort **alphabetically by color name**. Representative images prefer `image_status=ok`, then fall back to any available URL so the grid is not empty. Measure is original eliteOS canvas (no SlabCloud iframe / `manager.js`). |
 | **Why** | Operators need the same stock-finding + remnant-measure jobs as SlabCloud, inside one eliteOS workspace look. |
 | **Limits** | Auto contour quality depends on photo contrast. Paint / Inquire / Wishlist remain scaffolded. Image fallback does not change verified_photo_count semantics. |
+| **Photos** | Live Inventory stock stays `source=slabsmith`, but blank color-card photos are **enriched from `source=slabcloud`** by color_key / name+material (counts unchanged). Slabsmith local uploads alone leave many cards empty. |
+| **Measure Edit** | Edit → **Add point** clicks an edge (green +) to insert vertices for custom 5+ side shapes; Move drags corners; right-click removes. |
 | **Impacted files** | `app-live-inventory/*`, `slabInventoryApi.js` (+ tests), this entry. |
-| **Revisit trigger** | DXF/outline sync; public no-login showroom; Measure point-edit polish. |
+| **Revisit trigger** | DXF/outline sync; durable cross-source image identity map; public no-login showroom. |
 
 ---
 

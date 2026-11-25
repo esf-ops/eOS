@@ -560,8 +560,20 @@ body {
   border-color: var(--eos-ink);
 }
 
-.li-measure-area {
+.li-measure-meta {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.li-measure-points {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--eos-ink-muted);
+}
+
+.li-measure-area {
   padding: 8px 12px;
   border-radius: var(--r-sm);
   background: #f6e08a;
@@ -589,6 +601,10 @@ body {
 }
 
 .li-measure-stage canvas.editing {
+  cursor: grab;
+}
+
+.li-measure-stage canvas.adding {
   cursor: crosshair;
 }
 
