@@ -17,6 +17,10 @@ import {
 import { geometryNeedsWork, runSlabGeometryDerivation, swatchStoragePath } from "./slabPieceGeometryJob.js";
 import {
   attachColorSwatches,
+  filterRowsByThickness,
+  parseThicknessParam,
+  thicknessMm,
+  thicknessOptions,
   parseFitParams,
   rankFitPieces,
   summarizeColorDimensions,
@@ -274,6 +278,29 @@ function synthImage(width, height, isStone) {
   assert.equal(cards[0].swatch_url, "s2.jpg");
   assert.equal(cards[1].swatch_url, null);
   console.log("ok: color card swatch selection");
+}
+
+/* ── Thickness normalisation + filter ── */
+{
+  assert.equal(thicknessMm("3 cm"), 30);
+  assert.equal(thicknessMm("2cm"), 20);
+  assert.equal(thicknessMm("20mm"), 20, "20mm groups with 2 cm");
+  assert.equal(thicknessMm("12MM"), 12);
+  assert.equal(thicknessMm("3"), 30, "bare small number = cm");
+  assert.equal(thicknessMm(null), null);
+  assert.equal(thicknessMm("1 1/4\""), null);
+  assert.equal(parseThicknessParam({}), null);
+  assert.equal(parseThicknessParam({ thickness_mm: "abc" }), null);
+  assert.deepEqual([...parseThicknessParam({ thickness_mm: "20, 30" })], [20, 30]);
+  const rows = [{ thickness_nominal: "3 cm" }, { thickness_nominal: "2 cm" }, { thickness_nominal: "20mm" }, { thickness_nominal: null }];
+  assert.equal(filterRowsByThickness(rows, null), rows, "no filter → unchanged");
+  assert.equal(filterRowsByThickness(rows, new Set([20])).length, 2);
+  assert.deepEqual(thicknessOptions([...rows, { thickness_nominal: "12MM" }]), [
+    { mm: 12, label: "12 mm", count: 1 },
+    { mm: 20, label: "2 cm", count: 2 },
+    { mm: 30, label: "3 cm", count: 1 },
+  ]);
+  console.log("ok: thickness normalisation + filter");
 }
 
 console.log("\nslabPieceGeometry: all tests passed");

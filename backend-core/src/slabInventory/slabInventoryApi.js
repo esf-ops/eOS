@@ -794,6 +794,49 @@ export function parseFitParams(query = {}) {
   };
 }
 
+/**
+ * Nominal thickness → whole millimetres: "3 cm" → 30, "2cm" → 20, "20mm" → 20, "12MM" → 12.
+ * A bare number ≤ 5 is read as cm. Null when unparseable.
+ */
+export function thicknessMm(raw) {
+  const m = trimStr(raw).toLowerCase().replace(",", ".").match(/^(\d+(?:\.\d+)?)\s*(mm|cm)?$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!(n > 0)) return null;
+  const mm = m[2] === "mm" ? n : m[2] === "cm" || n <= 5 ? n * 10 : n;
+  return Math.round(mm);
+}
+
+/** `thickness_mm=20,30` → Set{20, 30}; null when absent or nothing valid. */
+export function parseThicknessParam(query = {}) {
+  const raw = trimStr(query?.thickness_mm);
+  if (!raw) return null;
+  const set = new Set(
+    raw
+      .split(",")
+      .map((v) => Number(v.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0 && n <= 200)
+  );
+  return set.size ? set : null;
+}
+
+export function filterRowsByThickness(rows, thicknessSet) {
+  if (!thicknessSet) return rows;
+  return rows.filter((r) => thicknessSet.has(thicknessMm(r.thickness_nominal)));
+}
+
+/** Thickness filter options with piece counts, thinnest first. */
+export function thicknessOptions(rows) {
+  const counts = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const mm = thicknessMm(r.thickness_nominal);
+    if (mm != null) counts.set(mm, (counts.get(mm) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([mm, count]) => ({ mm, label: mm % 10 === 0 ? `${mm / 10} cm` : `${mm} mm`, count }));
+}
+
 function rowMatchesFitType(row, type) {
   if (type === "all") return true;
   return trimStr(row.source_inventory_type).toLowerCase() === type;
@@ -1146,18 +1189,30 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const organizationId = await orgId(req);
       const sourceFilter = resolveSourceFilter(req);
 
-      let q = supabase
-        .from("slab_inventory")
-        .select("material_name,color_name,price_group,thickness_nominal,rack,distributor")
-        .eq("is_active", true);
-      q = scopeInventory(q, organizationId, sourceFilter);
-      const { data: rows, error } = await q;
-      if (error) {
+      // Paginated: active rows exceed PostgREST's 1000-row cap, which silently dropped options.
+      let rows;
+      try {
+        rows = await fetchAllRowsPaginated(() =>
+          scopeInventory(
+            supabase
+              .from("slab_inventory")
+              .select("id,material_name,color_name,price_group,thickness_nominal,rack,distributor,source_inventory_type,source_inventory_scope")
+              .eq("is_active", true),
+            organizationId,
+            sourceFilter
+          )
+        );
+      } catch (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
         }
         throw error;
       }
+      const typedRows = rows.filter(
+        (r) =>
+          trimStr(r.source_inventory_scope) === COLOR_PROGRAM_SCOPE &&
+          ["Slab", "Remnant"].includes(trimStr(r.source_inventory_type))
+      );
 
       let imgQ = supabase.from("slab_images").select("image_status");
       imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
@@ -1172,6 +1227,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           colors: distinctValues(rows ?? [], "color_name"),
           price_groups: distinctValues(rows ?? [], "price_group"),
           thicknesses: distinctValues(rows ?? [], "thickness_nominal"),
+          thickness_options: thicknessOptions(typedRows),
           racks: distinctValues(rows ?? [], "rack"),
           distributors: distinctValues(rows ?? [], "distributor"),
           image_statuses: imageStatuses.length ? imageStatuses : [...IMAGE_STATUS_VALUES]
@@ -1317,7 +1373,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           scope(
             supabase
               .from("slab_inventory")
-              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope,length_actual_in,width_actual_in")
+              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope,length_actual_in,width_actual_in,thickness_nominal")
               .eq("is_active", true)
               .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
               .in("source_inventory_type", ["Slab", "Remnant"])
@@ -1331,6 +1387,8 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       }
 
       const fit = parseFitParams(req.query);
+      const thickness = parseThicknessParam(req.query);
+      rowList = filterRowsByThickness(rowList, thickness);
       const [imgRows, geometryMap] = await Promise.all([
         fetchSlabImagesForInventoryRows(supabase, scope, rowList, SLAB_IMAGE_SELECT_COLUMNS),
         fit
@@ -1356,6 +1414,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         color_programs: cards,
         total: cards.length,
         fit: fit ? { length_in: fit.lengthIn, width_in: fit.widthIn, type: fit.type } : null,
+        thickness_mm: thickness ? [...thickness].sort((a, b) => a - b) : null,
         price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
         source_inventory_scope: COLOR_PROGRAM_SCOPE,
         source_price_group_label: SOURCE_PRICE_GROUP_LABEL,
@@ -1422,6 +1481,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       } else if (params.type === "remnant") {
         typeFiltered = colorMatched.filter((r) => trimStr(r.source_inventory_type) === "Remnant");
       }
+      typeFiltered = filterRowsByThickness(typeFiltered, parseThicknessParam(req.query));
 
       const [imgRows, geometryMap] = await Promise.all([
         fetchSlabImagesForInventoryRows(supabase, scope, typeFiltered, SLAB_IMAGE_SELECT_COLUMNS),
@@ -1521,7 +1581,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         throw error;
       }
 
-      const typed = rows.filter((r) => rowMatchesFitType(r, fit.type));
+      const typed = filterRowsByThickness(
+        rows.filter((r) => rowMatchesFitType(r, fit.type)),
+        parseThicknessParam(req.query)
+      );
       const geometryMap = await loadGeometryMap(supabase, scope, typed);
       const ranked = rankFitPieces(typed, geometryMap, fit);
       const page = ranked.slice(0, limit);

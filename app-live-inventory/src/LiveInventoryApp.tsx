@@ -67,6 +67,7 @@ type Piece = {
 type Filters = {
   materials?: string[];
   price_groups?: string[];
+  thickness_options?: { mm: number; label: string; count: number }[];
 };
 
 type Summary = {
@@ -185,6 +186,7 @@ export default function LiveInventoryApp() {
   const [typeFilter, setTypeFilter] = useState<"all" | "Slab" | "Remnant">("all");
   const [material, setMaterial] = useState("");
   const [priceGroup, setPriceGroup] = useState("");
+  const [thicknessMm, setThicknessMm] = useState<number | null>(null);
   const [jobLength, setJobLength] = useState("");
   const [jobWidth, setJobWidth] = useState("");
   const [job, setJob] = useState<JobSize | null>(null);
@@ -198,6 +200,7 @@ export default function LiveInventoryApp() {
   const [filters, setFilters] = useState<Filters | null>(null);
   const [programs, setPrograms] = useState<ColorProgram[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stockTotals, setStockTotals] = useState<{ colors: number; pieces: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedColor, setSelectedColor] = useState<ColorProgram | null>(null);
@@ -236,7 +239,11 @@ export default function LiveInventoryApp() {
     let cancelled = false;
     setFitLoading(true);
     const qs = (extra: Record<string, string>) =>
-      new URLSearchParams({ source: INVENTORY_SOURCE, ...extra }).toString();
+      new URLSearchParams({
+        source: INVENTORY_SOURCE,
+        ...(thicknessMm ? { thickness_mm: String(thicknessMm) } : {}),
+        ...extra,
+      }).toString();
     Promise.all([
       apiGet(
         `/api/slab-inventory/color-programs?${qs({
@@ -270,7 +277,7 @@ export default function LiveInventoryApp() {
     return () => {
       cancelled = true;
     };
-  }, [token, job, fitType]);
+  }, [token, job, fitType, thicknessMm]);
 
   useEffect(() => {
     const sb = getSupabase();
@@ -307,14 +314,22 @@ export default function LiveInventoryApp() {
       if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
     };
     setLoading(true);
+    const thicknessQs = thicknessMm ? `&thickness_mm=${thicknessMm}` : "";
     const primaryReq = (
-      apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}`, token) as Promise<{
+      apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}${thicknessQs}`, token) as Promise<{
         color_programs?: ColorProgram[];
       }>
     ).then((prog) => (Array.isArray(prog.color_programs) ? prog.color_programs : []));
     primaryReq
       .then((primary) => {
-        if (!cancelled) setPrograms(primary);
+        if (cancelled) return;
+        setPrograms(primary);
+        if (!thicknessMm) {
+          setStockTotals({
+            colors: primary.length,
+            pieces: primary.reduce((n, p) => n + (p.total_inventory_count || 0), 0),
+          });
+        }
       })
       .catch(fail)
       .finally(() => {
@@ -331,11 +346,21 @@ export default function LiveInventoryApp() {
         if (!cancelled && photos.length) setPrograms(enrichColorProgramImages(primary, photos));
       })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [token, thicknessMm]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
     (apiGet(`/api/slab-inventory/filters?source=${INVENTORY_SOURCE}`, token) as Promise<{ filters?: Filters }>)
       .then((fil) => {
         if (!cancelled) setFilters(fil.filters || null);
       })
-      .catch(fail);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
+      });
     (apiGet(`/api/slab-inventory/summary?source=${INVENTORY_SOURCE}`, token) as Promise<Summary>)
       .then((sum) => {
         if (!cancelled) setSummary(sum);
@@ -404,6 +429,7 @@ export default function LiveInventoryApp() {
           type: tab,
           active_only: "true",
         });
+        if (thicknessMm) params.set("thickness_mm", String(thicknessMm));
         const body = (await apiGet(
           `/api/slab-inventory/colors/${encodeURIComponent(colorKey)}/inventory?${params}`,
           token
@@ -422,7 +448,7 @@ export default function LiveInventoryApp() {
         setPiecesLoading(false);
       }
     },
-    [token, job]
+    [token, job, thicknessMm]
   );
 
   const [preferTab, setPreferTab] = useState<"slab" | "remnant" | null>(null);
@@ -454,6 +480,7 @@ export default function LiveInventoryApp() {
     setTypeFilter("all");
     setMaterial("");
     setPriceGroup("");
+    setThicknessMm(null);
     setJobLength("");
     setJobWidth("");
     setView("colors");
@@ -538,8 +565,10 @@ export default function LiveInventoryApp() {
 
   const syncLabel = syncAgeLabel(summary?.last_sync?.finished_at);
   const activePiece = selectedPiece;
-  const totalPieces = programs.reduce((n, p) => n + (p.total_inventory_count || 0), 0);
-  const filtersActive = Boolean(search || typeFilter !== "all" || material || priceGroup || jobLength || jobWidth);
+  const filtersActive = Boolean(
+    search || typeFilter !== "all" || material || priceGroup || thicknessMm || jobLength || jobWidth
+  );
+  const thicknessChoices = (filters?.thickness_options || []).filter((o) => o.count > 0);
   const showFit = Boolean(job && view === "fit");
 
   return (
@@ -560,10 +589,10 @@ export default function LiveInventoryApp() {
         <div className="li-hero-copy">
           <h1>Stone in stock</h1>
           <p>
-            {programs.length ? (
+            {stockTotals ? (
               <>
-                <strong>{programs.length.toLocaleString()}</strong> colors ·{" "}
-                <strong>{totalPieces.toLocaleString()}</strong> pieces on the rack, measured from every photo
+                <strong>{stockTotals.colors.toLocaleString()}</strong> colors ·{" "}
+                <strong>{stockTotals.pieces.toLocaleString()}</strong> pieces on the rack, measured from every photo
               </>
             ) : (
               "Loading what's on the rack…"
@@ -615,6 +644,32 @@ export default function LiveInventoryApp() {
             </option>
           ))}
         </select>
+        {thicknessChoices.length > 1 ? (
+          <div className="li-seg" role="radiogroup" aria-label="Thickness">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={thicknessMm == null}
+              className={thicknessMm == null ? "active" : ""}
+              onClick={() => setThicknessMm(null)}
+            >
+              Any
+            </button>
+            {thicknessChoices.map((o) => (
+              <button
+                key={o.mm}
+                type="button"
+                role="radio"
+                aria-checked={thicknessMm === o.mm}
+                className={thicknessMm === o.mm ? "active" : ""}
+                title={`${o.count} pieces`}
+                onClick={() => setThicknessMm(o.mm)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <select value={priceGroup} onChange={(e) => setPriceGroup(e.target.value)} aria-label="Price group">
           <option value="">Any price group</option>
           {(filters?.price_groups || []).map((g) => (
