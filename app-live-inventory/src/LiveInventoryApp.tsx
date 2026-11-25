@@ -3,7 +3,7 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import MeasureView from "./components/MeasureView";
 import { apiGet, ApiError } from "./lib/api";
-import { enrichColorProgramImages } from "./lib/enrichColorImages";
+import { browseImageUrl, enrichColorProgramImages } from "./lib/enrichColorImages";
 import { getSupabase } from "./lib/supabase";
 
 const EOS_LOGO_URL =
@@ -418,7 +418,7 @@ export default function LiveInventoryApp() {
 
         <div className="li-grid" role="list">
           {visiblePrograms.map((p) => {
-            const img = p.representative_thumbnail_url || p.representative_image_url;
+            const img = browseImageUrl(p);
             const stock =
               typeFilter === "Remnant"
                 ? p.remnant_count
@@ -442,6 +442,11 @@ export default function LiveInventoryApp() {
                       onError={(e) => {
                         const el = e.currentTarget;
                         const full = p.representative_image_url;
+                        const thumb = p.representative_thumbnail_url;
+                        if (thumb && !el.src.includes(thumb) && el.src !== thumb) {
+                          el.src = thumb;
+                          return;
+                        }
                         if (full && el.src !== full) {
                           el.src = full;
                           return;

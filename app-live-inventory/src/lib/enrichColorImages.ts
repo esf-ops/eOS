@@ -13,6 +13,23 @@ function hasPhoto(p: ColorImageFields) {
   return Boolean(p.representative_thumbnail_url || p.representative_image_url);
 }
 
+/** SlabCloud often 404s full .jpg while `_thumb.jpg` works — prefer thumbs for browse. */
+export function preferBrowseThumb(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (/_thumb\.(jpe?g|png|webp)(\?|$)/i.test(url)) return url;
+  const thumbed = url.replace(/\.(jpe?g|png|webp)(\?|$)/i, "_thumb.$1$2");
+  return thumbed !== url ? thumbed : url;
+}
+
+export function browseImageUrl(p: ColorImageFields): string | null {
+  return (
+    preferBrowseThumb(p.representative_thumbnail_url) ||
+    preferBrowseThumb(p.representative_image_url) ||
+    p.representative_thumbnail_url ||
+    p.representative_image_url
+  );
+}
+
 /**
  * Keep primary stock cards (Slabsmith), but prefer secondary (SlabCloud) photos
  * for browse display — local uploads are sparse/broken; SlabCloud JPEGs are the
