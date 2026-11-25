@@ -18,6 +18,16 @@ export function IconRuler() {
   );
 }
 
+export function IconLayout() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.7">
+      <rect x="2" y="3" width="16" height="14" rx="1.5" />
+      <rect x="4.5" y="5.5" width="7" height="4" rx="0.5" />
+      <rect x="4.5" y="11" width="11" height="3.5" rx="0.5" />
+    </svg>
+  );
+}
+
 export function IconDownload() {
   return (
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.7">

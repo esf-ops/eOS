@@ -20,5 +20,6 @@
     "../shared/eliteos-supabase/**/*.ts",
     "../shared/eliteos-ui/**/*.ts",
     "../shared/eliteos-ui/**/*.tsx"
-  ]
+  ],
+  "exclude": ["src/**/*.test.ts"]
 }

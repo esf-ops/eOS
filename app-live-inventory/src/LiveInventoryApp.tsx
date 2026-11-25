@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import MeasureView, { type PieceGeometry } from "./components/MeasureView";
-import { IconArrow, IconDownload, IconRuler, IconSearch, TileMedia, TileSkeleton } from "./components/Tiles";
+import LayoutView from "./components/LayoutView";
+import { IconPick, loadPicks, PicksTray, savePicks, ShareDialog, type PickedPiece } from "./components/Picks";
+import { IconArrow, IconDownload, IconLayout, IconRuler, IconSearch, TileMedia, TileSkeleton } from "./components/Tiles";
 import { apiGet, ApiError } from "./lib/api";
 import { browseImageUrl, enrichColorProgramImages } from "./lib/enrichColorImages";
 import { parseJobSize, pieceFitsJob, type JobSize } from "./lib/fit";
@@ -76,7 +78,7 @@ type Summary = {
   last_sync?: { finished_at?: string | null; triggered_by?: string | null } | null;
 };
 
-type ToolId = "measure" | "download";
+type ToolId = "measure" | "layout" | "download";
 
 const COMING_TOOLS = ["Paint match", "Inquire", "Wishlist", "Email", "Get a quote", "3D / AR"];
 
@@ -212,6 +214,36 @@ export default function LiveInventoryApp() {
   const [piecesLoading, setPiecesLoading] = useState(false);
   const [selectedPiece, setSelectedPiece] = useState<Piece | null>(null);
   const [measurePiece, setMeasurePiece] = useState<Piece | null>(null);
+  const [layoutPiece, setLayoutPiece] = useState<Piece | null>(null);
+  const [picks, setPicks] = useState<PickedPiece[]>(loadPicks);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  useEffect(() => savePicks(picks), [picks]);
+
+  function togglePick(piece: Piece) {
+    const id = piece.id;
+    if (!id) return;
+    setPicks((prev) =>
+      prev.some((p) => p.id === id)
+        ? prev.filter((p) => p.id !== id)
+        : [
+            ...prev,
+            {
+              id,
+              color_name: piece.color_name,
+              material_name: piece.material_name,
+              source_inventory_type: piece.source_inventory_type,
+              thickness_nominal: piece.thickness_nominal,
+              length_in: piece.length_actual_in,
+              width_in: piece.width_actual_in,
+              inventory_id: piece.inventory_id,
+              thumbnail_url: piece.thumbnail_url,
+              image_url: piece.image_url,
+            },
+          ]
+    );
+  }
+  const pickedIds = useMemo(() => new Set(picks.map((p) => p.id)), [picks]);
   const [toolNote, setToolNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -532,6 +564,7 @@ export default function LiveInventoryApp() {
     setPieces([]);
     setSelectedPiece(null);
     setMeasurePiece(null);
+    setLayoutPiece(null);
     setToolNote(null);
   }
 
@@ -543,6 +576,15 @@ export default function LiveInventoryApp() {
         return;
       }
       setMeasurePiece(piece);
+      setToolNote(null);
+      return;
+    }
+    if (tool === "layout") {
+      if (!piece.image_url && !piece.thumbnail_url) {
+        setToolNote("No photo available to lay out on yet.");
+        return;
+      }
+      setLayoutPiece(piece);
       setToolNote(null);
       return;
     }
@@ -972,6 +1014,24 @@ export default function LiveInventoryApp() {
                   type="button"
                   className="li-action"
                   disabled={!activePiece}
+                  onClick={() => activePiece && runTool("layout", activePiece)}
+                >
+                  <IconLayout /> Lay out job
+                </button>
+                <button
+                  type="button"
+                  className={`li-action${activePiece?.id && pickedIds.has(activePiece.id) ? " picked" : ""}`}
+                  disabled={!activePiece?.id}
+                  aria-pressed={Boolean(activePiece?.id && pickedIds.has(activePiece.id))}
+                  onClick={() => activePiece && togglePick(activePiece)}
+                >
+                  <IconPick filled={Boolean(activePiece?.id && pickedIds.has(activePiece.id))} />
+                  {activePiece?.id && pickedIds.has(activePiece.id) ? "Picked" : "Pick"}
+                </button>
+                <button
+                  type="button"
+                  className="li-action"
+                  disabled={!activePiece}
                   onClick={() => activePiece && runTool("download", activePiece)}
                 >
                   <IconDownload /> Photo
@@ -1038,6 +1098,7 @@ export default function LiveInventoryApp() {
                       <div className="li-piece-meta">
                         <strong>
                           {fmtIn(piece.length_actual_in)} × {fmtIn(piece.width_actual_in)}
+                          {piece.id && pickedIds.has(piece.id) ? <em className="li-picked-tag">Picked</em> : null}
                         </strong>
                         <span>
                           {pieceAreaLabel(piece) || "—"}
@@ -1071,6 +1132,36 @@ export default function LiveInventoryApp() {
           geometry={measurePiece.geometry}
           title={measurePiece.color_name || undefined}
           onClose={() => setMeasurePiece(null)}
+        />
+      ) : null}
+
+      {layoutPiece && (layoutPiece.image_url || layoutPiece.thumbnail_url) ? (
+        <LayoutView
+          imageUrl={layoutPiece.image_url || layoutPiece.thumbnail_url || ""}
+          lengthIn={layoutPiece.length_actual_in}
+          widthIn={layoutPiece.width_actual_in}
+          geometry={layoutPiece.geometry}
+          title={layoutPiece.color_name || selectedColor?.color_name || "Slab"}
+          subtitle={[
+            layoutPiece.source_inventory_type === "Remnant" ? "Remnant" : "Slab",
+            layoutPiece.inventory_id ? `#${layoutPiece.inventory_id}` : null,
+            `${fmtIn(layoutPiece.length_actual_in)} × ${fmtIn(layoutPiece.width_actual_in)}`,
+            layoutPiece.thickness_nominal || null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          job={job}
+          onClose={() => setLayoutPiece(null)}
+        />
+      ) : null}
+
+      <PicksTray picks={picks} onShare={() => setShareOpen(true)} onClear={() => setPicks([])} />
+      {shareOpen && token ? (
+        <ShareDialog
+          picks={picks}
+          token={token}
+          onRemove={(id) => setPicks((prev) => prev.filter((p) => p.id !== id))}
+          onClose={() => setShareOpen(false)}
         />
       ) : null}
     </div>

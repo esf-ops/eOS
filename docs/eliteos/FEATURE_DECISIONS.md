@@ -5675,3 +5675,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
+### 422. Live Inventory — job layout on the real slab + customer share links
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-25 |
+| **Layout** | "Lay out job" (piece lightbox) places rectangular job pieces on the piece's own photo at true scale from `slab_piece_geometry` (`outline_px`, `px_per_in`; falls back to the client photo trace + L×W). Drag (¼″ snap, magnet to stone edge / neighbours ± saw spacing), rotate 90°, auto-place, auto-arrange (largest first), saw spacing + edge trim settings, validity per piece (inside the outline incl. notches; clear of other pieces by spacing), stone used %, **largest clean offcut** (the keepable remnant), cut preview, PNG export. Pure geometry in `app-live-inventory/src/lib/layout.ts` (tests: `layout.test.ts`). Client-only working state — layouts are **not persisted** (no table), so nothing here is an authority. |
+| **Share** | Rep picks specific pieces (session draft in `sessionStorage`, not an authority) → `POST /api/live-inventory/shares` creates a row in **`live_inventory_shares`** (`eliteos_live_inventory_shares_v1.sql`, applied; RLS on, no policies → Brain-only). Customer opens `/s/<token>` on the Live Inventory host with no login → `GET /api/public/live-inventory/shares/:token`. |
+| **Security** | Token = 32 random bytes base64url; **only sha256 stored**, raw token returned once to the creator. Create/list/revoke require auth + `live_inventory`/`slab_inventory` head access and a resolved `organization_id` (403 otherwise); create only accepts **active rows of the caller's org**; list/revoke are org-scoped (`revoked_by` recorded). Public read: per-IP rate limit (process-local, 60/min), `no-store`, `Referrer-Policy: no-referrer`, `noindex`; unknown → 404, expired/revoked → 410, same generic body. Public DTO is an explicit allow-list (color, material, type, thickness, L×W, area, item #, availability, photo/swatch URLs, org display name, optional rep name/email) — **never** price group, rack, lot, supplier codes, costs, internal/external ids. Default expiry 30 days (7/30/90). Created/revoked events logged (`live_inventory.share.*`); `view_count` / `last_viewed_at` tracked. |
+| **Authority** | `slab_inventory` stays stock authority — the page resolves availability live (sold pieces show "No longer available", no photo); `items` is only a display snapshot from creation time. No external writes. |
+| **Limits** | No customer reactions/replies yet; no persisted layouts; share does not hold or reserve stock. |
+| **Revisit trigger** | Customer "favorite"/reply feedback, holds/reservations, attaching a saved layout to a share. |
+
+---
+

@@ -20,7 +20,8 @@ import { attachQuickBooksIntelligenceRoutes } from "./quickbooks/quickBooksIntel
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
-import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
+import { attachSlabInventoryRoutes, SLAB_INVENTORY_READ_HEAD_SLUGS } from "./slabInventory/slabInventoryApi.js";
+import { attachLiveInventoryShareRoutes } from "./liveInventory/liveInventoryShares.js";
 import { attachSlabPieceGeometryRoutes } from "./slabInventory/slabPieceGeometryRoutes.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachJobsCommandCenterRoutes } from "./jobsCommandCenter/jobsCommandCenterApi.js";
@@ -1300,6 +1301,13 @@ attachSlabInventoryRoutes(app, {
   requireAuth,
   requireHeadAccess,
   requireAnyHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachLiveInventoryShareRoutes(app, {
+  requireAuth,
+  requireAnyHeadAccess,
+  headSlugs: SLAB_INVENTORY_READ_HEAD_SLUGS,
   getSupabase: supabaseServerClient
 });
 

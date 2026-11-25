@@ -241,7 +241,7 @@
     "eos:build:custom-quote": "npm run build --prefix app-custom-quote",
     "eos:build:slab-inventory": "npm run build --prefix app-slab-inventory",
     "eos:build:live-inventory": "npm run build --prefix app-live-inventory",
-    "eos:test:live-inventory": "node backend-core/src/liveInventory/liveInventoryRegistration.test.mjs",
+    "eos:test:live-inventory": "node backend-core/src/liveInventory/liveInventoryRegistration.test.mjs && node backend-core/src/liveInventory/liveInventoryShares.test.mjs && node app-live-inventory/src/lib/layout.test.ts",
     "eos:build:slab-ai": "npm run build --prefix app-slab-ai",
     "eos:test:slab-ai": "npm test --prefix app-slab-ai",
     "eos:test:slab-ai-knowledge": "node --test backend-core/src/slabAi/knowledge/knowledgeHub.test.mjs backend-core/src/slabAi/knowledge/hybridRetrieval.test.mjs backend-core/src/slabAi/knowledge/knowledgeLifecycle.e2e.test.mjs",

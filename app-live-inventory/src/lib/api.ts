@@ -45,3 +45,19 @@ export async function apiFetch(path: string, token: string, init: RequestInit = 
 export function apiGet(path: string, token: string) {
   return apiFetch(path, token, { method: "GET" });
 }
+
+export function apiPost(path: string, token: string, body?: unknown) {
+  return apiFetch(path, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/** Unauthenticated GET for public share pages. */
+export async function publicGet(path: string): Promise<unknown> {
+  const res = await fetch(`${backendBase()}${path}`, { cache: "no-store", referrerPolicy: "no-referrer" });
+  const body = await parseJson(res);
+  if (!res.ok) throw new ApiError(res.status, res.statusText || "Request failed", body);
+  return body;
+}
