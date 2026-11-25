@@ -274,6 +274,19 @@ const SLAB_IMAGE_FETCH_CONCURRENCY = 4;
  * @param {string} selectColumns
  */
 export async function fetchSlabImagesForInventoryRows(db, scopeQuery, rows, selectColumns) {
+  return fetchRowsForInventorySlabIds(db, "slab_images", scopeQuery, rows, selectColumns);
+}
+
+/**
+ * Load rows of a per-slab table (keyed by external_slab_id) only for the given inventory rows,
+ * chunking `.in()` lists and paginating each chunk.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} table
+ * @param {(q: object) => object} scopeQuery
+ * @param {Array<{ external_slab_id?: unknown }>} rows
+ * @param {string} selectColumns
+ */
+export async function fetchRowsForInventorySlabIds(db, table, scopeQuery, rows, selectColumns) {
   const ids = [
     ...new Set(
       (Array.isArray(rows) ? rows : [])
@@ -291,7 +304,7 @@ export async function fetchSlabImagesForInventoryRows(db, scopeQuery, rows, sele
     const batches = await Promise.all(
       chunks.slice(i, i + SLAB_IMAGE_FETCH_CONCURRENCY).map((chunk) =>
         fetchAllRowsPaginated(() =>
-          scopeQuery(db.from("slab_images").select(selectColumns).in("external_slab_id", chunk))
+          scopeQuery(db.from(table).select(selectColumns).in("external_slab_id", chunk))
         )
       )
     );

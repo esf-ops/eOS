@@ -21,6 +21,7 @@ import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
+import { attachSlabPieceGeometryRoutes } from "./slabInventory/slabPieceGeometryRoutes.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachJobsCommandCenterRoutes } from "./jobsCommandCenter/jobsCommandCenterApi.js";
 import { attachAccountDirectoryRoutes, resolveAccountDirectoryStore } from "./accountDirectory/accountDirectoryApi.js";
@@ -1364,6 +1365,10 @@ attachSalesOpsMondayScheduleRoutes(app, {
 });
 
 attachIntegrationFeedRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachSlabPieceGeometryRoutes(app, {
   getSupabase: supabaseServerClient
 });
 

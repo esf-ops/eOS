@@ -33,9 +33,12 @@ import {
   countActiveNotSeenInSync,
   fetchActiveInventoryRowsPaginated,
   fetchAllRowsPaginated,
+  fetchRowsForInventorySlabIds,
   fetchSlabImagesForInventoryRows,
   resolveSummarySyncCoverage,
 } from "./slabInventorySummaryQueries.js";
+import { pieceAreaSqft, pieceFitsJob } from "./slabPieceGeometry.js";
+import { GEOMETRY_SELECT_COLUMNS, TABLE_SLAB_PIECE_GEOMETRY } from "./slabPieceGeometryJob.js";
 import {
   matchSourceColorWithAliases,
   normalizeColorName as _normColorName,
@@ -767,6 +770,121 @@ export function groupColorPrograms(rows, imageMap = new Map(), sourceFilter = nu
   return cards;
 }
 
+const MAX_FIT_DIMENSION_IN = 400;
+
+/**
+ * Parse a job-piece size from `fit_length_in` / `fit_width_in` (or `length_in` / `width_in`).
+ * Returns null when no valid size was supplied.
+ * @param {Record<string, unknown>} query
+ */
+export function parseFitParams(query = {}) {
+  const q = query || {};
+  const num = (v) => {
+    const n = Number(trimStr(v));
+    return Number.isFinite(n) && n > 0 && n <= MAX_FIT_DIMENSION_IN ? n : null;
+  };
+  const lengthIn = num(q.fit_length_in ?? q.length_in);
+  const widthIn = num(q.fit_width_in ?? q.width_in);
+  if (lengthIn == null && widthIn == null) return null;
+  const typeRaw = trimStr(q.fit_type ?? q.type).toLowerCase();
+  return {
+    lengthIn: lengthIn ?? widthIn,
+    widthIn: widthIn ?? lengthIn,
+    type: ["slab", "remnant"].includes(typeRaw) ? typeRaw : "all",
+  };
+}
+
+function rowMatchesFitType(row, type) {
+  if (type === "all") return true;
+  return trimStr(row.source_inventory_type).toLowerCase() === type;
+}
+
+/** @param {Map<string, any>} geometryMap */
+export function geometryFor(geometryMap, row) {
+  return geometryMap.get(`${trimStr(row.external_source)}|${trimStr(row.external_slab_id)}`) ?? null;
+}
+
+/** Staff-safe piece geometry for Measure / fit display. Null unless derived successfully. */
+export function toPieceGeometryDto(g) {
+  if (!g || g.status !== "ok") return null;
+  return {
+    outline_px: g.outline_px ?? null,
+    image_width_px: g.image_width_px ?? null,
+    image_height_px: g.image_height_px ?? null,
+    px_per_in: g.px_per_in != null ? Number(g.px_per_in) : null,
+    area_sqft: g.area_sqft != null ? Number(g.area_sqft) : null,
+    usable_long_in: g.max_rect_long_in != null ? Number(g.max_rect_long_in) : null,
+    usable_short_in: g.max_rect_short_in != null ? Number(g.max_rect_short_in) : null,
+    fit_frontier_in: g.fit_frontier_in ?? null,
+    is_rectangular: g.is_rectangular ?? null,
+  };
+}
+
+/**
+ * Add largest-piece dimensions (and fit counts when a job size is given) to color cards.
+ * With a fit, only cards with at least one fitting piece are returned. Counts are unchanged.
+ */
+export function summarizeColorDimensions(cards, rows, geometryMap = new Map(), fit = null) {
+  const stats = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const key = makeColorKey(r.color_name, r.material_name, r.price_group);
+    const s = stats.get(key) ?? { long: null, short: null, fitCount: 0 };
+    const L = Number(r.length_actual_in);
+    const W = Number(r.width_actual_in);
+    if (L > 0 && W > 0) {
+      const long = Math.max(L, W);
+      const short = Math.min(L, W);
+      if (s.long == null || long * short > s.long * s.short) {
+        s.long = long;
+        s.short = short;
+      }
+    }
+    if (fit && rowMatchesFitType(r, fit.type) && pieceFitsJob(geometryFor(geometryMap, r), r, fit.lengthIn, fit.widthIn)) {
+      s.fitCount += 1;
+    }
+    stats.set(key, s);
+  }
+  const out = cards.map((c) => {
+    const s = stats.get(c.color_key);
+    return {
+      ...c,
+      largest_piece_long_in: s?.long != null ? Math.round(s.long * 10) / 10 : null,
+      largest_piece_short_in: s?.short != null ? Math.round(s.short * 10) / 10 : null,
+      ...(fit ? { fit_count: s?.fitCount ?? 0 } : {}),
+    };
+  });
+  return fit ? out.filter((c) => c.fit_count > 0) : out;
+}
+
+/**
+ * Pieces that fit a job size, ranked by least leftover stone (waste), remnants first on ties.
+ * @returns {Array<{ row: any, geometry: any, area_sqft: number|null, waste_sqft: number|null, waste_pct: number|null }>}
+ */
+export function rankFitPieces(rows, geometryMap, fit) {
+  const jobSqft = (fit.lengthIn * fit.widthIn) / 144;
+  const ranked = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!rowMatchesFitType(r, fit.type)) continue;
+    const g = geometryFor(geometryMap, r);
+    if (!pieceFitsJob(g, r, fit.lengthIn, fit.widthIn)) continue;
+    const area = pieceAreaSqft(g, r);
+    const waste = area != null ? Math.max(0, area - jobSqft) : null;
+    ranked.push({
+      row: r,
+      geometry: g,
+      area_sqft: area,
+      waste_sqft: waste != null ? Math.round(waste * 10) / 10 : null,
+      waste_pct: waste != null && area ? Math.round((waste / area) * 1000) / 10 : null,
+    });
+  }
+  const typeRank = (r) => (trimStr(r.source_inventory_type) === "Remnant" ? 0 : 1);
+  ranked.sort(
+    (a, b) =>
+      (a.waste_sqft ?? Infinity) - (b.waste_sqft ?? Infinity) || typeRank(a.row) - typeRank(b.row)
+  );
+  return ranked;
+}
+
 /**
  * Normalize query params for the color inventory (per-slab rows) endpoint.
  * @param {Record<string, unknown>} query
@@ -879,6 +997,17 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
 
   function scopeInventory(query, organizationId, sourceFilter) {
     return applyInventorySourceFilter(scopeOrg(query, organizationId), sourceFilter);
+  }
+
+  // Derived piece geometry for the given rows. Non-fatal when the table is not installed yet.
+  async function loadGeometryMap(supabase, scope, rows) {
+    try {
+      const geo = await fetchRowsForInventorySlabIds(supabase, TABLE_SLAB_PIECE_GEOMETRY, scope, rows, GEOMETRY_SELECT_COLUMNS);
+      return new Map(geo.map((g) => [`${trimStr(g.external_source)}|${trimStr(g.external_slab_id)}`, g]));
+    } catch (e) {
+      if (isMissingRelationError(e) || e?.code === "PGRST205") return new Map();
+      throw e;
+    }
   }
 
   // GET /api/slab-inventory/summary — counts + last sync metadata (read-only).
@@ -1168,7 +1297,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           scope(
             supabase
               .from("slab_inventory")
-              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope")
+              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope,length_actual_in,width_actual_in")
               .eq("is_active", true)
               .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
               .in("source_inventory_type", ["Slab", "Remnant"])
@@ -1181,10 +1310,14 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         throw error;
       }
 
-      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, rowList, SLAB_IMAGE_SELECT_COLUMNS);
+      const fit = parseFitParams(req.query);
+      const [imgRows, geometryMap] = await Promise.all([
+        fetchSlabImagesForInventoryRows(supabase, scope, rowList, SLAB_IMAGE_SELECT_COLUMNS),
+        fit ? loadGeometryMap(supabase, scope, rowList) : Promise.resolve(new Map()),
+      ]);
       const imageMap = buildImageMap(imgRows, sourceFilter);
 
-      const cards = groupColorPrograms(rowList, imageMap, sourceFilter);
+      const cards = summarizeColorDimensions(groupColorPrograms(rowList, imageMap, sourceFilter), rowList, geometryMap, fit);
 
       res.json({
         ok: true,
@@ -1192,6 +1325,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         organization_id: organizationId,
         color_programs: cards,
         total: cards.length,
+        fit: fit ? { length_in: fit.lengthIn, width_in: fit.widthIn, type: fit.type } : null,
         price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
         source_inventory_scope: COLOR_PROGRAM_SCOPE,
         source_price_group_label: SOURCE_PRICE_GROUP_LABEL,
@@ -1259,7 +1393,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         typeFiltered = colorMatched.filter((r) => trimStr(r.source_inventory_type) === "Remnant");
       }
 
-      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, typeFiltered, SLAB_IMAGE_SELECT_COLUMNS);
+      const [imgRows, geometryMap] = await Promise.all([
+        fetchSlabImagesForInventoryRows(supabase, scope, typeFiltered, SLAB_IMAGE_SELECT_COLUMNS),
+        loadGeometryMap(supabase, scope, typeFiltered),
+      ]);
       const imageMap = buildImageMap(imgRows, sourceFilter);
 
       // Apply image_status post-filter (after images are resolved).
@@ -1295,7 +1432,8 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           image_source_label: imagePatternDisplayLabel(img?.image_url_pattern),
           source_public_slug: r.source_public_slug ?? null,
           source_api_company_code: r.source_api_company_code ?? null,
-          source_asset_company_code: r.source_asset_company_code ?? null
+          source_asset_company_code: r.source_asset_company_code ?? null,
+          geometry: toPieceGeometryDto(geometryFor(geometryMap, r))
         };
       });
 
@@ -1306,6 +1444,92 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         rows: mapped,
         total: mapped.length,
         source_price_group_label: SOURCE_PRICE_GROUP_LABEL
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // GET /api/slab-inventory/fit — pieces that fit a job size, ranked by least waste.
+  //
+  // Query params:
+  //   length_in, width_in     job piece size in inches (either orientation; one value = square)
+  //   type=remnant|slab|all   default: all
+  //   limit                   default 60, max 200
+  //
+  // Fit uses photo-derived inscribed rectangles (slab_piece_geometry) so L-shaped and
+  // notched remnants only match where usable stone exists; pieces without derived
+  // geometry fall back to the Slabsmith L×W bounding box.
+  app.get("/api/slab-inventory/fit", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const fit = parseFitParams(req.query);
+      if (!fit) return res.status(400).json({ ok: false, error: "length_in and/or width_in required (inches, 0–400)" });
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60));
+
+      const supabase = db();
+      const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
+      const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
+
+      let rows;
+      try {
+        rows = await fetchAllRowsPaginated(() =>
+          scope(
+            supabase
+              .from("slab_inventory")
+              .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
+              .eq("is_active", true)
+              .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+              .in("source_inventory_type", ["Slab", "Remnant"])
+          )
+        );
+      } catch (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, pieces: [], message: "Slab inventory cache not installed." });
+        }
+        throw error;
+      }
+
+      const typed = rows.filter((r) => rowMatchesFitType(r, fit.type));
+      const geometryMap = await loadGeometryMap(supabase, scope, typed);
+      const ranked = rankFitPieces(typed, geometryMap, fit);
+      const page = ranked.slice(0, limit);
+      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, page.map((p) => p.row), SLAB_IMAGE_SELECT_COLUMNS);
+      const imageMap = buildImageMap(imgRows, sourceFilter);
+
+      const pieces = page.map(({ row: r, geometry, area_sqft, waste_sqft, waste_pct }) => {
+        const img = lookupInventoryImage(imageMap, r, sourceFilter);
+        return {
+          id: r.id ?? null,
+          external_slab_id: r.external_slab_id ?? null,
+          inventory_id: r.inventory_id ?? null,
+          color_key: makeColorKey(r.color_name, r.material_name, r.price_group),
+          color_name: r.color_name ?? null,
+          material_name: r.material_name ?? null,
+          source_price_group: r.price_group ?? null,
+          source_inventory_type: r.source_inventory_type ?? null,
+          thickness_nominal: r.thickness_nominal ?? null,
+          rack: r.rack ?? null,
+          lot: r.lot ?? null,
+          length_actual_in: r.length_actual_in ?? null,
+          width_actual_in: r.width_actual_in ?? null,
+          image_url: img?.image_url ?? null,
+          thumbnail_url: img?.thumbnail_url ?? null,
+          area_sqft,
+          waste_sqft,
+          waste_pct,
+          fit_basis: geometry?.status === "ok" ? "photo_geometry" : "bounding_box",
+          geometry: toPieceGeometryDto(geometry),
+        };
+      });
+
+      res.json({
+        ok: true,
+        fit: { length_in: fit.lengthIn, width_in: fit.widthIn, type: fit.type, job_sqft: Math.round(((fit.lengthIn * fit.widthIn) / 144) * 10) / 10 },
+        total_matches: ranked.length,
+        pieces,
+        geometry_coverage: { pieces_considered: typed.length, with_photo_geometry: typed.filter((r) => geometryFor(geometryMap, r)?.status === "ok").length },
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -2158,6 +2382,6 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   });
 
   console.log(
-    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only), GET /api/public/cambria-showroom (read-only)"
+    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /fit, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only), GET /api/public/cambria-showroom (read-only)"
   );
 }

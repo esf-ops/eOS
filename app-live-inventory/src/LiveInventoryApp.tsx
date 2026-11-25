@@ -1,16 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
-import MeasureView from "./components/MeasureView";
+import MeasureView, { type PieceGeometry } from "./components/MeasureView";
 import { apiGet, ApiError } from "./lib/api";
 import { browseImageUrl, enrichColorProgramImages } from "./lib/enrichColorImages";
+import { parseJobSize, pieceFitsJob, type JobSize } from "./lib/fit";
 import { getSupabase } from "./lib/supabase";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const HOME_URL = String(import.meta.env.VITE_HOME_URL || "https://www.eliteosfab.com").replace(/\/+$/, "");
-/** Stock authority — Slabsmith cache. Photos may be sparse; SlabCloud fills blanks. */
+/** Stock + photo authority — Slabsmith cache. SlabCloud only fills colors with no Slabsmith photo. */
 const INVENTORY_SOURCE = "slabsmith";
 const IMAGE_ENRICH_SOURCE = "slabcloud";
 
@@ -24,6 +25,22 @@ type ColorProgram = {
   remnant_count: number;
   representative_image_url: string | null;
   representative_thumbnail_url: string | null;
+  largest_piece_long_in?: number | null;
+  largest_piece_short_in?: number | null;
+};
+
+type FitPiece = Piece & {
+  color_key: string;
+  area_sqft: number | null;
+  waste_sqft: number | null;
+  waste_pct: number | null;
+  fit_basis: "photo_geometry" | "bounding_box";
+};
+
+type FitResponse = {
+  total_matches?: number;
+  pieces?: FitPiece[];
+  fit?: { job_sqft?: number };
 };
 
 type Piece = {
@@ -42,6 +59,7 @@ type Piece = {
   image_url: string | null;
   thumbnail_url: string | null;
   image_status?: string | null;
+  geometry?: PieceGeometry | null;
 };
 
 type Filters = {
@@ -78,6 +96,25 @@ function fmtArea(w: number | null | undefined, l: number | null | undefined) {
   return `${Math.round((w * l) / 144)} ft²`;
 }
 
+function fmtSize(long: number | null | undefined, short: number | null | undefined) {
+  if (long == null || short == null) return null;
+  return `${Math.round(long)}″ × ${Math.round(short)}″`;
+}
+
+/** Area from the photo outline when measured, else L×W. */
+function pieceAreaLabel(piece: Piece) {
+  const a = piece.geometry?.area_sqft;
+  if (a != null && Number.isFinite(a)) return `${Math.round(a * 10) / 10} ft²`;
+  return fmtArea(piece.width_actual_in, piece.length_actual_in);
+}
+
+/** Largest usable rectangle, shown only when the piece is not a plain rectangle. */
+function usableLabel(piece: Piece) {
+  const g = piece.geometry;
+  if (!g || g.is_rectangular || !g.usable_long_in || !g.usable_short_in) return null;
+  return fmtSize(g.usable_long_in, g.usable_short_in);
+}
+
 function syncAgeLabel(iso: string | null | undefined) {
   if (!iso) return null;
   const t = Date.parse(iso);
@@ -101,8 +138,14 @@ export default function LiveInventoryApp() {
   const [typeFilter, setTypeFilter] = useState<"all" | "Slab" | "Remnant">("all");
   const [material, setMaterial] = useState("");
   const [priceGroup, setPriceGroup] = useState("");
-  const [minLength, setMinLength] = useState("");
-  const [minWidth, setMinWidth] = useState("");
+  const [jobLength, setJobLength] = useState("");
+  const [jobWidth, setJobWidth] = useState("");
+  const [job, setJob] = useState<JobSize | null>(null);
+  const [view, setView] = useState<"colors" | "fit">("colors");
+  const [fitCounts, setFitCounts] = useState<Map<string, number> | null>(null);
+  const [fitResult, setFitResult] = useState<FitResponse | null>(null);
+  const [fitLoading, setFitLoading] = useState(false);
+  const preferPieceIdRef = useRef<string | null>(null);
 
   const [summary, setSummary] = useState<Summary | null>(null);
   const [filters, setFilters] = useState<Filters | null>(null);
@@ -122,6 +165,65 @@ export default function LiveInventoryApp() {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
     return () => window.clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const next = parseJobSize(jobLength, jobWidth);
+      setJob((prev) =>
+        prev?.lengthIn === next?.lengthIn && prev?.widthIn === next?.widthIn ? prev : next
+      );
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [jobLength, jobWidth]);
+
+  const fitType = typeFilter === "Slab" ? "slab" : typeFilter === "Remnant" ? "remnant" : "all";
+
+  // Shape-aware fit: which colors have a piece that fits the job (grid) + ranked best-fit pieces.
+  useEffect(() => {
+    if (!token || !job) {
+      setFitCounts(null);
+      setFitResult(null);
+      if (!job) setView("colors");
+      return;
+    }
+    let cancelled = false;
+    setFitLoading(true);
+    const qs = (extra: Record<string, string>) =>
+      new URLSearchParams({ source: INVENTORY_SOURCE, ...extra }).toString();
+    Promise.all([
+      apiGet(
+        `/api/slab-inventory/color-programs?${qs({
+          fit_length_in: String(job.lengthIn),
+          fit_width_in: String(job.widthIn),
+          fit_type: fitType,
+        })}`,
+        token
+      ) as Promise<{ color_programs?: (ColorProgram & { fit_count?: number })[] }>,
+      apiGet(
+        `/api/slab-inventory/fit?${qs({
+          length_in: String(job.lengthIn),
+          width_in: String(job.widthIn),
+          type: fitType,
+          limit: "200",
+        })}`,
+        token
+      ) as Promise<FitResponse>,
+    ])
+      .then(([colors, fit]) => {
+        if (cancelled) return;
+        setFitCounts(new Map((colors.color_programs || []).map((c) => [c.color_key, c.fit_count ?? 0])));
+        setFitResult(fit);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setFitLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, job, fitType]);
 
   useEffect(() => {
     const sb = getSupabase();
@@ -187,6 +289,7 @@ export default function LiveInventoryApp() {
       if (typeFilter === "Remnant" && !(p.remnant_count > 0)) return false;
       if (material && p.material_name !== material) return false;
       if (priceGroup && p.source_price_group !== priceGroup) return false;
+      if (fitCounts && !fitCounts.get(p.color_key)) return false;
       if (q) {
         const hay = `${p.color_name || ""} ${p.material_name || ""} ${p.source_price_group || ""} ${p.color_key}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -200,7 +303,20 @@ export default function LiveInventoryApp() {
       if (an && !bn) return -1;
       return an.localeCompare(bn, undefined, { sensitivity: "base" });
     });
-  }, [programs, debouncedSearch, typeFilter, material, priceGroup]);
+  }, [programs, debouncedSearch, typeFilter, material, priceGroup, fitCounts]);
+
+  const visibleFitPieces = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    return (fitResult?.pieces || []).filter((p) => {
+      if (material && p.material_name !== material) return false;
+      if (priceGroup && p.source_price_group !== priceGroup) return false;
+      if (q) {
+        const hay = `${p.color_name || ""} ${p.material_name || ""} ${p.inventory_id || ""} ${p.rack || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [fitResult, debouncedSearch, material, priceGroup]);
 
   const loadColorPieces = useCallback(
     async (colorKey: string, tab: "slab" | "remnant") => {
@@ -218,20 +334,11 @@ export default function LiveInventoryApp() {
           token
         )) as { rows?: Piece[] };
         let rows = body.rows || [];
-        const minL = Number(minLength);
-        const minW = Number(minWidth);
-        if (Number.isFinite(minL) && minL > 0) {
-          rows = rows.filter((r) => (r.length_actual_in ?? 0) >= minL || (r.width_actual_in ?? 0) >= minL);
-        }
-        if (Number.isFinite(minW) && minW > 0) {
-          rows = rows.filter((r) => {
-            const a = r.length_actual_in ?? 0;
-            const b = r.width_actual_in ?? 0;
-            return Math.min(a, b) >= minW || Math.max(a, b) >= minW;
-          });
-        }
+        if (job) rows = rows.filter((r) => pieceFitsJob(r, job));
         setPieces(rows);
-        setSelectedPiece(rows[0] || null);
+        const preferId = preferPieceIdRef.current;
+        preferPieceIdRef.current = null;
+        setSelectedPiece((preferId && rows.find((r) => r.id === preferId)) || rows[0] || null);
       } catch (e) {
         setPieces([]);
         setSelectedPiece(null);
@@ -240,16 +347,21 @@ export default function LiveInventoryApp() {
         setPiecesLoading(false);
       }
     },
-    [token, minLength, minWidth]
+    [token, job]
   );
+
+  const [preferTab, setPreferTab] = useState<"slab" | "remnant" | null>(null);
 
   useEffect(() => {
     if (!selectedColor) return;
-    const preferRemnant = typeFilter === "Remnant" || (selectedColor.remnant_count > 0 && selectedColor.slab_count === 0);
+    const preferRemnant =
+      preferTab === "remnant" ||
+      (preferTab == null &&
+        (typeFilter === "Remnant" || (selectedColor.remnant_count > 0 && selectedColor.slab_count === 0)));
     const tab = preferRemnant ? "remnant" : "slab";
     setColorTab(tab);
     void loadColorPieces(selectedColor.color_key, tab);
-  }, [selectedColor, typeFilter, loadColorPieces]);
+  }, [selectedColor, preferTab, typeFilter, loadColorPieces]);
 
   const menuItems: EliteosTopbarMenuItem[] = useMemo(
     () => [{ id: "home", label: "Open Home", onSelect: () => { window.location.href = HOME_URL; } }],
@@ -267,15 +379,38 @@ export default function LiveInventoryApp() {
     setTypeFilter("all");
     setMaterial("");
     setPriceGroup("");
-    setMinLength("");
-    setMinWidth("");
+    setJobLength("");
+    setJobWidth("");
+    setView("colors");
   }
 
   function openColor(p: ColorProgram) {
+    setPreferTab(null);
     setSelectedColor(p);
     setToolNote(null);
     setMeasurePiece(null);
     setLoading(false);
+  }
+
+  function openFitPiece(piece: FitPiece) {
+    const program =
+      programs.find((p) => p.color_key === piece.color_key) ||
+      ({
+        color_key: piece.color_key,
+        color_name: piece.color_name,
+        material_name: piece.material_name,
+        source_price_group: piece.source_price_group,
+        total_inventory_count: 0,
+        slab_count: 0,
+        remnant_count: 0,
+        representative_image_url: piece.image_url,
+        representative_thumbnail_url: piece.thumbnail_url,
+      } as ColorProgram);
+    preferPieceIdRef.current = piece.id;
+    setPreferTab(piece.source_inventory_type === "Remnant" ? "remnant" : "slab");
+    setSelectedColor(program);
+    setToolNote(null);
+    setMeasurePiece(null);
   }
 
   function closeColor() {
@@ -379,26 +514,30 @@ export default function LiveInventoryApp() {
             </option>
           ))}
         </select>
-        <input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step={1}
-          placeholder="Min. length"
-          value={minLength}
-          onChange={(e) => setMinLength(e.target.value)}
-          aria-label="Minimum length inches"
-        />
-        <input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step={1}
-          placeholder="Min. width"
-          value={minWidth}
-          onChange={(e) => setMinWidth(e.target.value)}
-          aria-label="Minimum width inches"
-        />
+        <div className="li-jobsize" role="group" aria-label="Fits a job piece">
+          <span className="li-jobsize-label">Fits</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={1}
+            placeholder="Length″"
+            value={jobLength}
+            onChange={(e) => setJobLength(e.target.value)}
+            aria-label="Job piece length in inches"
+          />
+          <span aria-hidden>×</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={1}
+            placeholder="Width″"
+            value={jobWidth}
+            onChange={(e) => setJobWidth(e.target.value)}
+            aria-label="Job piece width in inches"
+          />
+        </div>
         <button type="button" className="li-reset" onClick={resetFilters}>
           Reset
         </button>
@@ -406,17 +545,90 @@ export default function LiveInventoryApp() {
 
       <main className="main">
         <div className="li-statusline">
-          <span>
-            <strong>{visiblePrograms.length}</strong> colors
-            {summary?.total_active_slabs != null ? ` · ${summary.total_active_slabs} pieces` : ""}
-          </span>
-          {syncLabel ? <span className="li-sync">{syncLabel}</span> : null}
+          {job ? (
+            <div className="li-viewswitch" role="tablist" aria-label="Results view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "colors"}
+                className={view === "colors" ? "active" : ""}
+                onClick={() => setView("colors")}
+              >
+                Colors <span>{visiblePrograms.length}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "fit"}
+                className={view === "fit" ? "active" : ""}
+                onClick={() => setView("fit")}
+              >
+                Best fit <span>{visibleFitPieces.length}</span>
+              </button>
+            </div>
+          ) : (
+            <span>
+              <strong>{visiblePrograms.length}</strong> colors
+              {summary?.total_active_slabs != null ? ` · ${summary.total_active_slabs} pieces` : ""}
+            </span>
+          )}
+          {job ? (
+            <span className="li-sync">
+              {fitLoading
+                ? "Matching…"
+                : `Pieces that fit ${Math.round(job.lengthIn)}″ × ${Math.round(job.widthIn)}″ — measured from each piece's real shape`}
+            </span>
+          ) : syncLabel ? (
+            <span className="li-sync">{syncLabel}</span>
+          ) : null}
         </div>
 
         {error ? <div className="li-error">{error}</div> : null}
         {loading ? <div className="li-muted">Loading inventory…</div> : null}
 
-        <div className="li-grid" role="list">
+        {job && view === "fit" ? (
+          <>
+            <div className="li-grid" role="list">
+              {visibleFitPieces.map((p, idx) => {
+                const img = p.thumbnail_url || p.image_url;
+                const usable = usableLabel(p);
+                return (
+                  <button
+                    key={p.id || p.external_slab_id || `fit-${idx}`}
+                    type="button"
+                    className="li-card"
+                    role="listitem"
+                    onClick={() => openFitPiece(p)}
+                  >
+                    <div className="li-card-media">
+                      {img ? <img src={img} alt="" loading="lazy" /> : <div className="li-card-placeholder" aria-hidden />}
+                      {idx === 0 ? <span className="li-fit-rank">Best fit</span> : null}
+                    </div>
+                    <div className="li-card-head">
+                      <h2>{p.color_name || "Unnamed"}</h2>
+                      <p>
+                        {p.material_name || "—"} · {p.source_inventory_type === "Remnant" ? "Remnant" : "Slab"}
+                      </p>
+                      <p className="li-card-dims">
+                        {fmtIn(p.length_actual_in)} × {fmtIn(p.width_actual_in)}
+                        {usable ? ` · usable ${usable}` : ""}
+                      </p>
+                      <span className={`li-stock${p.waste_pct != null && p.waste_pct > 50 ? " warn" : ""}`}>
+                        {p.waste_pct != null ? `${Math.round(p.waste_pct)}% leftover` : "Fits"}
+                        {p.waste_sqft != null ? ` · ${p.waste_sqft} ft²` : ""}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {!fitLoading && visibleFitPieces.length === 0 ? (
+              <p className="li-empty">No pieces in stock fit this size. Try a smaller piece or include slabs.</p>
+            ) : null}
+          </>
+        ) : null}
+
+        <div className="li-grid" role="list" hidden={Boolean(job && view === "fit")}>
           {visiblePrograms.map((p) => {
             const img = browseImageUrl(p);
             const stock =
@@ -462,14 +674,19 @@ export default function LiveInventoryApp() {
                 <div className="li-card-head">
                   <h2>{p.color_name || "Unnamed"}</h2>
                   <p>{p.material_name || "—"}</p>
-                  <span className="li-stock">In Stock — {stock}</span>
+                  {fmtSize(p.largest_piece_long_in, p.largest_piece_short_in) ? (
+                    <p className="li-card-dims">Up to {fmtSize(p.largest_piece_long_in, p.largest_piece_short_in)}</p>
+                  ) : null}
+                  <span className="li-stock">
+                    {fitCounts ? `${fitCounts.get(p.color_key) ?? 0} fit` : `In Stock — ${stock}`}
+                  </span>
                 </div>
               </button>
             );
           })}
         </div>
 
-        {!loading && visiblePrograms.length === 0 ? (
+        {!loading && view === "colors" && visiblePrograms.length === 0 ? (
           <p className="li-empty">No colors match these filters.</p>
         ) : null}
       </main>
@@ -517,11 +734,15 @@ export default function LiveInventoryApp() {
                     <dt>Size</dt>
                     <dd>
                       {fmtIn(activePiece.length_actual_in)} × {fmtIn(activePiece.width_actual_in)}
-                      {fmtArea(activePiece.width_actual_in, activePiece.length_actual_in)
-                        ? ` · ${fmtArea(activePiece.width_actual_in, activePiece.length_actual_in)}`
-                        : ""}
+                      {pieceAreaLabel(activePiece) ? ` · ${pieceAreaLabel(activePiece)}` : ""}
                     </dd>
                   </div>
+                  {usableLabel(activePiece) ? (
+                    <div>
+                      <dt>Largest usable</dt>
+                      <dd>{usableLabel(activePiece)}</dd>
+                    </div>
+                  ) : null}
                   <div>
                     <dt>Thickness</dt>
                     <dd>{activePiece.thickness_nominal || "—"}</dd>
@@ -588,6 +809,11 @@ export default function LiveInventoryApp() {
                 </button>
               </div>
 
+              {job ? (
+                <p className="li-muted">
+                  Showing pieces that fit {Math.round(job.lengthIn)}″ × {Math.round(job.widthIn)}″.
+                </p>
+              ) : null}
               {piecesLoading ? <p className="li-muted">Loading pieces…</p> : null}
 
               <div className="li-piece-rail" role="list">
@@ -612,6 +838,10 @@ export default function LiveInventoryApp() {
                         <strong>
                           {fmtIn(piece.length_actual_in)} × {fmtIn(piece.width_actual_in)}
                         </strong>
+                        <span>
+                          {pieceAreaLabel(piece) || "—"}
+                          {usableLabel(piece) ? ` · usable ${usableLabel(piece)}` : ""}
+                        </span>
                         <span>{piece.inventory_id || piece.lot || "Piece"}</span>
                         <span>{piece.rack || "—"}</span>
                       </div>
@@ -621,7 +851,9 @@ export default function LiveInventoryApp() {
               </div>
 
               {!piecesLoading && pieces.length === 0 ? (
-                <p className="li-empty">No {colorTab === "slab" ? "slabs" : "remnants"} in this color.</p>
+                <p className="li-empty">
+                  No {colorTab === "slab" ? "slabs" : "remnants"} in this color{job ? " fit this size" : ""}.
+                </p>
               ) : null}
             </div>
           </div>
@@ -633,6 +865,7 @@ export default function LiveInventoryApp() {
           imageUrl={measurePiece.image_url || measurePiece.thumbnail_url || ""}
           lengthIn={measurePiece.length_actual_in}
           widthIn={measurePiece.width_actual_in}
+          geometry={measurePiece.geometry}
           title={measurePiece.color_name || undefined}
           onClose={() => setMeasurePiece(null)}
         />

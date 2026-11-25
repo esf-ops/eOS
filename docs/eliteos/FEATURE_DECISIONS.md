@@ -5648,13 +5648,28 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | Field | Detail |
 |-------|--------|
 | **Date** | 2026-11-25 |
-| **Decision** | Live Inventory keeps **SlabCloud-class utility** (color-first browse, sticky filters, min L/W, stock counts, color lightbox with slabs/remnants, Measure Auto + **Edit** with draggable points) but uses the **slabOS / eliteOS visual system** from `eliteos-ui-direction.md` / Home tokens — light `#f6f7fb`, navy ink, burgundy accent, soft washes — **not** a dark SlabCloud skin. Color programs sort **alphabetically by color name**. Representative images prefer `image_status=ok`, then fall back to any available URL so the grid is not empty. Measure is original eliteOS canvas (no SlabCloud iframe / `manager.js`). |
+| **Decision** | Live Inventory keeps **SlabCloud-class utility** (color-first browse, sticky filters, job-size fit (see 421), stock counts, color lightbox with slabs/remnants, Measure Auto + **Edit** with draggable points) but uses the **slabOS / eliteOS visual system** from `eliteos-ui-direction.md` / Home tokens — light `#f6f7fb`, navy ink, burgundy accent, soft washes — **not** a dark SlabCloud skin. Color programs sort **alphabetically by color name**. Representative images prefer `image_status=ok`, then fall back to any available URL so the grid is not empty. Measure is original eliteOS canvas (no SlabCloud iframe / `manager.js`). |
 | **Why** | Operators need the same stock-finding + remnant-measure jobs as SlabCloud, inside one eliteOS workspace look. |
 | **Limits** | Auto contour quality depends on photo contrast. Paint / Inquire / Wishlist remain scaffolded. Image fallback does not change verified_photo_count semantics. |
 | **Photos** | Live Inventory stock **and photos** come from `source=slabsmith` (eliteOS storage `eliteos-slab-images`, `full.jpg` + `thumb.jpg`; ~100% coverage of active pieces). SlabCloud photos only fill a color with **no** Slabsmith photo (many SlabCloud rows are stale/404). `/color-programs` and `/colors/:colorKey/inventory` paginate inventory and load `slab_images` **only for the active rows shown** (chunked `.in()`) — `slab_images` keeps retired-slab rows (8k+), so an org-wide read truncated at PostgREST's 1000-row cap and dropped most photos. Elite 100 / showroom / kiosk routes were intentionally left unchanged. |
 | **Measure Edit** | Edit → **Add point** clicks an edge (green +) to insert vertices for custom 5+ side shapes; Move drags corners; right-click removes. |
 | **Impacted files** | `app-live-inventory/*`, `slabInventoryApi.js` (+ tests), this entry. |
 | **Revisit trigger** | DXF/outline sync; durable cross-source image identity map; public no-login showroom. |
+
+---
+
+### 421. Piece geometry from the Slabsmith photo — shape-aware fit + remnant matching
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-25 |
+| **Decision** | New Brain-only table **`slab_piece_geometry`** (`backend-core/supabase/eliteos_slab_piece_geometry_v1.sql`, applied to production) stores, per active Slabsmith piece: outline (full-image px), px/in, stone area, largest inscribed rectangle, and a **fit frontier** (Pareto set of usable `[short, long]` rectangles). Derived from the piece's own `slabsmith_local_upload` photo (`slabPieceGeometry.js`, method `photo_mask_v1`) by `slabPieceGeometryJob.js` — cron `GET /api/internal/slab-inventory/geometry/derive` every 15 min (cron-secret gated) plus `npm run eos:slab-geometry:derive` for backfill. |
+| **Authority** | `slab_inventory` stays stock authority (Slabsmith L×W); `slab_images` stays photo authority; geometry is a **derived cache**, recomputed when photo URL/`updated_at`, source L×W, or method change; errors retry after 24h. Never edited by hand. |
+| **Why** | Slabsmith XML has no outline (`UsableA/D` are just W/L in mm). Slabsmith photos are rectified top-down shots on white: stone bbox matches L×W within 0.6% (p95) across all 1,061 active pieces (max 2.6%). **311 of 1,061 (29%) are shaped**, so bounding-box "fits" is wrong for ~⅓ of stock. |
+| **API** | `/color-programs` adds `largest_piece_long_in/short_in`; with `fit_length_in`/`fit_width_in`/`fit_type` it returns only colors with a fitting piece plus `fit_count` (counts unchanged). `/colors/:colorKey/inventory` adds an explicit `geometry` DTO per piece. New `GET /api/slab-inventory/fit?length_in&width_in&type&limit` ranks fitting pieces by least leftover stone (remnants first on ties); pieces without geometry fall back to L×W (`fit_basis`). Elite 100 / showroom / kiosk / non-stock routes unchanged. |
+| **App** | Live Inventory: "Fits L × W" filter (either orientation), "Best fit" view ranked by leftover %, largest-piece size on cards, area + largest usable rectangle on pieces, Measure opens on the stored true-scale outline (still editable). |
+| **Limits** | Axis-aligned rectangles only (no rotated/angled cut fit, no multi-piece nesting yet). Requires the white-field Slabsmith photo; SlabCloud-only pieces use L×W. Seams/defects in the stone are not detected. |
+| **Revisit trigger** | Multi-piece job nesting; angled cuts; defect marking; DXF export to saw/CAD. |
 
 ---
 

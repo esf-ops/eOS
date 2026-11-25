@@ -8,13 +8,40 @@ import {
   type Point,
 } from "../lib/slabOutline";
 
+export type PieceGeometry = {
+  outline_px: [number, number][] | null;
+  image_width_px: number | null;
+  image_height_px: number | null;
+  px_per_in: number | null;
+  area_sqft: number | null;
+  usable_long_in: number | null;
+  usable_short_in: number | null;
+  fit_frontier_in: [number, number][] | null;
+  is_rectangular: boolean | null;
+};
+
 type Props = {
   imageUrl: string;
   lengthIn: number | null;
   widthIn: number | null;
+  geometry?: PieceGeometry | null;
   title?: string;
   onClose: () => void;
 };
+
+/** Stored outline (derived server-side from this photo) mapped onto the loaded image's pixels. */
+function outlineFromGeometry(geometry: PieceGeometry | null | undefined, naturalW: number, naturalH: number) {
+  if (!geometry?.outline_px?.length || !geometry.image_width_px || !geometry.image_height_px || !geometry.px_per_in) {
+    return null;
+  }
+  const sx = naturalW / geometry.image_width_px;
+  const sy = naturalH / geometry.image_height_px;
+  if (Math.abs(sx - sy) > 0.02) return null;
+  return {
+    contour: geometry.outline_px.map(([x, y]) => ({ x: x * sx, y: y * sy })),
+    inchesPerPixel: 1 / (geometry.px_per_in * sx),
+  };
+}
 
 type Mode = "auto" | "edit";
 type EditTool = "move" | "add";
@@ -49,7 +76,7 @@ function hitPoint(contour: Point[], x: number, y: number, radius: number) {
   return -1;
 }
 
-export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClose }: Props) {
+export default function MeasureView({ imageUrl, lengthIn, widthIn, geometry, title, onClose }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const viewScaleRef = useRef(1);
@@ -157,6 +184,13 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
   const runAuto = useCallback(() => {
     const image = imgRef.current;
     if (!image) return;
+    const stored = outlineFromGeometry(geometry, image.naturalWidth, image.naturalHeight);
+    if (stored) {
+      setContour(stored.contour);
+      setInchesPerPixel(stored.inchesPerPixel);
+      paint(stored.contour, stored.inchesPerPixel, false, "move");
+      return;
+    }
     const analyzed = analyzeSlabImage(image, { lengthIn, widthIn });
     // Keep enough vertices for irregular remnants (not forced to 4).
     const epsilon = Math.max(4, Math.min(image.naturalWidth, image.naturalHeight) * 0.006);
@@ -169,7 +203,7 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
     setContour(pts);
     setInchesPerPixel(analyzed.inchesPerPixel);
     paint(pts, analyzed.inchesPerPixel, false, "move");
-  }, [lengthIn, widthIn, paint]);
+  }, [lengthIn, widthIn, geometry, paint]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,6 +380,11 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
           ) : null}
           <div className="li-measure-meta" aria-live="polite">
             <span className="li-measure-points">{contour.length} pts</span>
+            {geometry?.usable_long_in && geometry.usable_short_in && !geometry.is_rectangular ? (
+              <span className="li-measure-points">
+                Largest usable {fmtIn(geometry.usable_long_in)} × {fmtIn(geometry.usable_short_in)}
+              </span>
+            ) : null}
             <span className="li-measure-area">
               Area: <strong>{areaSqFt != null ? `${areaSqFt} ft²` : "—"}</strong>
             </span>
@@ -372,7 +411,9 @@ export default function MeasureView({ imageUrl, lengthIn, widthIn, title, onClos
             ? editTool === "add"
               ? "Click a green + on an edge (or anywhere along an edge) to add a vertex. Switch to Move to drag corners. Right-click a point to remove."
               : "Drag orange handles to adjust. Use Add point for custom shapes (5+ sides). Right-click a point to remove."
-            : "Auto traces the photo. Switch to Edit → Add point for custom remnant shapes."}
+            : geometry?.outline_px?.length
+              ? "Outline measured from this piece's photo at true scale. Switch to Edit to adjust or add points."
+              : "Auto traces the photo. Switch to Edit → Add point for custom remnant shapes."}
         </p>
       </div>
     </div>

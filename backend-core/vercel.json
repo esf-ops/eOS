@@ -29,6 +29,10 @@
     {
       "path": "/api/internal/integration-feeds/stale-check",
       "schedule": "40 * * * *"
+    },
+    {
+      "path": "/api/internal/slab-inventory/geometry/derive",
+      "schedule": "*/15 * * * *"
     }
   ],
   "git": {
