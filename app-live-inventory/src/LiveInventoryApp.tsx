@@ -164,11 +164,11 @@ function ColorTile({
         </span>
       </TileMedia>
       <div className="li-tile-body">
-        <div className="li-tile-title">
-          <h3>{p.color_name || "Unnamed"}</h3>
+        <h3 className="li-tile-name">{p.color_name || "Unnamed"}</h3>
+        <div className="li-tile-meta">
+          <p>{p.material_name || "—"}</p>
           {size ? <span className="li-tile-size">up to {size}</span> : null}
         </div>
-        <p>{p.material_name || "—"}</p>
       </div>
     </button>
   );
@@ -705,7 +705,7 @@ export default function LiveInventoryApp() {
 
         {showFit ? (
           <>
-            <div className="li-grid" role="list">
+            <div className="li-grid li-grid--pieces" role="list">
               {visibleFitPieces.map((p, idx) => {
                 const usable = usableLabel(p);
                 const remnant = p.source_inventory_type === "Remnant";
@@ -732,17 +732,16 @@ export default function LiveInventoryApp() {
                       </span>
                     </TileMedia>
                     <div className="li-tile-body">
-                      <div className="li-tile-title">
-                        <h3>{p.color_name || "Unnamed"}</h3>
+                      <h3 className="li-tile-name">{p.color_name || "Unnamed"}</h3>
+                      <div className="li-tile-meta">
+                        <p>
+                          {p.material_name || "—"}
+                          {p.rack ? ` · ${p.rack}` : ""}
+                        </p>
                         <span className="li-tile-size">
-                          {fmtIn(p.length_actual_in)} × {fmtIn(p.width_actual_in)}
+                          {usable ? `usable ${usable}` : `${fmtIn(p.length_actual_in)} × ${fmtIn(p.width_actual_in)}`}
                         </span>
                       </div>
-                      <p>
-                        {p.material_name || "—"}
-                        {usable ? ` · usable ${usable}` : ""}
-                        {p.rack ? ` · ${p.rack}` : ""}
-                      </p>
                     </div>
                   </button>
                 );
