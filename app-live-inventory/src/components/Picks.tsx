@@ -299,7 +299,7 @@ export function ShareDialog({
                   </span>
                 </div>
                 <span className={`li-share-state ${s.state}`}>
-                  {s.state === "active" ? `${s.view_count} view${s.view_count === 1 ? "" : "s"}` : s.state}
+                  {s.state === "active" ? `${s.view_count} view${s.view_count === 1 ? "" : "s"}` : s.state === "revoked" ? "Revoked" : "Expired"}
                 </span>
                 {s.state === "active" ? (
                   <button type="button" onClick={() => void revoke(s.id)}>

@@ -4,6 +4,7 @@ import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopba
 import MeasureView, { type PieceGeometry } from "./components/MeasureView";
 import LayoutView from "./components/LayoutView";
 import { IconPick, loadPicks, PicksTray, savePicks, ShareDialog, type PickedPiece } from "./components/Picks";
+import { SimilarRail } from "./components/Similar";
 import { IconArrow, IconDownload, IconLayout, IconRuler, IconSearch, TileMedia, TileSkeleton } from "./components/Tiles";
 import { apiGet, ApiError } from "./lib/api";
 import { browseImageUrl, enrichColorProgramImages } from "./lib/enrichColorImages";
@@ -1119,6 +1120,14 @@ export default function LiveInventoryApp() {
                   No {colorTab === "slab" ? "slabs" : "remnants"} in this color{job ? " fit this size" : ""}.
                 </p>
               ) : null}
+
+              <SimilarRail
+                colorKey={selectedColor.color_key}
+                token={token}
+                source={INVENTORY_SOURCE}
+                thicknessMm={thicknessMm}
+                onOpen={openColor}
+              />
             </div>
           </div>
         </div>
@@ -1155,7 +1164,9 @@ export default function LiveInventoryApp() {
         />
       ) : null}
 
-      <PicksTray picks={picks} onShare={() => setShareOpen(true)} onClear={() => setPicks([])} />
+      {!measurePiece && !layoutPiece && !shareOpen ? (
+        <PicksTray picks={picks} onShare={() => setShareOpen(true)} onClear={() => setPicks([])} />
+      ) : null}
       {shareOpen && token ? (
         <ShareDialog
           picks={picks}

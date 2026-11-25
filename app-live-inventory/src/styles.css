@@ -1184,6 +1184,119 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── More like this ── */
+
+.li-similar {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--eos-line);
+}
+
+.li-similar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.li-similar-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--eos-ink);
+}
+
+.li-similar-head span {
+  font-size: 12px;
+  color: var(--eos-ink-muted);
+}
+
+.li-similar-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 132px;
+  gap: 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  padding: 2px 2px 10px;
+  margin: 0 -2px;
+}
+
+.li-similar-card {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  scroll-snap-align: start;
+  min-width: 0;
+}
+
+.li-similar-media {
+  aspect-ratio: 1;
+  border-radius: 14px;
+  margin-bottom: 6px;
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 6%);
+  transition: transform var(--eos-dur-1) var(--eos-ease), box-shadow var(--eos-dur-1) var(--eos-ease);
+}
+
+.li-similar-card:hover .li-similar-media,
+.li-similar-card:focus-visible .li-similar-media {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 8%), 0 10px 22px -12px rgb(15 23 42 / 45%);
+}
+
+.li-similar-card:focus-visible {
+  outline: none;
+}
+
+.li-similar-card:focus-visible .li-similar-media {
+  box-shadow: 0 0 0 3px var(--eos-accent-ring);
+}
+
+.li-similar-card strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--eos-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.li-similar-card span,
+.li-similar-card em {
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--eos-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.li-similar-card--skeleton {
+  cursor: default;
+}
+
+.li-similar-card--skeleton i {
+  display: block;
+  height: 10px;
+  border-radius: 6px;
+  background: var(--eos-line);
+  width: 80%;
+}
+
+.li-similar-card--skeleton i + i {
+  width: 55%;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .li-media,
   .li-media img,
@@ -1677,7 +1790,8 @@ a.li-action {
   position: fixed;
   left: 50%;
   bottom: 20px;
-  z-index: 70;
+  /* Above the color lightbox; hidden while Measure / Layout / Share are open. */
+  z-index: 85;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -1945,10 +2059,18 @@ a.li-action {
   padding: 6px 12px;
 }
 
+.li-share-fields .li-layout-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--eos-ink);
+  cursor: pointer;
+}
+
 .li-share-state {
   font-size: 12px;
   font-weight: 700;
-  text-transform: capitalize;
   color: var(--eos-ink-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -2079,6 +2201,10 @@ a.li-action {
 .ps-card:focus-visible {
   outline: 2px solid var(--eos-accent);
   outline-offset: 3px;
+}
+
+.ps-shell {
+  --li-tile-tint: #fbfbfa;
 }
 
 .ps-media {

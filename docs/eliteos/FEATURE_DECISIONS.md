@@ -5689,3 +5689,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 
 ---
 
+### 423. Live Inventory — "More like this" (swatch appearance features)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-25 |
+| **What** | Color lightbox shows in-stock colors that look closest in color + veining. `GET /api/slab-inventory/colors/:colorKey/similar?limit=&thickness_mm=` (same auth/head gate as `/color-programs`, org + source scoped) returns `/color-programs` card shape + `match_distance`; other variants of the same color name are excluded. |
+| **Features** | `slab_piece_geometry.swatch_features jsonb` (`eliteos_slab_piece_geometry_features_v1.sql`, additive, applied). Computed from the derived swatch by `swatchFeatures.js`: CIELAB mean, 3-color k-means palette, lightness spread at 64 px; fine-detail texture (high-passed, so photo lighting gradients don't count) at **swatch resolution** — photographed veins are thin and faint (≈5 L*), downsampling erased them. `v` versions the algorithm. |
+| **Ranking** | Each color is represented by the same piece as its card swatch (slab before remnant, then largest). `swatchDistance` = ½ ΔE(mean) + ½ palette distance + texture on a **log** scale (vein coverage, vein contrast) + lightness spread. Weights tuned by inspecting real neighbours (solid blacks → solid blacks, veined calacattas → veined calacattas, quartzites → quartzites). |
+| **Pipeline** | New swatches get features at upload; the 15-min geometry job also backfills up to 300 rows/run with missing or older-version features, reading only the ~40 KB swatch (not the full photo). Script: `eos:slab-geometry:derive -- --limit=0 --features=2000`. Derived cache only; `slab_inventory` remains stock authority. |
+| **Limits** | Appearance from one photo per color; photo exposure differences between suppliers shift L*. No learned embedding. |
+| **Revisit trigger** | Visible mismatches reported by reps, multi-photo colors, or room/paint tone matching (reuses `toneMatchDistance`). |
+
+---
+

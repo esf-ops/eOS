@@ -14,6 +14,7 @@ import jpeg from "jpeg-js";
 import { cropResizeRgba, deriveGeometryFromImage, GEOMETRY_METHOD, swatchOutputSize } from "./slabPieceGeometry.js";
 import { fetchAllRowsPaginated, SLAB_IMAGE_ID_CHUNK_SIZE } from "./slabInventorySummaryQueries.js";
 import { sanitizeStorageSegment, SLABSMITH_IMAGE_BUCKET } from "../slabsmith/slabsmithImageStorage.mjs";
+import { computeSwatchFeatures, SWATCH_FEATURES_VERSION } from "./swatchFeatures.js";
 
 export const TABLE_SLAB_PIECE_GEOMETRY = "slab_piece_geometry";
 export const GEOMETRY_SOURCE = "slabsmith";
@@ -28,6 +29,9 @@ export const GEOMETRY_SELECT_COLUMNS =
 
 /** Light projection for color cards (no outline / frontier). */
 export const GEOMETRY_CARD_COLUMNS = "external_source,external_slab_id,status,area_sqft,swatch_url";
+
+/** Card columns + appearance features (similarity / tone match). */
+export const GEOMETRY_FEATURE_COLUMNS = `${GEOMETRY_CARD_COLUMNS},swatch_features`;
 
 const sameNum = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.01);
 
@@ -143,7 +147,42 @@ async function uploadSwatch(db, img, rect, path) {
   const { data: pub } = db.storage.from(SLABSMITH_IMAGE_BUCKET).getPublicUrl(path);
   const url = String(pub?.publicUrl ?? "").trim();
   if (!url) throw new Error("swatch upload returned no public URL");
-  return { swatch_url: url, swatch_width_px: w, swatch_height_px: h };
+  return { swatch_url: url, swatch_width_px: w, swatch_height_px: h, swatch_features: computeSwatchFeatures(crop) };
+}
+
+/**
+ * Compute appearance features for `ok` pieces whose swatch has no features or features from an older version.
+ * Reads the small swatch JPEG, not the full photo. Idempotent; failures are skipped and retried next run.
+ * @param {{ db: any, limit?: number, concurrency?: number, fetchImpl?: typeof fetch, decodeImage?: (url: string) => Promise<any> }} opts
+ */
+export async function runSwatchFeatureBackfill({ db, limit = 300, concurrency = 6, fetchImpl = fetch, decodeImage }) {
+  const decode = decodeImage ?? ((url) => fetchJpeg(url, fetchImpl));
+  const { data, error } = await db
+    .from(TABLE_SLAB_PIECE_GEOMETRY)
+    .select("id,swatch_url")
+    .eq("status", "ok")
+    .not("swatch_url", "is", null)
+    .or(`swatch_features.is.null,swatch_features->>v.neq.${SWATCH_FEATURES_VERSION}`)
+    .limit(Math.max(0, limit));
+  if (error) throw error;
+  const rows = data ?? [];
+  const counts = { updated: 0, failed: 0 };
+  for (let i = 0; i < rows.length; i += concurrency) {
+    await Promise.all(
+      rows.slice(i, i + concurrency).map(async (r) => {
+        try {
+          const features = computeSwatchFeatures(await decode(r.swatch_url));
+          if (!features) throw new Error("no features");
+          const { error: upErr } = await db.from(TABLE_SLAB_PIECE_GEOMETRY).update({ swatch_features: features }).eq("id", r.id);
+          if (upErr) throw upErr;
+          counts.updated += 1;
+        } catch {
+          counts.failed += 1;
+        }
+      })
+    );
+  }
+  return { candidates: rows.length, ...counts };
 }
 
 /**
@@ -158,6 +197,7 @@ export async function runSlabGeometryDerivation({
   fetchImpl = fetch,
   decodeImage,
   writeSwatch,
+  featureLimit = 300,
 }) {
   const startedAt = Date.now();
   const work = await selectPendingGeometryWork(db, { organizationId });
@@ -169,13 +209,13 @@ export async function runSlabGeometryDerivation({
 
   async function processOne({ inv, image }) {
     let result;
-    let swatch = { swatch_url: null, swatch_width_px: null, swatch_height_px: null };
+    let swatch = { swatch_url: null, swatch_width_px: null, swatch_height_px: null, swatch_features: null };
     try {
       const img = await decode(image.image_url);
       result = deriveGeometryFromImage(img, { lengthIn: inv.length_actual_in, widthIn: inv.width_actual_in });
       if (result.status === "ok" && result.swatch_rect_px) {
         try {
-          swatch = await putSwatch(img, result.swatch_rect_px, swatchStoragePath(inv, image));
+          swatch = { ...swatch, ...(await putSwatch(img, result.swatch_rect_px, swatchStoragePath(inv, image))) };
           counts.swatches += 1;
         } catch (e) {
           counts.swatch_errors += 1;
@@ -227,7 +267,17 @@ export async function runSlabGeometryDerivation({
     await Promise.all(batch.slice(i, i + concurrency).map(processOne));
   }
 
+  let features = null;
+  if (featureLimit > 0) {
+    try {
+      features = await runSwatchFeatureBackfill({ db, limit: featureLimit, fetchImpl, decodeImage });
+    } catch (e) {
+      features = { error: String(e?.message || e).slice(0, 200) };
+    }
+  }
+
   return {
+    features,
     method: GEOMETRY_METHOD,
     active_pieces: work.active_pieces,
     active_with_photo: work.active_with_photo,

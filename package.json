@@ -131,7 +131,7 @@
     "eos:test:slab-color-program-matching": "node backend-core/src/slabInventory/colorProgramMatching.test.mjs",
     "eos:elite100:import-catalog": "node backend-core/src/scripts/slabInventory/importElite100Catalog.js",
     "eos:slab-geometry:derive": "node backend-core/src/scripts/slabInventory/deriveSlabPieceGeometry.js",
-    "eos:test:slab-piece-geometry": "node backend-core/src/slabInventory/slabPieceGeometry.test.mjs",
+    "eos:test:slab-piece-geometry": "node backend-core/src/slabInventory/slabPieceGeometry.test.mjs && node backend-core/src/slabInventory/swatchFeatures.test.mjs",
     "eos:elite100:preview-matches": "node backend-core/src/scripts/slabInventory/previewElite100Matches.js",
     "eos:elite100:import-alias-reviews": "node backend-core/src/scripts/slabInventory/importElite100AliasReviews.js",
     "eos:elite100:import-manual-photos": "node backend-core/src/scripts/slabInventory/importElite100ManualPhotos.js",

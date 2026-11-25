@@ -767,6 +767,7 @@ import {
     "/api/slab-inventory/slabs/:id",
     "/api/slab-inventory/color-programs",
     "/api/slab-inventory/colors/:colorKey/inventory",
+    "/api/slab-inventory/colors/:colorKey/similar",
     "/api/slab-inventory/elite100-programs",
     "/api/slab-inventory/elite100-programs/:catalogItemId/inventory",
     "/api/slab-inventory/non-stock-programs",

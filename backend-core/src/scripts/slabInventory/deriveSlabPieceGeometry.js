@@ -3,7 +3,7 @@
  * Backfill / refresh slab_piece_geometry for active Slabsmith pieces.
  * Same idempotent job the 15-minute cron runs; use for the initial backfill.
  *
- *   npm run eos:slab-geometry:derive -- [--limit=2000] [--dry-run]
+ *   npm run eos:slab-geometry:derive -- [--limit=2000] [--features=2000] [--dry-run]
  */
 
 import { dirname, join } from "node:path";
@@ -37,6 +37,7 @@ if (dryRun) {
   const work = await selectPendingGeometryWork(db);
   console.log(JSON.stringify({ dry_run: true, active_pieces: work.active_pieces, active_with_photo: work.active_with_photo, derived: work.derived, pending: work.pending.length }));
 } else {
-  const result = await runSlabGeometryDerivation({ db, limit, concurrency: 6 });
+  const featureLimit = Number(args.get("features") ?? 2000);
+  const result = await runSlabGeometryDerivation({ db, limit, concurrency: 6, featureLimit });
   console.log(JSON.stringify(result));
 }

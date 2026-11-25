@@ -38,7 +38,8 @@ import {
   resolveSummarySyncCoverage,
 } from "./slabInventorySummaryQueries.js";
 import { pieceAreaSqft, pieceFitsJob } from "./slabPieceGeometry.js";
-import { GEOMETRY_CARD_COLUMNS, GEOMETRY_SELECT_COLUMNS, TABLE_SLAB_PIECE_GEOMETRY } from "./slabPieceGeometryJob.js";
+import { GEOMETRY_CARD_COLUMNS, GEOMETRY_FEATURE_COLUMNS, GEOMETRY_SELECT_COLUMNS, TABLE_SLAB_PIECE_GEOMETRY } from "./slabPieceGeometryJob.js";
+import { swatchDistance } from "./swatchFeatures.js";
 import {
   matchSourceColorWithAliases,
   normalizeColorName as _normColorName,
@@ -869,6 +870,12 @@ export function toPieceGeometryDto(g) {
  * remnant, then the largest stone area. Cards without a derived swatch get null.
  */
 export function attachColorSwatches(cards, rows, geometryMap = new Map()) {
+  const best = bestSwatchPieces(rows, geometryMap);
+  return cards.map((c) => ({ ...c, swatch_url: best.get(c.color_key)?.url ?? null }));
+}
+
+/** color_key → { url, features } of the piece that represents the color (see attachColorSwatches). */
+export function bestSwatchPieces(rows, geometryMap = new Map()) {
   const best = new Map();
   for (const r of Array.isArray(rows) ? rows : []) {
     const g = geometryFor(geometryMap, r);
@@ -877,10 +884,28 @@ export function attachColorSwatches(cards, rows, geometryMap = new Map()) {
     const score = [trimStr(r.source_inventory_type) === "Slab" ? 1 : 0, Number(g.area_sqft) || 0];
     const cur = best.get(key);
     if (!cur || score[0] > cur.score[0] || (score[0] === cur.score[0] && score[1] > cur.score[1])) {
-      best.set(key, { score, url: g.swatch_url });
+      best.set(key, { score, url: g.swatch_url, features: g.swatch_features ?? null });
     }
   }
-  return cards.map((c) => ({ ...c, swatch_url: best.get(c.color_key)?.url ?? null }));
+  return best;
+}
+
+/**
+ * Rank cards by appearance against a scoring function over each color's representative features.
+ * Cards without features are dropped. `exclude(card)` removes e.g. the color itself.
+ * @returns {Array<object>} cards with `match_distance`, closest first
+ */
+export function rankCardsByFeatures(cards, best, distanceFn, { limit = 12, exclude = () => false } = {}) {
+  const scored = [];
+  for (const c of cards) {
+    if (exclude(c)) continue;
+    const f = best.get(c.color_key)?.features;
+    if (!f || !Array.isArray(f.lab)) continue;
+    const d = distanceFn(f);
+    if (Number.isFinite(d)) scored.push({ ...c, match_distance: Math.round(d * 100) / 100 });
+  }
+  scored.sort((a, b) => a.match_distance - b.match_distance || String(a.color_key).localeCompare(String(b.color_key)));
+  return scored.slice(0, Math.max(0, limit));
 }
 
 /**
@@ -1357,6 +1382,25 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   // combination. Counts physical rows — NEVER sums count_for_color.
   // Active ESF price groups: Promo, A, B, C, D, E, F. Group G is excluded.
   // Elite 100 classification requires a future catalog/override layer — program_status=unclassified.
+  /** Active typed Slab/Remnant rows for color cards (minimal projection; never count_for_color). Null when not installed. */
+  async function fetchColorProgramRows(supabase, scope) {
+    try {
+      return await fetchAllRowsPaginated(() =>
+        scope(
+          supabase
+            .from("slab_inventory")
+            .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope,length_actual_in,width_actual_in,thickness_nominal")
+            .eq("is_active", true)
+            .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+            .in("source_inventory_type", ["Slab", "Remnant"])
+        )
+      );
+    } catch (error) {
+      if (isMissingRelationError(error)) return null;
+      throw error;
+    }
+  }
+
   app.get("/api/slab-inventory/color-programs", ...guard, async (req, res) => {
     try {
       jsonNoStore(res);
@@ -1364,26 +1408,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const organizationId = await orgId(req);
       const sourceFilter = resolveSourceFilter(req);
 
-      // Fetch all active typed rows (minimal projection for grouping).
-      // Never selects or sums count_for_color.
       const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
-      let rowList;
-      try {
-        rowList = await fetchAllRowsPaginated(() =>
-          scope(
-            supabase
-              .from("slab_inventory")
-              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope,length_actual_in,width_actual_in,thickness_nominal")
-              .eq("is_active", true)
-              .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
-              .in("source_inventory_type", ["Slab", "Remnant"])
-          )
-        );
-      } catch (error) {
-        if (isMissingRelationError(error)) {
-          return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
-        }
-        throw error;
+      let rowList = await fetchColorProgramRows(supabase, scope);
+      if (!rowList) {
+        return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
       }
 
       const fit = parseFitParams(req.query);
@@ -1419,6 +1447,68 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         source_inventory_scope: COLOR_PROGRAM_SCOPE,
         source_price_group_label: SOURCE_PRICE_GROUP_LABEL,
         elite_100_note: "Elite 100 classification requires a future catalog/override layer. program_status=unclassified for all cards."
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // GET /api/slab-inventory/colors/:colorKey/similar — in-stock colors that look most like this one.
+  //
+  // Ranked by the appearance features (color, palette, veining) of each color's representative
+  // swatch piece — see swatchFeatures.js. Other variants of the same color name are excluded.
+  // Returns /color-programs card shape plus match_distance (lower = closer).
+  // Query: limit (1–24, default 12), thickness_mm (same as /color-programs).
+  app.get("/api/slab-inventory/colors/:colorKey/similar", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const colorKey = trimStr(req.params.colorKey);
+      if (!colorKey || colorKey.length > 300) return res.status(400).json({ ok: false, error: "invalid color key" });
+      const limit = Math.min(24, Math.max(1, Number.parseInt(String(req.query.limit ?? ""), 10) || 12));
+      const supabase = db();
+      const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
+      const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
+
+      const allRows = await fetchColorProgramRows(supabase, scope);
+      if (!allRows) return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
+      const keyOf = (r) => makeColorKey(r.color_name, r.material_name, r.price_group);
+      const targetRows = allRows.filter((r) => keyOf(r) === colorKey);
+      if (!targetRows.length) return res.status(404).json({ ok: false, error: "color not found", color_key: colorKey });
+
+      const thickness = parseThicknessParam(req.query);
+      const rowList = filterRowsByThickness(allRows, thickness);
+      const geometryMap = await loadGeometryMap(supabase, scope, allRows, GEOMETRY_FEATURE_COLUMNS);
+      const target = bestSwatchPieces(targetRows, geometryMap).get(colorKey)?.features;
+      if (!target) {
+        return res.json({ ok: true, color_key: colorKey, similar: [], reason: "no_features" });
+      }
+
+      const nameOf = new Map(rowList.map((r) => [keyOf(r), trimStr(r.color_name).toLowerCase()]));
+      const targetName = trimStr(targetRows[0].color_name).toLowerCase();
+      const best = bestSwatchPieces(rowList, geometryMap);
+      const top = rankCardsByFeatures(
+        [...best.keys()].map((k) => ({ color_key: k })),
+        best,
+        (f) => swatchDistance(target, f),
+        { limit, exclude: (c) => c.color_key === colorKey || (targetName !== "" && nameOf.get(c.color_key) === targetName) }
+      );
+      const distance = new Map(top.map((c) => [c.color_key, c.match_distance]));
+      const topRows = rowList.filter((r) => distance.has(keyOf(r)));
+      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, topRows, SLAB_IMAGE_SELECT_COLUMNS);
+      const cards = attachColorSwatches(
+        summarizeColorDimensions(groupColorPrograms(topRows, buildImageMap(imgRows, sourceFilter), sourceFilter), topRows, geometryMap),
+        topRows,
+        geometryMap
+      )
+        .map((c) => ({ ...c, match_distance: distance.get(c.color_key) }))
+        .sort((a, b) => a.match_distance - b.match_distance);
+
+      res.json({
+        ok: true,
+        color_key: colorKey,
+        similar: cards,
+        thickness_mm: thickness ? [...thickness].sort((a, b) => a - b) : null,
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -2475,6 +2565,6 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   });
 
   console.log(
-    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /fit, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only), GET /api/public/cambria-showroom (read-only)"
+    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/similar, /colors/:colorKey/inventory, /fit, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only), GET /api/public/cambria-showroom (read-only)"
   );
 }
