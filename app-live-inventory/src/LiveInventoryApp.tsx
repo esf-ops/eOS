@@ -435,7 +435,21 @@ export default function LiveInventoryApp() {
               >
                 <div className="li-card-media">
                   {img ? (
-                    <img src={img} alt="" loading="lazy" />
+                    <img
+                      src={img}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        const full = p.representative_image_url;
+                        if (full && el.src !== full) {
+                          el.src = full;
+                          return;
+                        }
+                        el.style.display = "none";
+                        el.parentElement?.classList.add("li-card-media--empty");
+                      }}
+                    />
                   ) : (
                     <div className="li-card-placeholder" aria-hidden />
                   )}

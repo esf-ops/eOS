@@ -14,9 +14,9 @@ function hasPhoto(p: ColorImageFields) {
 }
 
 /**
- * Keep slabsmith (or primary) stock cards, but fill blank photos from a secondary
- * source (typically SlabCloud) matched by color_key, then color+material+price,
- * then color+material. Does not change counts.
+ * Keep primary stock cards (Slabsmith), but prefer secondary (SlabCloud) photos
+ * for browse display — local uploads are sparse/broken; SlabCloud JPEGs are the
+ * reliable public thumbs. Counts are never changed.
  */
 export function enrichColorProgramImages<T extends ColorImageFields>(
   primary: T[],
@@ -37,13 +37,12 @@ export function enrichColorProgramImages<T extends ColorImageFields>(
   }
 
   return primary.map((p) => {
-    if (hasPhoto(p)) return p;
     const nm = nameMaterialKey(p.color_name, p.material_name);
     const hit =
       byKey.get(p.color_key) ||
       byNamePrice.get(`${nm}||${String(p.source_price_group || "").trim().toLowerCase()}`) ||
       byName.get(nm);
-    if (!hit) return p;
+    if (!hit || !hasPhoto(hit)) return p;
     return {
       ...p,
       representative_image_url: hit.representative_image_url,
