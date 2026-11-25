@@ -386,6 +386,15 @@ body {
   display: none;
 }
 
+.li-catalog .li-sections {
+  transition: opacity 200ms var(--eos-ease);
+}
+
+.li-catalog.is-refreshing .li-sections {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .li-section {
   scroll-margin-top: 84px;
 }

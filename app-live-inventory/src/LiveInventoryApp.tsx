@@ -201,6 +201,9 @@ export default function LiveInventoryApp() {
   const [programs, setPrograms] = useState<ColorProgram[]>([]);
   const [loading, setLoading] = useState(true);
   const [stockTotals, setStockTotals] = useState<{ colors: number; pieces: number } | null>(null);
+  /** Color list per thickness (0 = any) so switching back is instant; always revalidated. */
+  const programsCacheRef = useRef(new Map<number, ColorProgram[]>());
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedColor, setSelectedColor] = useState<ColorProgram | null>(null);
@@ -314,6 +317,9 @@ export default function LiveInventoryApp() {
       if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
     };
     setLoading(true);
+    const cached = programsCacheRef.current.get(thicknessMm ?? 0);
+    if (cached) setPrograms(cached);
+    setRefreshing(!cached);
     const thicknessQs = thicknessMm ? `&thickness_mm=${thicknessMm}` : "";
     const primaryReq = (
       apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}${thicknessQs}`, token) as Promise<{
@@ -324,6 +330,7 @@ export default function LiveInventoryApp() {
       .then((primary) => {
         if (cancelled) return;
         setPrograms(primary);
+        setRefreshing(false);
         if (!thicknessMm) {
           setStockTotals({
             colors: primary.length,
@@ -333,7 +340,9 @@ export default function LiveInventoryApp() {
       })
       .catch(fail)
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        setLoading(false);
+        setRefreshing(false);
       });
     Promise.all([
       primaryReq,
@@ -343,7 +352,10 @@ export default function LiveInventoryApp() {
     ])
       .then(([primary, photoProg]) => {
         const photos = Array.isArray(photoProg.color_programs) ? photoProg.color_programs : [];
-        if (!cancelled && photos.length) setPrograms(enrichColorProgramImages(primary, photos));
+        if (cancelled) return;
+        const merged = photos.length ? enrichColorProgramImages(primary, photos) : primary;
+        programsCacheRef.current.set(thicknessMm ?? 0, merged);
+        if (photos.length) setPrograms(merged);
       })
       .catch(() => undefined);
     return () => {
@@ -735,9 +747,11 @@ export default function LiveInventoryApp() {
             </div>
           ) : (
             <span>
-              {filtersActive ? (
+              {refreshing && programs.length ? (
+                "Updating…"
+              ) : filtersActive ? (
                 <>
-                  <strong>{visiblePrograms.length}</strong> of {programs.length} colors
+                  <strong>{visiblePrograms.length}</strong> of {stockTotals?.colors ?? programs.length} colors
                 </>
               ) : (
                 <>
@@ -813,7 +827,7 @@ export default function LiveInventoryApp() {
           </>
         ) : null}
 
-        <div className="li-catalog" hidden={showFit}>
+        <div className={`li-catalog${refreshing && programs.length ? " is-refreshing" : ""}`} hidden={showFit}>
           <div className="li-sections">
             {letterGroups.map((group) => (
               <section key={group.letter} id={`li-letter-${group.letter}`} className="li-section" aria-label={group.letter}>
