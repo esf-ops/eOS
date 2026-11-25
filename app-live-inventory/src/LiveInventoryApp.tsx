@@ -150,7 +150,7 @@ export default function LiveInventoryApp() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [filters, setFilters] = useState<Filters | null>(null);
   const [programs, setPrograms] = useState<ColorProgram[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedColor, setSelectedColor] = useState<ColorProgram | null>(null);
@@ -252,31 +252,48 @@ export default function LiveInventoryApp() {
     };
   }, []);
 
+  // Each request renders as soon as it lands — the grid never waits on summary/filters.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const [sum, fil, prog, photoProg] = await Promise.all([
-          apiGet(`/api/slab-inventory/summary?source=${INVENTORY_SOURCE}`, token) as Promise<Summary>,
-          apiGet(`/api/slab-inventory/filters?source=${INVENTORY_SOURCE}`, token) as Promise<{ filters?: Filters }>,
-          apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}`, token) as Promise<{
-            color_programs?: ColorProgram[];
-          }>,
-          apiGet(`/api/slab-inventory/color-programs?source=${IMAGE_ENRICH_SOURCE}`, token).catch(() => ({
-            color_programs: [] as ColorProgram[],
-          })) as Promise<{ color_programs?: ColorProgram[] }>,
-        ]);
-        if (cancelled) return;
-        setSummary(sum);
-        setFilters(fil.filters || null);
-        const primary = Array.isArray(prog.color_programs) ? prog.color_programs : [];
+    const fail = (e: unknown) => {
+      if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
+    };
+    setLoading(true);
+    const primaryReq = (
+      apiGet(`/api/slab-inventory/color-programs?source=${INVENTORY_SOURCE}`, token) as Promise<{
+        color_programs?: ColorProgram[];
+      }>
+    ).then((prog) => (Array.isArray(prog.color_programs) ? prog.color_programs : []));
+    primaryReq
+      .then((primary) => {
+        if (!cancelled) setPrograms(primary);
+      })
+      .catch(fail)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    Promise.all([
+      primaryReq,
+      (apiGet(`/api/slab-inventory/color-programs?source=${IMAGE_ENRICH_SOURCE}`, token) as Promise<{
+        color_programs?: ColorProgram[];
+      }>).catch(() => ({ color_programs: [] as ColorProgram[] })),
+    ])
+      .then(([primary, photoProg]) => {
         const photos = Array.isArray(photoProg.color_programs) ? photoProg.color_programs : [];
-        setPrograms(enrichColorProgramImages(primary, photos));
-      } catch (e) {
-        if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
-      }
-    })();
+        if (!cancelled && photos.length) setPrograms(enrichColorProgramImages(primary, photos));
+      })
+      .catch(() => undefined);
+    (apiGet(`/api/slab-inventory/filters?source=${INVENTORY_SOURCE}`, token) as Promise<{ filters?: Filters }>)
+      .then((fil) => {
+        if (!cancelled) setFilters(fil.filters || null);
+      })
+      .catch(fail);
+    (apiGet(`/api/slab-inventory/summary?source=${INVENTORY_SOURCE}`, token) as Promise<Summary>)
+      .then((sum) => {
+        if (!cancelled) setSummary(sum);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -389,7 +406,6 @@ export default function LiveInventoryApp() {
     setSelectedColor(p);
     setToolNote(null);
     setMeasurePiece(null);
-    setLoading(false);
   }
 
   function openFitPiece(piece: FitPiece) {
@@ -584,7 +600,7 @@ export default function LiveInventoryApp() {
         </div>
 
         {error ? <div className="li-error">{error}</div> : null}
-        {loading ? <div className="li-muted">Loading inventory…</div> : null}
+        {loading && !programs.length ? <div className="li-muted">Loading inventory…</div> : null}
 
         {job && view === "fit" ? (
           <>
