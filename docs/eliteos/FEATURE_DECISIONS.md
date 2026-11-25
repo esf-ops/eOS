@@ -5642,3 +5642,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | First tool (Measure or Inquire) ships; DNS + Deployment Protection cleared; decide whether `app-slab-inventory` eventually becomes programs-only. |
 
 ---
+
+### 420. Live Inventory = SlabCloud utility + slabOS look
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-25 |
+| **Decision** | Live Inventory keeps **SlabCloud-class utility** (color-first browse, sticky filters, min L/W, stock counts, color lightbox with slabs/remnants, Measure Auto + **Edit** with draggable points) but uses the **slabOS / eliteOS visual system** from `eliteos-ui-direction.md` / Home tokens — light `#f6f7fb`, navy ink, burgundy accent, soft washes — **not** a dark SlabCloud skin. Color programs sort **alphabetically by color name**. Representative images prefer `image_status=ok`, then fall back to any available URL so the grid is not empty. Measure is original eliteOS canvas (no SlabCloud iframe / `manager.js`). |
+| **Why** | Operators need the same stock-finding + remnant-measure jobs as SlabCloud, inside one eliteOS workspace look. |
+| **Limits** | Auto contour quality depends on photo contrast. Paint / Inquire / Wishlist remain scaffolded. Image fallback does not change verified_photo_count semantics. |
+| **Impacted files** | `app-live-inventory/*`, `slabInventoryApi.js` (+ tests), this entry. |
+| **Revisit trigger** | DXF/outline sync; public no-login showroom; Measure point-edit polish. |
+
+---
+

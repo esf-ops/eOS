@@ -712,18 +712,25 @@ export function groupColorPrograms(rows, imageMap = new Map(), sourceFilter = nu
 
   const cards = [];
   for (const [colorKey, g] of groups.entries()) {
-    // Choose a representative image: first verified (ok) image found for any slab in this group.
+    // Prefer verified (ok) images; fall back to any URL so showroom cards are not blank.
     let repImage = null;
     let repThumbnail = null;
+    let fallbackImage = null;
+    let fallbackThumbnail = null;
     let verifiedCount = 0;
     for (const invRow of g.inventoryRows) {
       const img = lookupInventoryImage(imageMap, invRow, sourceFilter);
-      if (img?.image_status === "ok") {
+      if (!img) continue;
+      const hasUrl = Boolean(img.image_url || img.thumbnail_url);
+      if (img.image_status === "ok" && hasUrl) {
         verifiedCount += 1;
         if (!repImage) {
           repImage = img.image_url ?? null;
           repThumbnail = img.thumbnail_url ?? null;
         }
+      } else if (!fallbackImage && hasUrl) {
+        fallbackImage = img.image_url ?? img.thumbnail_url ?? null;
+        fallbackThumbnail = img.thumbnail_url ?? img.image_url ?? null;
       }
     }
     cards.push({
@@ -735,8 +742,8 @@ export function groupColorPrograms(rows, imageMap = new Map(), sourceFilter = nu
       slab_count: g.slabCount,
       remnant_count: g.remnantCount,
       verified_photo_count: verifiedCount,
-      representative_image_url: repImage,
-      representative_thumbnail_url: repThumbnail,
+      representative_image_url: repImage || fallbackImage,
+      representative_thumbnail_url: repThumbnail || fallbackThumbnail,
       sample_inventory_ids: g.sampleIds,
       source_inventory_scope: COLOR_PROGRAM_SCOPE,
       // Elite 100 classification deferred — needs a future catalog/override layer.
@@ -744,11 +751,13 @@ export function groupColorPrograms(rows, imageMap = new Map(), sourceFilter = nu
     });
   }
 
+  // Alphabetical by color name. Blank names sort last. Price group remains a filter, not the primary sort.
   cards.sort((a, b) => {
-    const ia = priceGroupSortIndex(a.source_price_group);
-    const ib = priceGroupSortIndex(b.source_price_group);
-    if (ia !== ib) return ia - ib;
-    return String(a.color_name ?? "").localeCompare(String(b.color_name ?? ""), undefined, { sensitivity: "base" });
+    const an = String(a.color_name ?? "").trim();
+    const bn = String(b.color_name ?? "").trim();
+    if (!an && bn) return 1;
+    if (an && !bn) return -1;
+    return an.localeCompare(bn, undefined, { sensitivity: "base" });
   });
   return cards;
 }

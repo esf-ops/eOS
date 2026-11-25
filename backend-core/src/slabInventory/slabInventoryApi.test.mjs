@@ -623,21 +623,14 @@ import {
   assert.equal(alabasterBCard.source_inventory_scope, "typed", "scope is typed");
   assert.equal(alabasterBCard.program_status, "unclassified", "program_status placeholder");
 
-  // Group order: Promo first, then A, then B, then G (unknown/other) last.
-  const pgSequence = cards.map((c) => c.source_price_group);
-  const promoIdx = pgSequence.indexOf("Promo");
-  const aIdx = pgSequence.indexOf("A");
-  const bIdx = pgSequence.indexOf("B");
-  const gIdx = pgSequence.indexOf("G");
-  assert.ok(promoIdx < aIdx, "Promo before A");
-  assert.ok(aIdx < bIdx, "A before B");
-  assert.ok(bIdx < gIdx, "B before G (G is other/unknown, sorts after F)");
+  // Alphabetical by color_name (price group is a filter, not primary sort).
+  const names = cards.map((c) => String(c.color_name ?? ""));
+  const sortedNames = [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  assert.deepEqual(names, sortedNames, "cards sorted alphabetically by color_name");
 
-  // Group G is present but at the end (not excluded from results — only excluded
-  // from the defined sort order, which places it in the "other" bucket after F).
+  // Group G is still present (data preserved).
   const gCard = cards.find((c) => c.source_price_group === "G");
-  assert.ok(gCard, "G card exists (data preserved) but sorts after F");
-  assert.ok(cards.indexOf(gCard) > cards.indexOf(cards.find((c) => c.source_price_group === "B")), "G card sorts after B");
+  assert.ok(gCard, "G card exists (data preserved)");
 
   // sample_inventory_ids is capped at 5.
   assert.ok(alabasterBCard.sample_inventory_ids.length <= 5, "sample capped at 5");
@@ -647,19 +640,17 @@ import {
     assert.ok(!("count_for_color" in card), "cards must not expose count_for_color");
   }
 
-  // Within the same price group, cards are sorted by color_name asc.
-  // (Only one B-group card here — just verify the field exists.)
   assert.ok(typeof alabasterBCard.color_name === "string" || alabasterBCard.color_name === null);
 
   // source_price_group comes from the source row's price_group — not slabOS authority.
   assert.equal(alabasterBCard.source_price_group, "B", "source_price_group is imported from source");
 
-  console.log("ok: groupColorPrograms (aggregation, slab/remnant, ordering, count semantics, Group G)");
+  console.log("ok: groupColorPrograms (aggregation, slab/remnant, alpha ordering, count semantics, Group G)");
 }
 
 /* ── groupColorPrograms: verified_photo_count and representative image ───── */
 {
-  // Color with no verified images — verified_photo_count=0, rep image=null.
+  // Color with no verified images — verified_photo_count=0, but fall back to any URL for display.
   const rows = [
     { id: "i1", external_slab_id: "s1", color_name: "Dark", material_name: "Granite", price_group: "C",
       source_inventory_type: "Slab", source_inventory_scope: "typed" }
@@ -669,7 +660,7 @@ import {
   ]);
   const noVerified = groupColorPrograms(rows, imageMapMissing);
   assert.equal(noVerified[0].verified_photo_count, 0, "no verified images → 0");
-  assert.equal(noVerified[0].representative_image_url, null, "no verified image → rep url null");
+  assert.equal(noVerified[0].representative_image_url, "d.jpg", "missing-status still falls back to URL for browse");
 
   // Color with one ok image — use it as representative.
   const imageMapOk = new Map([
