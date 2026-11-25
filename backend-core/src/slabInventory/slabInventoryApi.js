@@ -8,7 +8,7 @@
  *   back to SlabCloud/Slabsmith. Every route here is a GET.
  *
  * Auth:
- *   requireAuth() + requireHeadAccess("slab_inventory"). Admin/super_admin bypass
+ *   requireAuth() + requireAnyHeadAccess(["slab_inventory","live_inventory"]). Admin/super_admin bypass
  *   the head check inside the middleware (anti-lockout) but still must be signed in.
  *   Queries are organization_id scoped via resolveOrganizationContext.
  *
@@ -127,6 +127,15 @@ export {
 
 export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 
+/** Live Inventory head may reuse the same read-only inventory cache APIs. */
+export const LIVE_INVENTORY_HEAD_SLUG = "live_inventory";
+
+/** Heads allowed to call /api/slab-inventory/* read routes. */
+export const SLAB_INVENTORY_READ_HEAD_SLUGS = Object.freeze([
+  SLAB_INVENTORY_HEAD_SLUG,
+  LIVE_INVENTORY_HEAD_SLUG,
+]);
+
 /** Staff-safe columns returned to the internal head. Intentionally explicit (no SELECT *). */
 export const INVENTORY_SELECT_COLUMNS = Object.freeze([
   "id",
@@ -229,6 +238,13 @@ export function parseListParams(query = {}) {
   const imageStatus = trimStr(q.image_status).toLowerCase();
   const { column, ascending } = resolveSort(q.sort, q.direction);
 
+  const typeRaw = trimStr(q.type || q.inventory_type || q.source_inventory_type);
+  const typeNorm = typeRaw.toLowerCase();
+  let sourceInventoryType = "";
+  if (typeNorm === "slab") sourceInventoryType = "Slab";
+  else if (typeNorm === "remnant") sourceInventoryType = "Remnant";
+  else if (typeRaw === "Slab" || typeRaw === "Remnant") sourceInventoryType = typeRaw;
+
   return {
     search: trimStr(q.search || q.q),
     material_name: trimStr(q.material_name),
@@ -237,6 +253,7 @@ export function parseListParams(query = {}) {
     thickness_nominal: trimStr(q.thickness_nominal),
     rack: trimStr(q.rack),
     distributor: trimStr(q.distributor),
+    source_inventory_type: sourceInventoryType,
     image_status: IMAGE_STATUS_VALUES.includes(imageStatus) ? imageStatus : "",
     is_active: isActive,
     limit: clampLimit(q.limit),
@@ -814,16 +831,22 @@ export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAlia
  * @param {import("express").Express} app
  * @param {{
  *   requireAuth: Function,
- *   requireHeadAccess: Function,
+ *   requireHeadAccess?: Function,
+ *   requireAnyHeadAccess?: Function,
  *   getSupabase: () => import("@supabase/supabase-js").SupabaseClient
  * }} deps
  */
-export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess, getSupabase }) {
+export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess, requireAnyHeadAccess, getSupabase }) {
   if (typeof requireAuth !== "function") throw new Error("attachSlabInventoryRoutes: requireAuth required");
-  if (typeof requireHeadAccess !== "function") throw new Error("attachSlabInventoryRoutes: requireHeadAccess required");
   if (typeof getSupabase !== "function") throw new Error("attachSlabInventoryRoutes: getSupabase required");
+  if (typeof requireAnyHeadAccess !== "function" && typeof requireHeadAccess !== "function") {
+    throw new Error("attachSlabInventoryRoutes: requireAnyHeadAccess or requireHeadAccess required");
+  }
 
-  const headAccess = requireHeadAccess(SLAB_INVENTORY_HEAD_SLUG, { getSupabase });
+  const headAccess =
+    typeof requireAnyHeadAccess === "function"
+      ? requireAnyHeadAccess([...SLAB_INVENTORY_READ_HEAD_SLUGS], { getSupabase })
+      : requireHeadAccess(SLAB_INVENTORY_HEAD_SLUG, { getSupabase });
   const guard = [requireAuth(), headAccess];
   const db = () => getSupabase();
 
@@ -1014,6 +1037,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       if (params.thickness_nominal) q = q.eq("thickness_nominal", params.thickness_nominal);
       if (params.rack) q = q.eq("rack", params.rack);
       if (params.distributor) q = q.eq("distributor", params.distributor);
+      if (params.source_inventory_type) q = q.eq("source_inventory_type", params.source_inventory_type);
 
       if (params.search) {
         const term = escapeIlike(params.search);

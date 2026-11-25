@@ -93,6 +93,7 @@ const HEAD_URL_DEFAULTS: Record<string, string> = {
   install_dashboard: "http://localhost:5189",
   account_directory: "http://localhost:5190",
   jobs_command_center: "http://localhost:5195",
+  live_inventory: "http://localhost:5200",
   public_quote: "http://localhost:5179",
   app_home: "http://localhost:5177"
 };
@@ -112,6 +113,7 @@ const HEAD_ENV_KEYS: Record<string, string> = {
   install_dashboard: "VITE_HEAD_URL_INSTALL_DASHBOARD",
   account_directory: "VITE_HEAD_URL_ACCOUNT_DIRECTORY",
   jobs_command_center: "VITE_HEAD_URL_JOBS_COMMAND_CENTER",
+  live_inventory: "VITE_HEAD_URL_LIVE_INVENTORY",
   public_quote: "VITE_HEAD_URL_PUBLIC_QUOTE",
   org_directory: "VITE_HEAD_URL_ORG_DIRECTORY",
   app_home: "VITE_HEAD_URL_APP_HOME"

@@ -26,6 +26,7 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "dealer_resources",
   "ai_takeoff",   // v5.9: AI Takeoff Lab — internal preview head
   "slab_inventory", // Slab Inventory Head v1 — read-only internal slab browser (SlabCloud cache)
+  "live_inventory", // Live Inventory — dedicated live stock browser + remnant tools (separate from slab_inventory)
   "custom_quote", // Custom Quote Tool — ESF-only off-program material quotes
   "estimate_builder", // Estimate Builder — beta line-item estimate head (quote_source estimate_builder)
   "visualizer", // Countertop Visualizer MVP — concept-only AI render (standalone head)

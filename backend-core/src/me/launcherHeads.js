@@ -251,6 +251,15 @@ export const HEAD_LAUNCHER_CATALOG = [
       "Read-only v1 — reads the normalized SlabCloud cache; no holds, allocation, or writeback. Price group shown is the imported source value, not slabOS pricing authority. Backend APIs still require slab_inventory head access per request."
   },
   {
+    slug: "live_inventory",
+    label: "Live Inventory",
+    description: "Live slab and remnant stock browser with measure, paint match, inquire, and share tools.",
+    category: "Inventory",
+    href: "/live-inventory",
+    roleNote:
+      "Dedicated live inventory head — separate from Slab Inventory (Elite 100 / catalog / kiosk surfaces). Read-only stock from the governed cache; no holds or writeback in v1. Tools roll out behind this head without changing app-slab-inventory."
+  },
+  {
     slug: "visualizer",
     label: "slabOS Visualizer",
     description: "Upload a kitchen photo and preview countertop materials with AI concept rendering.",

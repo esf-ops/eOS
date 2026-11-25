@@ -29,6 +29,7 @@ Copy `app-brain-health/.env.local.example` and `app-executive/.env.local.example
 | `EOS_CRON_SECRET` | For cron routes | Shared secret header `x-eos-cron-secret` for internal autosync endpoints. |
 | `HEAD_URL_SALES_OPS` | For Sales Ops launcher | Production `https://sales-ops.eliteosfab.com`. Distinct from `HEAD_URL_SALES`. |
 | `HEAD_URL_JOBS_COMMAND_CENTER` | For Jobs Command Center launcher + CORS | Production origin once the Vercel project exists (e.g. `https://jobs.eliteosfab.com`). Admin-only head in v1. |
+| `HEAD_URL_LIVE_INVENTORY` | For Live Inventory launcher + CORS | Production origin once the Vercel project exists (e.g. `https://live-inventory.eliteosfab.com`). Dedicated live stock browser; separate from `HEAD_URL_SLAB_INVENTORY`. |
 | `SALES_OPS_STORE` | For Sales Ops persistence | `supabase` after `eliteos_sales_ops_v1.sql` (applied) **and** additive `eliteos_sales_ops_monday_full_mirror_v2.sql` (unapplied until an operator runs it). Local default is in-memory. |
 | `MONDAY_APP_SIGNING_SECRET` | For Sales Ops webhooks | Monday app signing secret (JWT). Alias `MONDAY_SIGNING_SECRET`. Never frontend. |
 | `EOS_ALLOW_PUBLIC_SYNC_HEALTH` | No | Set to `1` only if you intentionally expose sync health without auth (default is guarded — see server). |

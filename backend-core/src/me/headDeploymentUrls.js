@@ -28,6 +28,7 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   dealer_resources: ["HEAD_URL_DEALER_RESOURCES"],
   ai_takeoff: ["HEAD_URL_AI_TAKEOFF"],  // v5.9: AI Takeoff Lab — https://takeoff.eliteosfab.com
   slab_inventory: ["HEAD_URL_SLAB_INVENTORY"],  // Slab Inventory Head v1 — read-only internal slab browser
+  live_inventory: ["HEAD_URL_LIVE_INVENTORY"], // Live Inventory — dedicated live stock browser
   custom_quote: ["HEAD_URL_CUSTOM_QUOTE"],  // Custom Quote Tool — ESF-only off-program material quotes
   estimate_builder: ["HEAD_URL_ESTIMATE_BUILDER"], // Estimate Builder — beta line-item estimate head
   visualizer: ["HEAD_URL_VISUALIZER"],  // Countertop Visualizer MVP — standalone concept render head

@@ -9,7 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
 import { ALLOWED_ROLES, requireAuth, requireRole } from "./auth/authMiddleware.js";
-import { requireHeadAccess } from "./auth/headAccessMiddleware.js";
+import { requireAnyHeadAccess, requireHeadAccess } from "./auth/headAccessMiddleware.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
 import { attachAdvancedSystemAdminUserRoutes } from "./admin/systemAdminUserManagement.js";
 import { attachMorawareAdminRoutes } from "./admin/morawareAdmin.js";
@@ -1298,6 +1298,7 @@ attachPublicVisualizerRoutes(app, {
 attachSlabInventoryRoutes(app, {
   requireAuth,
   requireHeadAccess,
+  requireAnyHeadAccess,
   getSupabase: supabaseServerClient
 });
 

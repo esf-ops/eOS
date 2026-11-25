@@ -284,6 +284,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | **`app-estimate-builder` or `backend-core/src/estimateBuilder` changed** | `npm install --prefix app-estimate-builder` (first clone), `npm run eos:test:estimate-builder`, `npm run eos:build:estimate-builder` |
 | **`app-elite100-estimate-studio` changed** | `npm run build --prefix app-elite100-estimate-studio` |
 | **`app-slab-ai` changed** | `npm install --prefix app-slab-ai` (first clone) then `npm test --prefix app-slab-ai` and `npm run build --prefix app-slab-ai` |
+| **`app-live-inventory` changed** | `npm install --prefix app-live-inventory` (first clone) then `npm run eos:build:live-inventory`; `npm run eos:test:live-inventory` |
 | **Backend JS touched** | `node --check <path-to-changed-file.js>` |
 | **Repo-wide sanity** | `npm run eos:check:local` |
 | **After deploy** (sensitive) | Hosted smoke: public calculate + submit + verify Supabase + Monday |

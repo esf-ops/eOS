@@ -174,6 +174,9 @@ import {
 
   // Invalid image_status is dropped (not passed through).
   assert.equal(parseListParams({ image_status: "bogus" }).image_status, "");
+  assert.equal(parseListParams({ type: "slab" }).source_inventory_type, "Slab");
+  assert.equal(parseListParams({ inventory_type: "Remnant" }).source_inventory_type, "Remnant");
+  assert.equal(parseListParams({ type: "all" }).source_inventory_type, "");
   console.log("ok: parseListParams");
 }
 
@@ -727,17 +730,25 @@ import {
   for (const m of ["get", "post", "put", "patch", "delete", "use", "options", "head"]) {
     mockApp[m] = (path) => calls.push({ method: m, path: typeof path === "string" ? path : "(mw)" });
   }
-  let headAccessSlug = null;
+  let headAccessSlugs = null;
   const requireAuth = () => (_req, _res, next) => next();
   const requireHeadAccess = (slug) => {
-    headAccessSlug = slug;
+    headAccessSlugs = [slug];
+    return (_req, _res, next) => next();
+  };
+  const requireAnyHeadAccess = (slugs) => {
+    headAccessSlugs = slugs;
     return (_req, _res, next) => next();
   };
   const getSupabase = () => ({});
 
-  attachSlabInventoryRoutes(mockApp, { requireAuth, requireHeadAccess, getSupabase });
+  attachSlabInventoryRoutes(mockApp, { requireAuth, requireHeadAccess, requireAnyHeadAccess, getSupabase });
 
-  assert.equal(headAccessSlug, SLAB_INVENTORY_HEAD_SLUG, "head access gate uses slab_inventory slug");
+  assert.deepEqual(
+    headAccessSlugs,
+    ["slab_inventory", "live_inventory"],
+    "head access gate accepts slab_inventory or live_inventory"
+  );
   assert.equal(SLAB_INVENTORY_HEAD_SLUG, "slab_inventory");
 
   const routeCalls = calls.filter((c) => c.path.startsWith("/api/slab-inventory"));

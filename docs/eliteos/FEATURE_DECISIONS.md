@@ -5626,3 +5626,19 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | The kiosk shell itself should treat short landscape phones as phones (it currently does not), or the browse page in this mode needs the phone grid too. |
 
 ---
+
+### 419. Live Inventory head — dedicated live stock browser (leave app-slab-inventory intact)
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-11-25 |
+| **Decision** | Ship a new protected head **Live Inventory** (`app-live-inventory/`, slug `live_inventory`, env `HEAD_URL_LIVE_INVENTORY`) instead of stripping Elite 100 / catalog / Non-Stock / visualizer out of `app-slab-inventory`. The existing Slab Inventory deploy keeps kiosk/program surfaces; Live Inventory is the clean live-stock + tools surface. |
+| **Why** | SlabCloud-class tools (measure, paint match, inquire, wishlist, share, quote handoff, 3D/AR) need a focused product. Reworking `app-slab-inventory` risked breaking public Elite 100 / catalog / shower / Cambria routes that already ship from that app. |
+| **Access** | Register `live_inventory` in `EOS_HEAD_SLUGS`, launcher catalog, and `HEAD_URL_LIVE_INVENTORY` CORS. Not a role default — grant via `user_head_access` (admins/super_admins bypass). |
+| **API** | v1 reuses read-only `/api/slab-inventory/*` behind `requireAnyHeadAccess(["slab_inventory","live_inventory"])`. Frontend defaults `?source=slabsmith`. No holds, no writeback, no new mutations. Tool CTAs are scaffolded in the UI; Measure / Paint / Inquire land in follow-up work. |
+| **Deploy** | Vercel project `eliteos-live-inventory`; domain `live-inventory.eliteosfab.com` added (DNS may still need CNAME). Prebuilt production deploy live on `eliteos-live-inventory.vercel.app`. |
+| **Out of scope (v1)** | Public no-login showroom, polygon measure editor, paint catalog, lead capture, AR/3D engine, deleting tabs from `app-slab-inventory`. |
+| **Impacted files/docs** | `app-live-inventory/*`, `eosGovernanceConstants.js`, `headDeploymentUrls.js`, `launcherHeads.js`, `headAccessMiddleware.js` (`requireAnyHeadAccess`), `slabInventoryApi.js` (+ type filter), `liveInventoryConstants.js` + registration test, head map, this entry. |
+| **Revisit trigger** | First tool (Measure or Inquire) ships; DNS + Deployment Protection cleared; decide whether `app-slab-inventory` eventually becomes programs-only. |
+
+---
