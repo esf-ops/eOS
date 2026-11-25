@@ -240,6 +240,67 @@ export async function resolveSummarySyncCoverage(
 }
 
 /**
+ * Fetch every row of an arbitrary query, paginating past the PostgREST 1000-row cap.
+ * buildQuery must return a fresh, fully-filtered builder each call (the table needs an `id` column).
+ * @param {() => object} buildQuery
+ * @returns {Promise<Array<Record<string, unknown>>>}
+ */
+export async function fetchAllRowsPaginated(buildQuery) {
+  /** @type {Array<Record<string, unknown>>} */
+  const all = [];
+  for (let offset = 0; ; offset += SUMMARY_FETCH_PAGE_SIZE) {
+    const { data, error } = await buildQuery()
+      .order("id", { ascending: true })
+      .range(offset, offset + SUMMARY_FETCH_PAGE_SIZE - 1);
+    if (error) throw error;
+    const batch = data ?? [];
+    all.push(...batch);
+    if (batch.length < SUMMARY_FETCH_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+/** external_slab_id values per `.in()` request — keeps PostgREST URLs well under length limits. */
+export const SLAB_IMAGE_ID_CHUNK_SIZE = 100;
+const SLAB_IMAGE_FETCH_CONCURRENCY = 4;
+
+/**
+ * Load slab_images only for the given inventory rows. slab_images keeps rows for retired slabs
+ * (thousands for Slabsmith), so an unscoped org-wide read silently truncates at 1000 rows and
+ * drops photos for in-stock pieces.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {(q: object) => object} scopeQuery
+ * @param {Array<{ external_slab_id?: unknown }>} rows
+ * @param {string} selectColumns
+ */
+export async function fetchSlabImagesForInventoryRows(db, scopeQuery, rows, selectColumns) {
+  const ids = [
+    ...new Set(
+      (Array.isArray(rows) ? rows : [])
+        .map((r) => (r?.external_slab_id == null ? "" : String(r.external_slab_id).trim()))
+        .filter(Boolean)
+    ),
+  ];
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += SLAB_IMAGE_ID_CHUNK_SIZE) {
+    chunks.push(ids.slice(i, i + SLAB_IMAGE_ID_CHUNK_SIZE));
+  }
+  /** @type {Array<Record<string, unknown>>} */
+  const out = [];
+  for (let i = 0; i < chunks.length; i += SLAB_IMAGE_FETCH_CONCURRENCY) {
+    const batches = await Promise.all(
+      chunks.slice(i, i + SLAB_IMAGE_FETCH_CONCURRENCY).map((chunk) =>
+        fetchAllRowsPaginated(() =>
+          scopeQuery(db.from("slab_images").select(selectColumns).in("external_slab_id", chunk))
+        )
+      )
+    );
+    for (const b of batches) out.push(...b);
+  }
+  return out;
+}
+
+/**
  * Simulate a truncated single-page fetch (Supabase default cap) for regression tests.
  * @param {Array<Record<string, unknown>>} allRows
  * @param {number} [pageSize]

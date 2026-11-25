@@ -39,8 +39,11 @@ import {
 import {
   countActiveInventoryRows,
   fetchActiveInventoryRowsPaginated,
+  fetchAllRowsPaginated,
+  fetchSlabImagesForInventoryRows,
   resolveSummarySyncCoverage,
   simulateTruncatedActiveFetch,
+  SLAB_IMAGE_ID_CHUNK_SIZE,
   SUMMARY_FETCH_PAGE_SIZE,
 } from "./slabInventorySummaryQueries.js";
 import {
@@ -1368,6 +1371,48 @@ const ASSET_INACTIVE = {
   );
   assert.equal(countKeys.length, 0, "enrichment fields must not include any count fields");
   console.log("ok: count_for_color and v2 display count not used as inventory authority in enrichment");
+}
+
+/* ── slab_images load is scoped to the shown rows and never truncates at 1000 ── */
+{
+  // 1,052 active slabs; 8,000 retired-slab image rows sort ahead of them (real Slabsmith shape).
+  const active = Array.from({ length: 1052 }, (_, i) => ({ id: `inv-${String(i).padStart(5, "0")}`, external_slab_id: `active-${i}` }));
+  const images = [
+    ...Array.from({ length: 8000 }, (_, i) => ({ id: `a-${String(i).padStart(5, "0")}`, external_slab_id: `retired-${i}`, external_source: "slabsmith" })),
+    ...active.map((r, i) => ({ id: `z-${String(i).padStart(5, "0")}`, external_slab_id: r.external_slab_id, external_source: "slabsmith" })),
+  ];
+  const tables = { slab_inventory: active, slab_images: images };
+  let maxInListLen = 0;
+  const mockDb = {
+    from(table) {
+      const f = { in: null, eq: {} };
+      const range = { from: 0, to: SUMMARY_FETCH_PAGE_SIZE - 1 };
+      const chain = {
+        select: () => chain,
+        eq: (c, v) => ((f.eq[c] = v), chain),
+        in: (c, v) => ((f.in = { c, v: new Set(v) }), (maxInListLen = Math.max(maxInListLen, v.length)), chain),
+        order: () => chain,
+        range: (a, b) => ((range.from = a), (range.to = Math.min(b, a + SUMMARY_FETCH_PAGE_SIZE - 1)), chain),
+        then(resolve) {
+          let rows = [...tables[table]].sort((x, y) => (x.id < y.id ? -1 : 1));
+          for (const [c, v] of Object.entries(f.eq)) rows = rows.filter((r) => r[c] === v);
+          if (f.in) rows = rows.filter((r) => f.in.v.has(r[f.in.c]));
+          resolve({ data: rows.slice(range.from, range.to + 1), error: null });
+        },
+      };
+      return chain;
+    },
+  };
+  const scope = (q) => q.eq("external_source", "slabsmith");
+
+  const allInv = await fetchAllRowsPaginated(() => mockDb.from("slab_inventory").select("*"));
+  assert.equal(allInv.length, 1052, "fetchAllRowsPaginated returns rows past the 1000 cap");
+
+  const imgs = await fetchSlabImagesForInventoryRows(mockDb, scope, allInv, "*");
+  assert.equal(imgs.length, 1052, "every active slab gets its image row; retired rows are not loaded");
+  assert.ok(maxInListLen <= SLAB_IMAGE_ID_CHUNK_SIZE, "external_slab_id .in() lists are chunked");
+  assert.deepEqual(await fetchSlabImagesForInventoryRows(mockDb, scope, [], "*"), [], "no rows → no image query");
+  console.log("ok: slab_images load covers all active slabs past the 1000-row cap");
 }
 
 console.log("\nslabInventoryApi: all visual asset helper tests passed");

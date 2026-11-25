@@ -13,27 +13,27 @@ function hasPhoto(p: ColorImageFields) {
   return Boolean(p.representative_thumbnail_url || p.representative_image_url);
 }
 
-/** SlabCloud often 404s full .jpg while `_thumb.jpg` works — prefer thumbs for browse. */
+const SLABCLOUD_HOST = /^https?:\/\/(www\.)?slabcloud\.com\//i;
+
+/**
+ * SlabCloud often 404s full `.jpg` while `_thumb.jpg` works. Only SlabCloud URLs are
+ * rewritten — eliteOS storage already serves `full.jpg` + `thumb.jpg` as separate objects.
+ */
 export function preferBrowseThumb(url: string | null | undefined): string | null {
   if (!url) return null;
+  if (!SLABCLOUD_HOST.test(url)) return url;
   if (/_thumb\.(jpe?g|png|webp)(\?|$)/i.test(url)) return url;
-  const thumbed = url.replace(/\.(jpe?g|png|webp)(\?|$)/i, "_thumb.$1$2");
-  return thumbed !== url ? thumbed : url;
+  return url.replace(/\.(jpe?g|png|webp)(\?|$)/i, "_thumb.$1$2");
 }
 
 export function browseImageUrl(p: ColorImageFields): string | null {
-  return (
-    preferBrowseThumb(p.representative_thumbnail_url) ||
-    preferBrowseThumb(p.representative_image_url) ||
-    p.representative_thumbnail_url ||
-    p.representative_image_url
-  );
+  return preferBrowseThumb(p.representative_thumbnail_url) || preferBrowseThumb(p.representative_image_url);
 }
 
 /**
- * Keep primary stock cards (Slabsmith), but prefer secondary (SlabCloud) photos
- * for browse display — local uploads are sparse/broken; SlabCloud JPEGs are the
- * reliable public thumbs. Counts are never changed.
+ * Primary (Slabsmith) photos live in eliteOS storage and win. SlabCloud photos only
+ * fill colors with no primary photo — many SlabCloud rows are stale and 404.
+ * Counts are never changed.
  */
 export function enrichColorProgramImages<T extends ColorImageFields>(
   primary: T[],
@@ -54,6 +54,7 @@ export function enrichColorProgramImages<T extends ColorImageFields>(
   }
 
   return primary.map((p) => {
+    if (hasPhoto(p)) return p;
     const nm = nameMaterialKey(p.color_name, p.material_name);
     const hit =
       byKey.get(p.color_key) ||

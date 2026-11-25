@@ -235,7 +235,7 @@ body {
   object-fit: contain;
   object-position: center;
   display: block;
-  background: #0f1520;
+  background: var(--eos-bg-soft);
 }
 
 .li-lightbox-hero img {
@@ -357,7 +357,7 @@ body {
 }
 
 .li-lightbox-hero {
-  background: #0f1520;
+  background: var(--eos-bg-soft);
   min-height: 280px;
   display: grid;
   place-items: center;

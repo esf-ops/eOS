@@ -32,6 +32,8 @@ import {
   countActiveInventoryRows,
   countActiveNotSeenInSync,
   fetchActiveInventoryRowsPaginated,
+  fetchAllRowsPaginated,
+  fetchSlabImagesForInventoryRows,
   resolveSummarySyncCoverage,
 } from "./slabInventorySummaryQueries.js";
 import {
@@ -113,8 +115,11 @@ export {
   countActiveNotSeenInSync,
   fetchActiveInventoryRowsPaginated,
   fetchActiveInventoryRowsPaginatedWithMeta,
+  fetchAllRowsPaginated,
   fetchLatestSyncRun,
+  fetchSlabImagesForInventoryRows,
   resolveSummarySyncCoverage,
+  SLAB_IMAGE_ID_CHUNK_SIZE,
   simulateTruncatedActiveFetch,
   SUMMARY_FETCH_PAGE_SIZE,
   verifyActiveInventoryFetchComplete,
@@ -1156,32 +1161,28 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
 
       // Fetch all active typed rows (minimal projection for grouping).
       // Never selects or sums count_for_color.
-      let q = supabase
-        .from("slab_inventory")
-        .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope")
-        .eq("is_active", true)
-        .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
-        .in("source_inventory_type", ["Slab", "Remnant"]);
-      q = scopeInventory(q, organizationId, sourceFilter);
-      const { data: rows, error } = await q;
-      if (error) {
+      const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
+      let rowList;
+      try {
+        rowList = await fetchAllRowsPaginated(() =>
+          scope(
+            supabase
+              .from("slab_inventory")
+              .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope")
+              .eq("is_active", true)
+              .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+              .in("source_inventory_type", ["Slab", "Remnant"])
+          )
+        );
+      } catch (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
         }
         throw error;
       }
 
-      const rowList = rows ?? [];
-
-      // Fetch all org-scoped slab_images without filtering by slab ID to avoid
-      // PostgREST URL-length overflow with large inventories. Join in JS.
-      let imageMap = new Map();
-      let imgQ = supabase
-        .from("slab_images")
-        .select(SLAB_IMAGE_SELECT_COLUMNS);
-      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
-      const { data: imgRows } = await imgQ;
-      if (imgRows?.length) imageMap = buildImageMap(imgRows, sourceFilter);
+      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, rowList, SLAB_IMAGE_SELECT_COLUMNS);
+      const imageMap = buildImageMap(imgRows, sourceFilter);
 
       const cards = groupColorPrograms(rowList, imageMap, sourceFilter);
 
@@ -1222,16 +1223,20 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const params = parseColorInventoryParams(req.query);
 
       // Fetch typed rows and match colorKey in JS. Avoids the need to reverse
-      // a slug back to raw column values. With ~1,679 typed rows this is fast.
-      let q = supabase
-        .from("slab_inventory")
-        .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
-        .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
-        .in("source_inventory_type", ["Slab", "Remnant"]);
-      if (params.active_only) q = q.eq("is_active", true);
-      q = scopeInventory(q, organizationId, sourceFilter);
-      const { data: rows, error } = await q;
-      if (error) {
+      // a slug back to raw column values.
+      const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
+      let rows;
+      try {
+        rows = await fetchAllRowsPaginated(() => {
+          let q = supabase
+            .from("slab_inventory")
+            .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
+            .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+            .in("source_inventory_type", ["Slab", "Remnant"]);
+          if (params.active_only) q = q.eq("is_active", true);
+          return scope(q);
+        });
+      } catch (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, rows: [], message: "Slab inventory cache not installed." });
         }
@@ -1254,18 +1259,8 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         typeFiltered = colorMatched.filter((r) => trimStr(r.source_inventory_type) === "Remnant");
       }
 
-      // Fetch images for this subset (small set per color — safe for .in()).
-      const slabIds = typeFiltered.map((r) => trimStr(r.external_slab_id)).filter(Boolean);
-      let imageMap = new Map();
-      if (slabIds.length) {
-        let imgQ = supabase
-          .from("slab_images")
-          .select(SLAB_IMAGE_SELECT_COLUMNS)
-          .in("external_slab_id", slabIds);
-        imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
-        const { data: imgRows } = await imgQ;
-        imageMap = buildImageMap(imgRows ?? [], sourceFilter);
-      }
+      const imgRows = await fetchSlabImagesForInventoryRows(supabase, scope, typeFiltered, SLAB_IMAGE_SELECT_COLUMNS);
+      const imageMap = buildImageMap(imgRows, sourceFilter);
 
       // Apply image_status post-filter (after images are resolved).
       let finalRows = typeFiltered;
